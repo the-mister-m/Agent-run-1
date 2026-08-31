@@ -1,0 +1,14 @@
+[
+  {
+    "name": "REG \u00b7 5-minute metronome hold (A-clock.md DONE-CHECK)",
+    "pass": false,
+    "lines": [
+      "ran 5 min: 300.256 s of AudioContext time, 601 beats scheduled",
+      "position at the end ......... 288226 ticks   expected \u2248 288245.8   delta -19.76 ticks (-20.58 ms)",
+      "worst |beat time \u2212 ideal| ... 0.000000 ms   over 601 beats",
+      "dropped windows 0   doubled windows 0",
+      "schedulerLoad while metronome-only: min 0.0000 max 0.0003",
+      "FAIL"
+    ]
+  }
+]

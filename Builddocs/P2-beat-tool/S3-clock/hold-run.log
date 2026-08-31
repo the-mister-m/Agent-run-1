@@ -1,0 +1,23 @@
+127.0.0.1 - - [23/Aug/2026 18:31:57] "GET /Builddocs/P2-beat-tool/S3-clock/clock-testpage.html HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 18:31:57] "GET /src/core/audio.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 18:31:57] "GET /src/core/clock.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 18:31:57] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 18:31:57] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+ctx state after unlock: running
+
+=== __q9(5) ===
+127.0.0.1 - - [23/Aug/2026 18:31:57] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 18:31:57] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+DONE-CHECK · metronome held for 5 minutes                    PASS
+   ran 300.01 s of AudioContext time
+   clicks: 601, expected 601
+   MAX click deviation from a perfect 120 bpm grid over the whole run: 0.0000 ms
+   mean deviation 0.0000 ms · click gaps 500.000–500.000 ms (expect 500.000)
+   scheduler windows: 12001 · gaps 0 · overlaps 0
+   unplanned resyncs during the run: 0 (must be 0 — a resync here would mean the scheduler starved)
+   final position 150.4.465 = tick 287985, wall-clock expects 288005 (off by -20)
+
+1/1 passed. All green.
+wrote /Users/moth3rship/Desktop/AI Design/School stuff/Chromebook DAW/Agent run 1/Builddocs/P2-beat-tool/S3-clock/clock-testresults-hold.json

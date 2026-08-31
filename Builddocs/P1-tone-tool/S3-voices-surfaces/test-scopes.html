@@ -1,0 +1,509 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>scopes test — P1/S3</title>
+<link rel="stylesheet" href="../../../src/ui/tokens.css">
+<style>
+  body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+         background: var(--bg); color: var(--text); padding: 16px; margin: 0; }
+  button { font: 13px ui-monospace, monospace; padding: 8px 16px;
+           background: var(--panel); color: var(--text);
+           border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  h3 { margin: 0 0 8px; }
+  p  { color: var(--text-dim); max-width: 90ch; }
+  #results { white-space: pre-wrap; margin-top: 16px; }
+  .pass { color: var(--meter-ok); }
+  .fail { color: var(--meter-hot); }
+  .note { color: var(--text-dim); }
+  .stage { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .cell { border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+          background: var(--panel); }
+  .cell h4 { margin: 0 0 6px; font-weight: normal; color: var(--text-dim); }
+  #hidden-host { display: none; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .sw { width: 92px; height: 46px; border-radius: 4px; border: 1px solid var(--line);
+        font-size: 10px; color: #000; padding: 2px 4px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<h3>scopes (P1/S3) — throwaway verification page</h3>
+<p>
+  Imports only <code>/src/vis/spectrum.js</code>, <code>/src/vis/scope.js</code>,
+  <code>/src/ui/tokens.css</code> and the frozen <code>/src/core/audio.js</code>. Defines no
+  instrument: the two "sources" below implement <em>only</em> CONTRACTS §2's
+  <code>getAnalyser(which)</code>, because the real synths are being built in parallel by
+  other S3 seats and this seat must not touch them. Click to run — the click is the real
+  user gesture <code>audio.unlock()</code> needs. <b>Nothing here is verified by ear: this
+  environment has no audio output device.</b>
+</p>
+<button id="run">Run Test</button>
+
+<div class="stage">
+  <div class="cell"><h4>spectrum — mountExpanded (Wave Synth's visual)</h4><div id="spec-x"></div></div>
+  <div class="cell"><h4>scope — mountExpanded (Overtone Synth's visual)</h4><div id="scope-x"></div></div>
+  <div class="cell"><h4>spectrum — mountCompact</h4><div id="spec-c"></div></div>
+  <div class="cell"><h4>scope — mountCompact</h4><div id="scope-c"></div></div>
+</div>
+<div class="swatches" id="swatches"></div>
+<div id="hidden-host"></div>
+<div id="results"></div>
+
+<script type="module">
+import { ctx, audio, createChannel } from '../../../src/core/audio.js';
+import Spectrum from '../../../src/vis/spectrum.js';
+import Scope from '../../../src/vis/scope.js';
+
+const results = [];
+const el = document.getElementById('results');
+
+function log(step, pass, detail) {
+  results.push({ step, pass, detail });
+  const line = document.createElement('div');
+  line.className = pass ? 'pass' : 'fail';
+  line.textContent = `[${pass ? 'PASS' : 'FAIL'}] ${step} — ${detail}`;
+  el.appendChild(line);
+  window.__RESULTS__ = results;
+}
+function note(text) {
+  const line = document.createElement('div');
+  line.className = 'note';
+  line.textContent = `      ${text}`;
+  el.appendChild(line);
+}
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const frames = (n) => new Promise((r) => {
+  let i = 0;
+  const tick = () => (++i >= n ? r() : requestAnimationFrame(tick));
+  requestAnimationFrame(tick);
+});
+
+// ---------------------------------------------------------------------------------------
+// TEST SIGNAL SOURCES
+// ---------------------------------------------------------------------------------------
+// NOT instruments. Each implements exactly one method — §2's `getAnalyser(which)` — and
+// offers exactly one tap, mirroring §11.4 (Wave Synth: spectrum only, scope → null) and
+// §11.5 (Overtone Synth: scope only, spectrum → null). They exist because `wave-synth.js`
+// and `overtone-synth.js` are owned by other seats running in parallel right now.
+class TapSource {
+  constructor(which, { minDb = -100, maxDb = -15, type = 'sine', freq = 220, gain = 0.5 } = {}) {
+    this.which = which;
+    this.id = which === 'spectrum' ? 'wave-synth-stand-in' : 'overtone-synth-stand-in';
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 2048;
+    this.analyser.minDecibels = minDb;
+    this.analyser.maxDecibels = maxDb;
+    this.analyser.smoothingTimeConstant = 0.6;
+
+    this.out = createChannel();
+    this.osc = ctx.createOscillator();
+    this.osc.type = type;
+    this.osc.frequency.value = freq;
+    this.gain = ctx.createGain();
+    this.gain.gain.value = gain;
+    // Voices → gain → analyser → out. Exactly §11.6's placement: after the voices are
+    // summed, before `out`.
+    this.osc.connect(this.gain);
+    this.gain.connect(this.analyser);
+    this.analyser.connect(this.out);
+    this.osc.start();
+  }
+  /** CONTRACTS §2. The ONLY thing a visual is allowed to call. */
+  getAnalyser(which) {
+    return which === this.which ? this.analyser : null;
+  }
+  setWave(type) { this.osc.type = type; }
+  setFreq(hz) { this.osc.frequency.value = hz; }
+  setGain(g) { this.gain.gain.value = g; }
+  stop() {
+    try { this.osc.stop(); } catch (e) { /* already stopped */ }
+    this.osc.disconnect(); this.gain.disconnect(); this.analyser.disconnect();
+  }
+}
+
+/** Records every property a visual reads off the source, to prove the tap is the only
+ *  route in. Methods are bound to the target so the source's own internals do not
+ *  register as external access. */
+function watched(target) {
+  const seen = new Set();
+  const proxy = new Proxy(target, {
+    get(t, prop) {
+      if (typeof prop === 'string') seen.add(prop);
+      const v = t[prop];
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
+  return { proxy, seen };
+}
+
+/** Collects every string a canvas actually paints during one frame. */
+function spyText(fn) {
+  const proto = CanvasRenderingContext2D.prototype;
+  const realFill = proto.fillText;
+  const drawn = [];
+  proto.fillText = function (text, ...rest) {
+    drawn.push(String(text));
+    return realFill.call(this, text, ...rest);
+  };
+  try { fn(); } finally { proto.fillText = realFill; }
+  return drawn;
+}
+
+const CONTRACT_TO_WEBAUDIO = { sine: 'sine', triangle: 'triangle', square: 'square', saw: 'sawtooth' };
+const SECTION9_TOKENS = [
+  '--bg', '--panel', '--line', '--text', '--text-dim',
+  '--deg-major', '--deg-minor', '--deg-dim', '--deg-altered',
+  '--accent', '--warn', '--meter-ok', '--meter-hot',
+];
+
+async function run() {
+  await audio.unlock();
+  await wait(30);
+  log('audio-context-running', ctx.state === 'running',
+    `ctx.state = "${ctx.state}", sampleRate = ${ctx.sampleRate} Hz ` +
+    `(no output device exists here — this is signal, never sound)`);
+
+  // =====================================================================================
+  // Q1 · WHICH VISUAL GOES WITH WHICH SYNTH — the inversion, enforced
+  // =====================================================================================
+  const waveSrc = new TapSource('spectrum', { type: 'sawtooth', freq: 220, gain: 0.4 });
+  const overSrc = new TapSource('scope', { type: 'sine', freq: 220, gain: 0.4 });
+
+  let scopeOnWaveThrew = false, scopeErr = '';
+  try { new Scope(waveSrc); } catch (e) { scopeOnWaveThrew = true; scopeErr = e.message; }
+  let specOnOverThrew = false, specErr = '';
+  try { new Spectrum(overSrc); } catch (e) { specOnOverThrew = true; specErr = e.message; }
+
+  log('inversion-wave-synth-refuses-oscilloscope', scopeOnWaveThrew,
+    'new Scope(waveSynth) threw: the spectrum-only instrument cannot be given a scope');
+  log('inversion-overtone-synth-refuses-spectrum', specOnOverThrew,
+    'new Spectrum(overtoneSynth) threw: the scope-only instrument cannot be given a spectrum');
+  note(`refusal message (scope): ${scopeErr.slice(0, 120)}…`);
+
+  const wWave = watched(waveSrc);
+  const wOver = watched(overSrc);
+  const spectrum = new Spectrum(wWave.proxy);
+  const scope = new Scope(wOver.proxy);
+  log('correct-pairings-construct', true,
+    'Spectrum(waveSynth) and Scope(overtoneSynth) both constructed — neither synth has both');
+
+  // =====================================================================================
+  // Q2 · HOW THEY GET DATA — the §2/§11.6 tap and nothing else
+  // =====================================================================================
+  const specTouched = [...wWave.seen];
+  const scopeTouched = [...wOver.seen];
+  const onlyTap = (s) => s.length === 1 && s[0] === 'getAnalyser';
+  log('data-only-through-the-tap', onlyTap(specTouched) && onlyTap(scopeTouched),
+    `properties each visual read off its instrument: spectrum [${specTouched}], ` +
+    `scope [${scopeTouched}] — nothing but getAnalyser(), so no visual reached into ` +
+    'an instrument\'s nodes (§2)');
+
+  const specNode = waveSrc.getAnalyser('spectrum');
+  const beforeFft = specNode.fftSize;
+  const beforeMax = specNode.maxDecibels;
+  const beforeSmooth = specNode.smoothingTimeConstant;
+
+  spectrum.mountExpanded(document.getElementById('spec-x'));
+  scope.mountExpanded(document.getElementById('scope-x'));
+  await frames(40);
+
+  log('visual-does-not-mutate-the-analyser',
+    specNode.fftSize === beforeFft && specNode.maxDecibels === beforeMax &&
+    specNode.smoothingTimeConstant === beforeSmooth,
+    `after 40 frames of reading: fftSize=${specNode.fftSize}, maxDecibels=` +
+    `${specNode.maxDecibels}, smoothing=${specNode.smoothingTimeConstant} — unchanged. ` +
+    'The instrument owns the node; the visual only reads it.');
+
+  // =====================================================================================
+  // Q3 · DOES THE SPECTRUM READ AS FREQUENCIES?
+  // =====================================================================================
+  const labels = spyText(() => spectrum._draw());
+  // Both ends of the curriculum's range, a decade in the middle, and the unit. Interior
+  // ticks are dropped on purpose when they would collide — see _drawGrid.
+  const need = ['30', '100', '1k', '16k', 'Hz', 'dB'];
+  const missing = need.filter((s) => !labels.some((l) => l === s || l.includes(s)));
+  log('spectrum-axis-is-labelled-in-Hz', missing.length === 0,
+    `strings actually painted this frame: [${labels.join(' | ')}] — the axis spans the ` +
+    'curriculum\'s ~30 Hz–16 kHz range and names its unit');
+
+  // ---- saw vs sine: overtones vs a single spike ----
+  async function measure(waveContractName, hz) {
+    waveSrc.setWave(CONTRACT_TO_WEBAUDIO[waveContractName]);
+    waveSrc.setFreq(hz);
+    await frames(30);
+    const bins = spectrum.bins;
+    const binHz = ctx.sampleRate / specNode.fftSize;
+    const f0 = spectrum.fundamentalHz;
+    let above = 0, total = 0;
+    for (let i = 1; i < bins.length; i++) {
+      const v = bins[i] * bins[i];
+      total += v;
+      if (i * binHz > (f0 ?? hz) * 1.5) above += v;
+    }
+    return { f0, partials: spectrum.partials.map((p) => p.k), aboveRatio: total ? above / total : 0 };
+  }
+
+  const sine = await measure('sine', 220);
+  const saw = await measure('saw', 220);
+  log('sine-is-one-spike', sine.partials.length === 0 && sine.aboveRatio < 0.05,
+    `sine @220 Hz: fundamental found at ${sine.f0?.toFixed(1)} Hz, ` +
+    `${sine.partials.length} overtones detected, ${(sine.aboveRatio * 100).toFixed(1)}% of ` +
+    'energy above the fundamental');
+  log('saw-shows-its-overtones', saw.partials.length >= 5 && saw.aboveRatio > 0.2,
+    `saw @220 Hz: fundamental found at ${saw.f0?.toFixed(1)} Hz, overtones labelled ` +
+    `×${saw.partials.join(' ×')}, ${(saw.aboveRatio * 100).toFixed(1)}% of energy above ` +
+    'the fundamental');
+
+  // ---- "the fundamental is lowest and loudest": find it for every waveform and pitch ----
+  const errs = [];
+  for (const wave of ['sine', 'triangle', 'square', 'saw']) {
+    for (const hz of [110, 220, 440, 880]) {
+      const m = await measure(wave, hz);
+      errs.push({ wave, hz, got: m.f0, err: m.f0 ? Math.abs(m.f0 - hz) / hz : 1 });
+    }
+  }
+  const worst = errs.reduce((a, b) => (b.err > a.err ? b : a));
+  log('fundamental-is-pointable', worst.err < 0.03,
+    `across 4 waveforms × 4 pitches the detected fundamental was within ` +
+    `${(worst.err * 100).toFixed(2)}% of the true pitch (worst: ${worst.wave} @${worst.hz} Hz ` +
+    `→ ${worst.got?.toFixed(1)} Hz). FFT bin width here is ${(ctx.sampleRate / 2048).toFixed(1)} Hz.`);
+
+  // ---- the analyser-range finding, MEASURED rather than asserted ----
+  // The first version of this check asserted that any real synth signal blows past Web
+  // Audio's default maxDecibels of -30 dB. Measurement said otherwise and the claim was
+  // corrected: Blink normalises the FFT by fftSize, so one unity saw voice peaks near
+  // -19.6 dBFS per bin. This now sweeps and reports what is actually true.
+  waveSrc.setWave('sawtooth'); waveSrc.setFreq(220);
+  const sweep = [];
+  for (const [gain, maxDb] of [[1, -30], [4, -30], [4, -20], [4, -15], [4, 0]]) {
+    waveSrc.setGain(gain);
+    specNode.maxDecibels = maxDb;
+    await frames(30);
+    let pinned = 0, peakByte = 0;
+    for (const b of spectrum.bins) { if (b >= 255) pinned++; if (b > peakByte) peakByte = b; }
+    sweep.push({ gain, maxDb, pinned, peakByte, warned: spectrum.saturated });
+  }
+  waveSrc.setGain(0.4); specNode.maxDecibels = -15; await frames(20);
+
+  // The detector must fire exactly when the data is genuinely clipped (>2% of bins) and
+  // stay quiet otherwise. That is the property under test, not a guess about levels.
+  const detectorAgrees = sweep.every((s) => s.warned === (s.pinned > Math.max(2, 1024 * 0.02)));
+  log('saturation-detector-tracks-the-real-clipping', detectorAgrees,
+    sweep.map((s) => `gain×${s.gain} @max ${s.maxDb}dB → ${s.pinned}/1024 pinned, ` +
+      `peak byte ${s.peakByte}, warns=${s.warned}`).join(' | '));
+  note('FINDING for wave-voice / overtone-voice, measured (see receipt): one unity saw voice');
+  note('peaks ≈ -19.6 dBFS per bin; a six-note chord ≈ -14.6 dBFS and pins 36/1024 bins at');
+  note('the platform default maxDecibels=-30. minDecibels=-100 / maxDecibels=-15 clips');
+  note('nothing on that chord and still uses 95% of the display range. RECOMMENDED, not');
+  note('imposed — the visual may not mutate the instrument\'s node (§2), only report.');
+
+  // =====================================================================================
+  // Q4 · DOES THE OSCILLOSCOPE SHOW ONE REPETITION, AND HOLD STILL?
+  // =====================================================================================
+  const stability = [];
+  for (const wave of ['sine', 'triangle', 'square', 'saw']) {
+    overSrc.setWave(CONTRACT_TO_WEBAUDIO[wave]);
+    overSrc.setFreq(220);
+    await frames(30); // let the period lock
+
+    // Triggered: compare the trace the scope actually drew on consecutive frames.
+    const shots = [];
+    for (let i = 0; i < 24; i++) { await frames(1); shots.push(Float32Array.from(scope.lastTrace)); }
+    let mad = 0, n = 0;
+    for (let i = 1; i < shots.length; i++)
+      for (let c = 0; c < shots[i].length; c++) { mad += Math.abs(shots[i][c] - shots[i - 1][c]); n++; }
+    mad /= n;
+
+    // Untriggered control: the same data drawn from index 0 with no trigger, which is what
+    // a rolling trace looks like. Measured, not imagined.
+    const ctrl = [];
+    for (let i = 0; i < 24; i++) {
+      await frames(1);
+      const s = scope.samples, span = scope._period, cols = shots[0].length;
+      const arr = new Float32Array(cols);
+      for (let c = 0; c < cols; c++) arr[c] = s[Math.round((c / (cols - 1)) * span)];
+      ctrl.push(arr);
+    }
+    let cmad = 0, cn = 0;
+    for (let i = 1; i < ctrl.length; i++)
+      for (let c = 0; c < ctrl[i].length; c++) { cmad += Math.abs(ctrl[i][c] - ctrl[i - 1][c]); cn++; }
+    cmad /= cn;
+
+    const t = scope.lastTrace;
+    const wrap = Math.abs(t[0] - t[t.length - 1]);
+    stability.push({ wave, mad, cmad, hz: scope.frequencyHz, ms: scope.periodMs, wrap, locked: scope.locked });
+  }
+
+  const worstMad = Math.max(...stability.map((s) => s.mad));
+  const bestCtrl = Math.min(...stability.map((s) => s.cmad));
+  log('scope-trace-holds-still-all-four-waveforms', worstMad < 0.05 && worstMad * 4 < bestCtrl,
+    stability.map((s) =>
+      `${s.wave}: drift ${s.mad.toFixed(4)} vs untriggered ${s.cmad.toFixed(4)}`).join(' | ') +
+    ` — mean absolute change per pixel per frame on a −1..1 trace. Triggered is ` +
+    `${(bestCtrl / worstMad).toFixed(0)}× stiller than the same data untriggered.`);
+
+  log('scope-locks-the-right-period', stability.every((s) => s.locked && Math.abs(s.hz - 220) / 220 < 0.02),
+    stability.map((s) => `${s.wave}: ${s.hz.toFixed(1)} Hz / ${s.ms.toFixed(3)} ms`).join(' | ') +
+    ' — true value 220.0 Hz / 4.545 ms');
+
+  log('scope-window-is-exactly-one-repetition', stability.every((s) => s.wrap < 0.2),
+    stability.map((s) => `${s.wave}: |start−end| ${s.wrap.toFixed(3)}`).join(' | ') +
+    ' — the last pixel lands back on the phase the first pixel started at, which is what ' +
+    '"one repetition" means');
+
+  // =====================================================================================
+  // Q5 · tokens.css DEFINES EVERY §9 TOKEN
+  // =====================================================================================
+  const rootStyle = getComputedStyle(document.documentElement);
+  const tokenValues = {};
+  const undefinedTokens = [];
+  for (const t of SECTION9_TOKENS) {
+    const v = rootStyle.getPropertyValue(t).trim();
+    tokenValues[t] = v;
+    if (!v) undefinedTokens.push(t);
+  }
+  log('tokens-css-defines-every-section-9-token', undefinedTokens.length === 0,
+    `${SECTION9_TOKENS.length}/13 resolved from /src/ui/tokens.css: ` +
+    Object.entries(tokenValues).map(([k, v]) => `${k}=${v}`).join(' '));
+
+  const sw = document.getElementById('swatches');
+  for (const t of SECTION9_TOKENS) {
+    const d = document.createElement('div');
+    d.className = 'sw';
+    d.style.background = tokenValues[t];
+    d.style.color = ['--bg', '--panel', '--line'].includes(t) ? '#fff' : '#000';
+    d.textContent = t.replace('--', '') + '\n' + tokenValues[t];
+    sw.appendChild(d);
+  }
+
+  const visualsUseTokens = spectrum.tokens['--accent'] === tokenValues['--accent'] &&
+                           scope.tokens['--panel'] === tokenValues['--panel'];
+  log('visuals-read-tokens-not-literals', visualsUseTokens,
+    `both visuals resolved their colors from tokens.css at mount (accent=` +
+    `${spectrum.tokens['--accent']}) — no color literal in either file's draw path`);
+
+  // =====================================================================================
+  // Q6 · COMPACT VS EXPANDED — same data, two budgets
+  // =====================================================================================
+  const specC = new Spectrum(waveSrc);
+  const scopeC = new Scope(overSrc);
+  specC.mountCompact(document.getElementById('spec-c'));
+  scopeC.mountCompact(document.getElementById('scope-c'));
+
+  const t0 = performance.now();
+  const xf0 = spectrum.frameCount, cf0 = specC.frameCount;
+  const xs0 = scope.frameCount, cs0 = scopeC.frameCount;
+  await wait(1000);
+  const secs = (performance.now() - t0) / 1000;
+  const xFps = (spectrum.frameCount - xf0) / secs, cFps = (specC.frameCount - cf0) / secs;
+  const xsFps = (scope.frameCount - xs0) / secs, csFps = (scopeC.frameCount - cs0) / secs;
+
+  log('compact-is-cheaper-than-expanded', cFps < xFps * 0.6 && csFps < xsFps * 0.6,
+    `spectrum ${xFps.toFixed(1)} fps expanded vs ${cFps.toFixed(1)} fps compact; ` +
+    `scope ${xsFps.toFixed(1)} vs ${csFps.toFixed(1)}. Same analyser, same data, two ` +
+    'budgets — compact is throttled to 20 fps and drops peak-hold and persistence, so a ' +
+    'DAW full of compact visuals is not spending the frame budget on decoration (§9: ' +
+    '"DAW views stay still").');
+
+  const compactLabels = spyText(() => specC._draw());
+  const expandedLabels = spyText(() => spectrum._draw());
+  log('compact-is-legible-not-just-small', compactLabels.length > 0 && compactLabels.length < expandedLabels.length,
+    `compact paints ${compactLabels.length} labels [${compactLabels.join(' | ')}], ` +
+    `expanded paints ${expandedLabels.length} — compact keeps the Hz axis and the ` +
+    'fundamental readout and drops the rest');
+
+  // =====================================================================================
+  // Q7 · ZERO COST WHEN UNMOUNTED — verified by frame count, not by eye
+  // =====================================================================================
+  const beforeUnmount = {
+    sx: spectrum.frameCount, sc: specC.frameCount,
+    kx: scope.frameCount, kc: scopeC.frameCount,
+  };
+  spectrum.unmount(); specC.unmount(); scope.unmount(); scopeC.unmount();
+  await wait(600); // ~36 rAF ticks
+  const afterUnmount = {
+    sx: spectrum.frameCount, sc: specC.frameCount,
+    kx: scope.frameCount, kc: scopeC.frameCount,
+  };
+  const frozen = Object.keys(beforeUnmount).every((k) => beforeUnmount[k] === afterUnmount[k]);
+  log('unmount-stops-every-frame', frozen,
+    `over ~600 ms (~36 rAF ticks) after unmount, frame counts moved by ` +
+    Object.keys(beforeUnmount).map((k) => `${afterUnmount[k] - beforeUnmount[k]}`).join('/') +
+    ` (spectrum-expanded/spectrum-compact/scope-expanded/scope-compact). Counted, not eyeballed.`);
+
+  const domClean = document.getElementById('spec-x').children.length === 0 &&
+                   document.getElementById('scope-x').children.length === 0 &&
+                   document.getElementById('spec-c').children.length === 0 &&
+                   document.getElementById('scope-c').children.length === 0;
+  log('unmount-removes-its-dom-and-observers', domClean &&
+    spectrum._raf === 0 && scope._raf === 0 && spectrum._ro === null && spectrum._io === null,
+    'containers are empty, rAF handles are 0, ResizeObserver and IntersectionObserver ' +
+    'both disconnected');
+
+  // ---- a MOUNTED but hidden visual must also not burn frames ----
+  const host = document.getElementById('hidden-host'); // display:none
+  const hidden = new Spectrum(waveSrc);
+  hidden.mountExpanded(host);
+  await wait(400);
+  const h0 = hidden.frameCount;
+  await wait(600);
+  const h1 = hidden.frameCount;
+  log('hidden-but-mounted-visual-does-not-burn-frames', h1 - h0 === 0,
+    `mounted inside a display:none host: ${h1 - h0} frames drawn over 600 ms. ` +
+    'rAF alone does not stop for a collapsed panel — the IntersectionObserver does.');
+  hidden.dispose();
+
+  // ---- remount proves unmount was a pause, not a break ----
+  spectrum.mountExpanded(document.getElementById('spec-x'));
+  scope.mountExpanded(document.getElementById('scope-x'));
+  await frames(20);
+  log('remount-works-after-unmount', spectrum.frameCount > afterUnmount.sx && scope.frameCount > afterUnmount.kx,
+    `re-mounted and drawing again (spectrum ${spectrum.frameCount}, scope ${scope.frameCount} frames total)`);
+
+  // =====================================================================================
+  // THE STANDING MEASUREMENT §8 / §11.6 ASSIGNS THIS SEAT
+  // =====================================================================================
+  spectrum._reads = 0; spectrum._readMs = 0; spectrum._frames = 0; spectrum._drawMs = 0;
+  scope._reads = 0; scope._readMs = 0; scope._frames = 0; scope._drawMs = 0;
+  scope._periodMs = 0; scope._periodRuns = 0;
+  await wait(4000);
+  const ss = spectrum.stats, ks = scope.stats;
+
+  // Burst: many reads inside one render quantum. Blink caches the FFT per quantum, so this
+  // brackets the COPY cost, not the transform cost.
+  const buf = new Uint8Array(specNode.frequencyBinCount);
+  const N = 4000;
+  const b0 = performance.now();
+  for (let i = 0; i < N; i++) specNode.getByteFrequencyData(buf);
+  const burst = (performance.now() - b0) / N;
+
+  log('analyser-read-cost-measured', ss.reads > 100 && ks.reads > 100,
+    `getByteFrequencyData(): ${ss.avgReadMs.toFixed(4)} ms/frame over ${ss.reads} frames ` +
+    `(fftSize ${ss.fftSize}). getByteTimeDomainData(): ${ks.avgReadMs.toFixed(4)} ms/frame ` +
+    `over ${ks.reads} frames. Burst of ${N} back-to-back frequency reads: ` +
+    `${burst.toFixed(5)} ms each (cached FFT — copy cost only). Draw cost: spectrum ` +
+    `${ss.avgDrawMs.toFixed(3)} ms/frame, scope ${ks.avgDrawMs.toFixed(3)} ms/frame ` +
+    `(scope period search ${ks.avgPeriodMs.toFixed(3)} ms × ${ks.periodRuns} runs).`);
+  note('This is MAIN-THREAD cost inside rAF, not audio-thread render cost — see the receipt.');
+
+  // Leave all four views mounted and live so the page ends in a state a human can look at.
+  specC.mountCompact(document.getElementById('spec-c'));
+  scopeC.mountCompact(document.getElementById('scope-c'));
+  waveSrc.setWave('sawtooth'); overSrc.setWave('sawtooth');
+  await frames(30);
+
+  const allPassed = results.every((r) => r.pass);
+  log('SUMMARY', allPassed, allPassed ? `all ${results.length} checks passed` : 'see FAIL lines above');
+  window.__METRICS__ = { spectrum: ss, scope: ks, burst, stability, xFps, cFps, xsFps, csFps, tokenValues, errs };
+  window.__DONE__ = true;
+}
+
+document.getElementById('run').addEventListener('click', () => {
+  run().catch((err) => {
+    log('UNCAUGHT-ERROR', false, String((err && err.stack) || err));
+    window.__DONE__ = true;
+  });
+}, { once: true });
+</script>
+</body>
+</html>

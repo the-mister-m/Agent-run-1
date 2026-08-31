@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>capture — done-check</title>
+<!--
+  THROWAWAY DONE-CHECK PAGE for /src/core/capture.js — seat `capture`, P2/S5.
+  Not a product surface. Not `tools/`. It exists to walk the seat brief's DONE-CHECK:
+
+    arm a drum machine · hear a count-in · play a backbeat in from QWERTY and from MIDI ·
+    loop four bars and overdub across passes · punch over one piece without touching the
+    others · undo the last take · capture velocity from MIDI — with ZERO audio recorded.
+
+  LIVE MONITORING IS WIRED HERE, NOT IN capture.js. Capture never calls `noteOn` — it is
+  not a scheduler (see that file's header). This page does what the shell will do: input
+  bus -> instrument. If capture also monitored, every hit would sound twice.
+-->
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 16px; background: #0a0d13; color: #f2f6fc;
+    font: 13px/1.5 system-ui, -apple-system, sans-serif;
+  }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: #93a1b8; margin: 0 0 14px; }
+  .panel {
+    background: #1b2332; border: 1px solid #3a485f; border-radius: 6px;
+    padding: 10px; margin-bottom: 10px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .row:last-child { margin-bottom: 0; }
+  .row > label { color: #93a1b8; margin-right: 2px; }
+  button {
+    font: inherit; font-weight: 600; color: #f2f6fc; background: #0a0d13;
+    border: 1px solid #3a485f; border-radius: 4px; padding: 4px 10px; cursor: pointer;
+  }
+  button:hover { border-color: #34e5b4; }
+  button[aria-pressed="true"] { background: #34e5b4; color: #0a0d13; border-color: #34e5b4; }
+  button.hot { border-color: #ff7a1a; color: #ff7a1a; }
+  input[type="number"] { width: 54px; background: #0a0d13; color: #f2f6fc;
+    border: 1px solid #3a485f; border-radius: 4px; padding: 3px 5px; font: inherit; }
+  #readout { font-variant-numeric: tabular-nums; }
+  .big { font-size: 20px; font-weight: 700; }
+  .warn { color: #ff7a1a; }
+  .ok { color: #34e5b4; }
+  pre { margin: 0; white-space: pre-wrap; font: 11px/1.45 ui-monospace, Menlo, monospace;
+    color: #93a1b8; max-height: 190px; overflow: auto; }
+  kbd { background: #0a0d13; border: 1px solid #3a485f; border-radius: 3px;
+    padding: 0 4px; font: inherit; }
+</style>
+</head>
+<body>
+
+<h1>capture — P2/S5 done-check</h1>
+<p class="sub">
+  Play with <kbd>a</kbd> <kbd>s</kbd> <kbd>d</kbd> <kbd>f</kbd> <kbd>g</kbd> <kbd>h</kbd>
+  <kbd>j</kbd> <kbd>k</kbd> (kick · snare · closed hat · open hat · clap · low tom ·
+  high tom · crash), or from a MIDI controller on notes 36–50.
+  Backbeat = <kbd>a</kbd> on 1 and 3, <kbd>s</kbd> on 2 and 4.
+</p>
+
+<div class="panel">
+  <div class="row">
+    <button id="play">Play</button>
+    <button id="rec" class="hot">● RECORD</button>
+    <button id="keep">KEEP THAT (last 4 bars)</button>
+    <button id="stop">Stop</button>
+    <button id="discard">Discard take</button>
+    <label>count-in</label><input id="countin" type="number" min="0" max="4" value="1" />
+    <button id="metro" aria-pressed="true">Metronome</button>
+    <label>bpm</label><input id="bpm" type="number" min="40" max="220" value="100" />
+  </div>
+  <div class="row">
+    <button id="loop" aria-pressed="true">Loop bars 1–4</button>
+    <label>loop mode</label>
+    <button id="overdub" aria-pressed="true">Overdub</button>
+    <button id="replace" aria-pressed="false">Replace</button>
+    <label>punch</label>
+    <button id="punch" aria-pressed="false">bars 3–4 only</button>
+    <label>arm</label>
+    <button id="armall" aria-pressed="true">all</button>
+    <button id="armsnare" aria-pressed="false">snare only</button>
+  </div>
+  <div class="row">
+    <label>quantize</label>
+    <button id="qon" aria-pressed="true">ON — snap to lane grid</button>
+    <button id="qoff" aria-pressed="false">OFF — keep it as played</button>
+    <button id="requant">re-apply</button>
+    <label>undo</label>
+    <button id="undo">↶ Undo take</button>
+    <button id="redo">↷ Redo</button>
+  </div>
+</div>
+
+<div class="panel" id="readout">
+  <div class="row">
+    <span class="big" id="state">idle</span>
+    <span id="pos">1.1.0</span>
+    <span id="pass"></span>
+    <span id="midi" class="warn">MIDI: waiting</span>
+    <span id="mic" class="ok">microphone requested: NO</span>
+  </div>
+  <div class="row"><span class="big" id="snapline">—</span></div>
+</div>
+
+<div id="grid" class="panel" style="padding:0;border:none;background:none"></div>
+
+<div class="panel"><pre id="log">ready.</pre></div>
+
+<script type="module">
+import { audio, ctx, createChannel } from '../../../src/core/audio.js';
+import { clock } from '../../../src/core/clock.js';
+import { input, DEFAULT_VELOCITY } from '../../../src/core/input.js';
+import DrumSynth from '../../../src/instruments/drum-synth.js';
+import StepGrid from '../../../src/surfaces/step-grid.js';
+import Capture from '../../../src/core/capture.js';
+
+// ── SEAT QUESTION 8, PROVEN AT RUNTIME ──────────────────────────────────────────────────
+// Nothing in this app may ask for a microphone. Trip-wire the API before any module can
+// reach it; if `capture.js` (or anything else on this page) ever calls it, the readout flips.
+let micAsked = false;
+if (navigator.mediaDevices?.getUserMedia) {
+  const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  navigator.mediaDevices.getUserMedia = (...args) => {
+    micAsked = true;
+    return real(...args);
+  };
+}
+
+// ── audio graph ─────────────────────────────────────────────────────────────────────────
+const channel = createChannel();
+const drum = new DrumSynth(ctx, channel);
+await drum.ready();
+
+const grid = new StepGrid(document.getElementById('grid'));
+grid.bindInstrument(drum);
+grid.mount(document.getElementById('grid'), 'expanded');
+grid.bars = 4;
+
+const capture = new Capture({ target: grid, instrument: drum });
+
+clock.bpm = 100;
+clock.countIn = 1;
+clock.metronome = true;
+clock.loop = { on: true, startBar: 1, endBar: 5 }; // endBar exclusive = four bars
+
+// ── live monitoring — THE SHELL'S JOB, DONE HERE. capture.js never calls noteOn. ─────────
+input.on('noteon', ({ note, velocity }) => drum.noteOn(note, velocity));
+
+// ── QWERTY route ────────────────────────────────────────────────────────────────────────
+const KEYS = { a: 36, s: 38, d: 42, f: 46, g: 39, h: 45, j: 50, k: 49 };
+addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  const note = KEYS[e.key.toLowerCase()];
+  if (note === undefined) return;
+  e.preventDefault();
+  audio.unlock();
+  // §12.1: a surface that cannot sense velocity reports the fixed default. input.js owns it.
+  input.emitNoteOn({ note, velocity: DEFAULT_VELOCITY, source: 'key' });
+});
+addEventListener('keyup', (e) => {
+  const note = KEYS[e.key.toLowerCase()];
+  if (note !== undefined) input.emitNoteOff({ note, source: 'key' });
+});
+
+// ── UI ──────────────────────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+const lines = [];
+function log(msg) {
+  lines.unshift(msg);
+  if (lines.length > 40) lines.length = 40;
+  logEl.textContent = lines.join('\n');
+}
+function press(id, on) { $(id).setAttribute('aria-pressed', String(on)); }
+
+$('play').onclick = () => { audio.unlock(); clock.play(); };
+$('stop').onclick = () => { audio.unlock(); clock.stop(); };
+$('rec').onclick = () => { audio.unlock(); capture.record(); };
+$('discard').onclick = () => log(capture.discardTake() ? 'take discarded — nothing committed' : 'no take in flight');
+$('keep').onclick = () => { audio.unlock(); capture.keepLast(4); };
+
+$('countin').onchange = (e) => { clock.countIn = Number(e.target.value); };
+$('bpm').onchange = (e) => { clock.bpm = Number(e.target.value); };
+$('metro').onclick = () => { clock.metronome = !clock.metronome; press('metro', clock.metronome); };
+$('loop').onclick = () => { clock.loop.on = !clock.loop.on; press('loop', clock.loop.on); };
+
+$('overdub').onclick = () => { capture.loopMode = 'overdub'; press('overdub', true); press('replace', false); };
+$('replace').onclick = () => { capture.loopMode = 'replace'; press('overdub', false); press('replace', true); };
+
+$('punch').onclick = () => {
+  if (capture.punch.on) { capture.punchOff(); press('punch', false); }
+  else { capture.punchIn(3, 5); press('punch', true); }
+};
+$('armall').onclick = () => { capture.arm('all'); press('armall', true); press('armsnare', false); };
+$('armsnare').onclick = () => {
+  capture.disarm('all');
+  capture.arm({ note: 38 }); // §14.1 index 1 — the snare, and only the snare
+  press('armall', false); press('armsnare', true);
+};
+
+$('qon').onclick = () => { capture.quantize.on = true; press('qon', true); press('qoff', false); };
+$('qoff').onclick = () => { capture.quantize.on = false; press('qon', false); press('qoff', true); };
+$('requant').onclick = () => capture.requantize();
+$('undo').onclick = () => { const r = capture.undo(); log(r ? `UNDO — take ${r.takeId ?? '(requantize)'} taken back` : 'nothing to undo'); };
+$('redo').onclick = () => { const r = capture.redo(); log(r ? `REDO — take ${r.takeId ?? '(requantize)'} put back` : 'nothing to redo'); };
+
+// ── the take report — SEAT QUESTION 2's visibility requirement ───────────────────────────
+capture.on('commit', (r) => {
+  if (r.refused) { log(`KEEP THAT refused: ${r.reason}`); $('snapline').textContent = 'nothing to keep'; return; }
+  if (r.discarded) { $('snapline').textContent = 'take discarded'; return; }
+  const s = r.summary;
+  $('snapline').innerHTML = s.moved
+    ? `<span class="warn">SNAPPED: ${s.moved} of ${s.of} hits moved · avg ${s.meanAbsDriftTicks} ticks ` +
+      `(${s.meanAbsDriftMs} ms) · ${s.late} late, ${s.early} early · worst ${s.worstDriftTicks}</span>`
+    : `<span class="ok">${r.noteCount} hits · nothing moved</span>`;
+  log(
+    `COMMIT take ${r.takeId} (${r.kind}) — ${r.noteCount} notes · ${r.passes} pass(es) · ` +
+    `${r.loopMode}${r.punch.on ? ` · punch ${r.punch.startBar}–${r.punch.endBar}` : ''}\n` +
+    `  quantize ${r.quantize.on ? `on ×${r.quantize.strength}` : 'OFF'} · ` +
+    `sources ${JSON.stringify(r.sources)} · ` +
+    `velocity ${r.velocityRange ? `${r.velocityRange.min.toFixed(2)}–${r.velocityRange.max.toFixed(2)}` : 'n/a'}\n` +
+    `  dropped: ${r.dropped.duringCountIn} in count-in, ${r.dropped.unarmedLane} unarmed lane, ` +
+    `${r.dropped.outsidePunch} outside punch\n` +
+    r.moved.slice(0, 8).map((m) =>
+      `    note ${m.note} lane ${m.lane} step ${m.stepIndex}: played ${m.trueTick}, grid ${m.gridTick}` +
+      ` → ${m.driftTicks > 0 ? '+' : ''}${m.driftTicks} ticks ${m.direction} (${Math.round(m.driftMs)} ms)`
+    ).join('\n')
+  );
+});
+
+capture.on('statechange', ({ from, to }) => log(`capture: ${from} → ${to}`));
+capture.on('note', (n) => log(`  ♪ ${n.source} note ${n.note} v${n.velocity.toFixed(2)} @tick ${n.trueTick}`));
+clock.on('statechange', ({ from, to }) => log(`clock: ${from} → ${to}`));
+clock.on('resync', (r) => log(`clock resync — ${r.gapSeconds.toFixed(2)}s gap`));
+
+// ── readout — rAF only, reads pure numbers, schedules nothing (§3/§10) ───────────────────
+function frame() {
+  requestAnimationFrame(frame);
+  const p = clock.position;
+  $('pos').textContent = `${p.bar}.${p.beat}.${p.tick}`;
+  const st = capture.state;
+  $('state').textContent = clock.countingIn
+    ? `counting in… ${clock.countInRemainingBars.toFixed(2)} bars`
+    : st;
+  $('state').className = `big ${st === 'recording' ? 'warn' : ''}`;
+  $('pass').textContent = capture.passCount ? `pass ${capture.passCount + 1}` : '';
+  $('midi').textContent = input.midiAttached ? 'MIDI: attached' : 'MIDI: waiting';
+  $('midi').className = input.midiAttached ? 'ok' : 'warn';
+  $('mic').textContent = `microphone requested: ${micAsked ? 'YES — BUG' : 'NO'}`;
+  $('mic').className = micAsked ? 'warn' : 'ok';
+}
+frame();
+
+log('ready — press RECORD, hear one bar of count-in, then play a backbeat.');
+
+// ── DRIVER HOOKS — for capture-testdriver.py. Same technique the `clock` seat's page uses.
+// A headless run cannot press a key, so it puts notes on the SAME §5 bus a key does; there
+// is no second code path and nothing here is test-only behaviour inside capture.js.
+window.__cap = {
+  clock, capture, grid, input, drum,
+  micAsked: () => micAsked,
+  /** Fire a note on the §5 input bus exactly as QWERTY or MIDI would. */
+  hit(note, velocity = DEFAULT_VELOCITY, source = 'key') {
+    input.emitNoteOn({ note, velocity, source });
+    input.emitNoteOff({ note, source });
+  },
+  /** On-steps of a lane, as `[stepIndex, velocity]` pairs — the §13.5 pattern, read back. */
+  lane(i) {
+    const l = grid.getPattern().lanes[i];
+    return l.steps.map((s, idx) => (s ? [idx, Number(s.v.toFixed(3))] : null)).filter(Boolean);
+  },
+  notes: () => capture.toProjectNotes(),
+  rawNotes: () => capture.getNotes(),
+};
+window.__unlock = () => { audio.unlock(); return audio.state; };
+window.__ready = true;
+</script>
+</body>
+</html>

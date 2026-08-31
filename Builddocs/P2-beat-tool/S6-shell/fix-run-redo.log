@@ -1,0 +1,32 @@
+127.0.0.1 - - [23/Aug/2026 20:08:04] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:08:04] "GET /src/core/audio.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:08:04] "GET /src/core/clock.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:08:04] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:08:04] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+
+=== __regDrift() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:08:56] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:08:56] "GET /src/core/clock.js HTTP/1.1" 304 -
+REG · zero tick drift over 64 bars (16ths and triplets)          PASS
+    division 4: 1024 steps over 64 bars — last step landed on 122880, expected 122880, tick drift 0, max |time − ideal| 0.000000 ms
+    division 3: 768 steps over 64 bars — last step landed on 122880, expected 122880, tick drift 0, max |time − ideal| 0.000000 ms
+    PASS — zero accumulated tick drift, both divisions.
+
+=== __aLoad() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:08:56] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:08:56] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+A · scheduler-pass cost probe moves under real load              PASS
+    idle          clock.schedulerLoad 0.0000   lastPassMs 0.000   governor.load 0.0000
+    under load    clock.schedulerLoad 0.0298   lastPassMs 2.800   governor.load 0.0000
+    after load    clock.schedulerLoad 0.0000  (smoothing decays over 20 passes)
+    inject  5 ms/pass -> schedulerLoad 0.0501   (§8 expects 0.05)
+    inject 10 ms/pass -> schedulerLoad 0.1000   (§8 expects 0.10)
+    inject 25 ms/pass -> schedulerLoad 0.2500   (§8 expects 0.25)
+    governor.load under the same 150-voice load: 0.0000 — audio.js's probe cannot see it
+    hook present on governor? false  <- false until audio.js gets the addition
+    PASS — near zero idle, rises with real scheduler work, decays after, correctly scaled.
+
+--- 2/2 PASS ---
+results -> /Users/moth3rship/Desktop/AI Design/School stuff/Chromebook DAW/Agent run 1/Builddocs/P2-beat-tool/S6-shell/fix-clock-results-redo.json

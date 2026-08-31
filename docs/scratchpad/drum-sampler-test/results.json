@@ -1,0 +1,205 @@
+{
+  "result": {
+    "log": [
+      {
+        "name": "constructor did not throw / instrument exists",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "kits.json discovered 808 + acoustic",
+        "pass": true,
+        "extra": [
+          "808",
+          "acoustic"
+        ]
+      },
+      {
+        "name": "mountCompact drew 8 pads",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "mountExpanded drew 8 pads",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "ready() resolves with no kit loaded",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "kitStatus reflects loading immediately after setParam (no block)",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "kit \"808\" reached ready status",
+        "pass": true,
+        "extra": {
+          "status": "ready",
+          "kit": "808",
+          "error": null
+        }
+      },
+      {
+        "name": "getState() records kit name",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "getParam(\"kit\") matches getState().kit",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "getState() is JSON-safe and round-trips",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "triggering all 8 pieces threw nothing and registered voices",
+        "pass": true,
+        "extra": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      {
+        "name": "cpuWeight is live and non-zero while voices sound",
+        "pass": true,
+        "extra": 80
+      },
+      {
+        "name": "voices free themselves after playing out",
+        "pass": true,
+        "extra": 0
+      },
+      {
+        "name": "extreme-velocity hits (0.0 and 1.0) both registered without throwing",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "unknown note is a silent no-op",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "missing kit reaches error status, not a throw",
+        "pass": true,
+        "extra": {
+          "status": "error",
+          "kit": "808",
+          "error": "kit \"does-not-exist-kit\": kit.json not found or unreadable"
+        }
+      },
+      {
+        "name": "page still responsive after missing-kit attempt",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "previous working kit (\"808\") survives a failed switch attempt",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "previous kit still triggers sound after a failed switch attempt",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "partially-broken kit still reaches ready (not error) with 7/8 good",
+        "pass": true,
+        "extra": {
+          "status": "ready",
+          "kit": "_test-broken",
+          "error": "kit \"_test-broken\": 1/8 pieces failed to decode"
+        }
+      },
+      {
+        "name": "triggering the missing piece makes no sound and does not throw",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "the other 7 pieces in a partially-broken kit still play",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "second kit \"acoustic\" loads with no code change",
+        "pass": true,
+        "extra": {
+          "status": "ready",
+          "kit": "acoustic",
+          "error": null
+        }
+      },
+      {
+        "name": "acoustic kit triggers sound",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "allNotesOff fired without throwing and left voices >= 0",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "allNotesOff eventually silences everything",
+        "pass": true,
+        "extra": 0
+      },
+      {
+        "name": "40-hit synchronous burst did not throw",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "voicePool.count never exceeds the 32-voice governor default",
+        "pass": true,
+        "extra": 32
+      },
+      {
+        "name": "dispose() returns nodesDisconnected/listenersDropped",
+        "pass": true,
+        "extra": {
+          "nodesDisconnected": 1,
+          "listenersDropped": 18
+        }
+      },
+      {
+        "name": "dispose() clears mount DOM",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "dispose() frees all live voices",
+        "pass": true,
+        "extra": null
+      },
+      {
+        "name": "noteOn after dispose is a silent no-op, not a throw",
+        "pass": true,
+        "extra": null
+      }
+    ],
+    "threwUnexpectedly": null,
+    "allPassed": true
+  },
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)",
+    "Failed to load resource: the server responded with a status of 404 (File not found)"
+  ]
+}

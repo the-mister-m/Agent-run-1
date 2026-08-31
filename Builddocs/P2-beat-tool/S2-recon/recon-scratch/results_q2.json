@@ -1,0 +1,6 @@
+{
+  "note": "harness_q2_backgrounding.py crashed after the visibility read (browser target closed during the 4s wait, headed real Chrome). The visibility result below is the actual console output captured before the crash; the gap-stat read after refocus never ran.",
+  "visibilityState_right_after_A_starts_A_focused": "visible",
+  "visibilityState_while_B_focused_4s_later": "visible",
+  "conclusion": "zero transition to hidden observed; automated tab switch does not trigger real backgrounding"
+}

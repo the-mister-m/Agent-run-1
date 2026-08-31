@@ -1,0 +1,94 @@
+{
+  "decode": {
+    "perFile": [
+      {
+        "file": "01_kick.wav",
+        "bytesOnDisk": 30912,
+        "decodeMs": 1,
+        "decodedFrames": 16798,
+        "decodedSeconds": 0.3499583333333333,
+        "decodedMemoryBytes": 67192,
+        "sampleRate": 48000
+      },
+      {
+        "file": "02_snare.wav",
+        "bytesOnDisk": 19448,
+        "decodeMs": 0.5,
+        "decodedFrames": 10560,
+        "decodedSeconds": 0.22,
+        "decodedMemoryBytes": 42240,
+        "sampleRate": 48000
+      },
+      {
+        "file": "03_hihat_closed.wav",
+        "bytesOnDisk": 5336,
+        "decodeMs": 0.2,
+        "decodedFrames": 2880,
+        "decodedSeconds": 0.06,
+        "decodedMemoryBytes": 11520,
+        "sampleRate": 48000
+      },
+      {
+        "file": "04_hihat_open.wav",
+        "bytesOnDisk": 39734,
+        "decodeMs": 0.7,
+        "decodedFrames": 21600,
+        "decodedSeconds": 0.45,
+        "decodedMemoryBytes": 86400,
+        "sampleRate": 48000
+      },
+      {
+        "file": "05_clap.wav",
+        "bytesOnDisk": 15920,
+        "decodeMs": 0.4,
+        "decodedFrames": 8640,
+        "decodedSeconds": 0.18,
+        "decodedMemoryBytes": 34560,
+        "sampleRate": 48000
+      },
+      {
+        "file": "06_tom_low.wav",
+        "bytesOnDisk": 24740,
+        "decodeMs": 0.4,
+        "decodedFrames": 13440,
+        "decodedSeconds": 0.28,
+        "decodedMemoryBytes": 53760,
+        "sampleRate": 48000
+      },
+      {
+        "file": "07_tom_high.wav",
+        "bytesOnDisk": 21212,
+        "decodeMs": 0.5,
+        "decodedFrames": 11520,
+        "decodedSeconds": 0.24,
+        "decodedMemoryBytes": 46080,
+        "sampleRate": 48000
+      },
+      {
+        "file": "08_rim.wav",
+        "bytesOnDisk": 4454,
+        "decodeMs": 0.3,
+        "decodedFrames": 2400,
+        "decodedSeconds": 0.05,
+        "decodedMemoryBytes": 9600,
+        "sampleRate": 48000
+      }
+    ],
+    "totalDecodeMs": 4
+  },
+  "sample_trigger_cost": {
+    "nTriggers": 500,
+    "totalMs": 2.9,
+    "perTriggerMs": 0.006
+  },
+  "synth_trigger_cost": {
+    "nTriggers": 500,
+    "totalMs": 3.9,
+    "perTriggerMs": 0.008
+  },
+  "summary": {
+    "total_bytes_on_disk_8_files": 161756,
+    "total_decoded_memory_bytes_8_files": 351352,
+    "memory_expansion_ratio": 2.17
+  }
+}

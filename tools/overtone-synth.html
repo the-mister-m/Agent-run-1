@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overtone Synth — Chromebook DAW</title>
+
+<!--
+  /tools/overtone-synth.html — the Overtone Synth standalone teaching page.
+  Built by `tone-shell`, P1/S4. CONTRACTS §1 names this exact path.
+
+  NO BUILD STEP (CONTRACTS §10, seat question 3). Plain ES module imports, relative paths,
+  no bundler, no dependency, nothing to compile. Serve the project root over static HTTP
+  and open this file:
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/tools/overtone-synth.html
+
+  It must be HTTP, not file:// — Chrome refuses ES module imports from a file:// origin,
+  and Web MIDI plus the P5 service worker need a secure context (CONTRACTS §5, §10).
+  127.0.0.1 counts as secure.
+
+  THE LESSON (PHASE.md), the inversion of the Wave Synth: you stack the FREQUENCIES by
+  hand — fundamental ×1, then ×2, ×3, ×4 … — and the oscilloscope shows you the SHAPE they
+  add up to over one repetition. The spectrum analyzer is deliberately not on this page.
+  Do not "fix" this by adding one.
+-->
+
+<link rel="stylesheet" href="../src/ui/tokens.css">
+<style>
+  html, body { margin: 0; padding: 0; background: var(--bg, #0a0d13); }
+  .cbdaw-boot {
+    margin: 0; padding: 24px;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+  }
+  .cbdaw-boot code { color: var(--accent, #34e5b4); }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="cbdaw-boot">
+    This tool is a Web Audio instrument and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+  import { mountStandaloneTool } from '../src/ui/shell.js';
+  import OvertoneSynth from '../src/instruments/overtone-synth.js';
+  import Scope from '../src/vis/scope.js';
+
+  // ONE visual, named here and nowhere else. `vis/scope.js` binds to getAnalyser('scope');
+  // Overtone Synth returns null for 'spectrum' (CONTRACTS §11.5), so this page
+  // structurally cannot grow a spectrum analyzer — vis/spectrum.js would throw in its own
+  // constructor if anyone tried.
+  mountStandaloneTool({
+    toolId: 'overtone-synth',
+    Instrument: OvertoneSynth,
+    Visual: Scope,
+    tap: 'scope',
+    lesson:
+      'Stack partials on the fundamental and watch the shape they add up to. ' +
+      'More frequencies = a more complex wave.',
+    visualTitle: 'Oscilloscope',
+    visualNote:
+      'the gain of the wave over the course of ONE repetition — raise a partial and the ' +
+      'shape changes in front of you',
+  });
+</script>
+
+</body>
+</html>

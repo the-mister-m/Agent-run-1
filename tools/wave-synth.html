@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wave Synth — Chromebook DAW</title>
+
+<!--
+  /tools/wave-synth.html — the Wave Synth standalone teaching page.
+  
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/tools/wave-synth.html
+
+-->
+
+<link rel="stylesheet" href="../src/ui/tokens.css">
+<style>
+  html, body { margin: 0; padding: 0; background: var(--bg, #0a0d13); }
+  .cbdaw-boot {
+    margin: 0; padding: 24px;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+  }
+  .cbdaw-boot code { color: var(--accent, #34e5b4); }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="cbdaw-boot">
+    This tool is a Web Audio instrument and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+  import { mountStandaloneTool } from '../src/ui/shell.js';
+  import WaveSynth from '../src/instruments/wave-synth.js';
+  import Spectrum from '../src/vis/spectrum.js';
+
+  // ONE visual, named here and nowhere else. `vis/spectrum.js` binds to
+  // getAnalyser('spectrum'); Wave Synth returns null for 'scope' (CONTRACTS §11.4), so
+  // this page structurally cannot grow an oscilloscope — vis/scope.js would throw in its
+  // own constructor if anyone tried.
+  mountStandaloneTool({
+    toolId: 'wave-synth',
+    Instrument: WaveSynth,
+    Visual: Spectrum,
+    tap: 'spectrum',
+    lesson:
+      'Pick a shape and see how many frequencies are in it. ' +
+      'Smoother wave = fewer overtones.',
+    visualTitle: 'Spectrum analyzer',
+    visualNote:
+      'every frequency in the sound right now — the fundamental is the lowest and ' +
+      'loudest, everything above it is an overtone (×2, ×3, ×4 …)',
+  });
+</script>
+
+</body>
+</html>

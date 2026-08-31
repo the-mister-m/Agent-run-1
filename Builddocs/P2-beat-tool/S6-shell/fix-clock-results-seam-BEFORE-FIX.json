@@ -1,0 +1,16 @@
+[
+  {
+    "name": "REG \u00b7 loop seam: no drop, no double, no escape",
+    "pass": false,
+    "lines": [
+      "loop wraps observed ......... 31 of 40 wanted",
+      "doubled ticks at the seam ... 0",
+      "dropped ticks at the seam ... 0",
+      "ticks covered ............... 92539",
+      "\u26a0 ESCAPED the loop at leading-edge tick 2064 (region is [0, 1920))",
+      "  after 31 good wraps; last window ended at tick 2064",
+      "  a window that ends EXACTLY on lb.end never trips `toTick > lb.end`.",
+      "FAIL"
+    ]
+  }
+]

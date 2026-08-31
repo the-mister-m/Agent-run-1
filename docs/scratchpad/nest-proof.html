@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset=utf-8><title>S1 §0 proof harness</title>
+<style>
+/* ---- THE ARCHITECTURE UNDER TEST (S1 §0) ---- */
+:root{ --fs-root:12px; --sp-unit:2px; --r-unit:2px; }
+*{ --fs-sm:calc(var(--fs-root)*0.917); --sp-3:calc(var(--sp-unit)*3); --r-ctl:calc(var(--r-unit)*2); }
+.expanded{ --fs-root:16px; --sp-unit:3px; --r-unit:3px; }
+
+/* arm 1: calc tokens, nested three deep */
+.calc .a,.calc .a .b,.calc .a .b .c{ font-size:var(--fs-sm); }
+/* arm 2: naive em, nested three deep */
+.em{font-size:12px} .em .a,.em .a .b,.em .a .b .c{ font-size:0.917em; }
+.box{ padding:var(--sp-3); border-radius:var(--r-ctl); font-size:var(--fs-sm); }
+
+body{font:14px/1.5 ui-monospace,Menlo,monospace;background:#0a0d13;color:#f2f6fc;padding:24px}
+pre{background:#1b2332;border:1px solid #3a485f;border-radius:8px;padding:16px;white-space:pre-wrap}
+.pass{color:#6ee05a;font-weight:700} .fail{color:#ff3b30;font-weight:700}
+h1{font-size:18px;color:#34e5b4}
+</style></head><body>
+<h1>S1 §0 — proof harness</h1>
+<p>Owning spec: <code>Builddocs/skinspecs/S1-token-vocabulary.md</code> §0 / §9 DONE-CHECK.
+Open this file in the project's browser. Every line must read PASS.</p>
+
+<div class=calc id=c1><div class=a><div class=b><div class=c>x</div></div></div></div>
+<div class=em   id=e1><div class=a><div class=b><div class=c>x</div></div></div></div>
+<div class="calc expanded" id=c2><div class=a><div class=b><div class=c>x</div></div></div></div>
+<div class=box id=b1>x</div>
+<div class="box expanded" id=b2>x</div>
+<pre id=out></pre>
+<script>
+const g=(s,p)=>getComputedStyle(document.querySelector(s))[p];
+const chain=id=>['.a','.a .b','.a .b .c'].map(s=>g('#'+id+' '+s,'fontSize'));
+const c1=chain('c1'), e1=chain('e1'), c2=chain('c2');
+const T=[];
+const check=(label,cond,detail)=>T.push(`[${cond?'PASS':'FAIL'}] ${label.padEnd(46)} ${detail}`);
+
+check('calc tokens do NOT compound when nested',
+      new Set(c1).size===1, c1.join(' → '));
+check('naive em DOES compound (control arm)',
+      new Set(e1).size===3, e1.join(' → '));
+check('variant override rescales type',
+      c2[0]!==c1[0], `${c1[0]} → ${c2[0]}  (expect 16*0.917=14.672px)`);
+check('variant rescale holds 3 levels deep',
+      new Set(c2).size===1, c2.join(' → '));
+check('variant override rescales padding',
+      g('#b2','padding')!==g('#b1','padding'), `${g('#b1','padding')} → ${g('#b2','padding')}`);
+check('variant override rescales radius',
+      g('#b2','borderRadius')!==g('#b1','borderRadius'), `${g('#b1','borderRadius')} → ${g('#b2','borderRadius')}`);
+
+const allPass=T.every(l=>l.startsWith('[PASS'));
+const el=document.getElementById('out');
+el.textContent=T.join('\n')+'\n\n'+(allPass
+  ? 'ALL PASS — S1 §0 holds in this browser. S2 may open.'
+  : 'FAILURE — S1 §0 does not hold here. STOP. Everything downstream is built on it.');
+el.className=allPass?'pass':'fail';
+</script></body></html>

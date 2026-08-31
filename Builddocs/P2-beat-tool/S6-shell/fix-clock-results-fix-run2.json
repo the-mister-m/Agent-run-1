@@ -1,0 +1,79 @@
+[
+  {
+    "name": "B2 \u00b7 play() from past loop.endBar enters the loop",
+    "pass": true,
+    "lines": [
+      "loop bars 1\u20131  ->  ticks [0, 1920)",
+      "parked at tick 3840 (bar 3) \u2014 past the region",
+      "tick at play() ................ 0   (expected 0: 3840 folds back mod 1920)",
+      "highest tick over 4 s of play . 1864   (was 4871 and climbing before the fix)",
+      "PASS \u2014 the playhead entered the loop and stayed inside it.",
+      "loop bars 2\u20133 (ticks 1920\u20135760): from 9600 -> 1920 (expect 1920 \u2014 exact multiple of the span)",
+      "loop bars 2\u20133 (ticks 1920\u20135760): from 11760 -> 4080 (expect 4080)",
+      "playhead BEFORE the region: from 0 -> 0 (expect 0, unchanged \u2014 it plays in)",
+      "PASS \u2014 modulo fold, and a playhead before the loop is left alone."
+    ]
+  },
+  {
+    "name": "B2b \u00b7 record() takes the same loop entry",
+    "pass": true,
+    "lines": [
+      "record() from tick 7680, loop [0, 3840): entered at 0, max 2417",
+      "PASS"
+    ]
+  },
+  {
+    "name": "B1 \u00b7 countingIn and position agree across the record point",
+    "pass": true,
+    "lines": [
+      "frames sampled 156",
+      "frames reporting bar < 1 ............ 0  (was ~6 frames / ~100 ms)",
+      "frames with positionTicks < 0 ....... 0",
+      "flag/position contradictions ........ 0",
+      "last frame counting in  : ticks 0  bar 1  remain 0.001 bars",
+      "first frame after flip  : ticks 16  bar 1  remain 0.000 bars",
+      "gap across the flip     : 16 ms of AudioContext time",
+      "PASS \u2014 the flip and the reported position describe the same instant. No bar 0."
+    ]
+  },
+  {
+    "name": "B1b \u00b7 capture.js\u2019s count-in gate never yields a negative tick",
+    "pass": true,
+    "lines": [
+      "_stampTick() results: 156 total, 104 dropped as count-in, 52 would be written",
+      "of those written, NEGATIVE ticks: 0   min written tick 10",
+      "PASS \u2014 capture.js can no longer stamp a note before the record point."
+    ]
+  },
+  {
+    "name": "REG \u00b7 loop seam: no drop, no double, no escape",
+    "pass": true,
+    "lines": [
+      "loop wraps observed ......... 40 of 40 wanted",
+      "doubled ticks at the seam ... 0",
+      "dropped ticks at the seam ... 0",
+      "ticks covered ............... 76954",
+      "PASS \u2014 half-open windows still tile the loop exactly, no escape."
+    ]
+  },
+  {
+    "name": "REG \u00b7 zero tick drift over 64 bars (16ths and triplets)",
+    "pass": false,
+    "lines": [
+      "division 4: 1024 steps over 64 bars \u2014 tick drift 120, max |time \u2212 ideal| 0.000000 ms",
+      "division 3: 768 steps over 64 bars \u2014 tick drift 160, max |time \u2212 ideal| 0.000000 ms",
+      "FAIL"
+    ]
+  },
+  {
+    "name": "A \u00b7 scheduler-pass cost probe moves under real load",
+    "pass": false,
+    "lines": [
+      "idle          clock.schedulerLoad 0.0001   lastPassMs 0.000   governor.load 0.0001",
+      "under load    clock.schedulerLoad 0.0294   lastPassMs 3.100   governor.load 0.0000",
+      "after load    clock.schedulerLoad 0.0002  (smoothing decays over 20 passes)",
+      "hook present on governor? false  <- false until audio.js gets the one line",
+      "FAIL \u2014 the probe did not move with real scheduler work."
+    ]
+  }
+]

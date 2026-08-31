@@ -1,0 +1,36 @@
+{
+  "eighthTriplet": {
+    "name": "eighth-note triplet",
+    "tickPerNote": 160,
+    "isInteger": true,
+    "totalEvents": 768,
+    "finalTick_integerAccumulation": 122880,
+    "expectedFinalTick": 122880,
+    "drift_ticks_integerAccumulation": 0,
+    "finalTick_naiveRoundFormula": 122880,
+    "drift_ticks_naiveRoundFormula": 0
+  },
+  "sixteenthTriplet": {
+    "name": "16th-note triplet",
+    "tickPerNote": 80,
+    "isInteger": true,
+    "totalEvents": 1536,
+    "finalTick_integerAccumulation": 122880,
+    "expectedFinalTick": 122880,
+    "drift_ticks_integerAccumulation": 0,
+    "finalTick_naiveRoundFormula": 122880,
+    "drift_ticks_naiveRoundFormula": 0
+  },
+  "straightSixteenth": {
+    "name": "straight 16th (control)",
+    "tickPerNote": 120,
+    "isInteger": true,
+    "totalEvents": 1024,
+    "finalTick_integerAccumulation": 122880,
+    "expectedFinalTick": 122880,
+    "drift_ticks_integerAccumulation": 0,
+    "finalTick_naiveRoundFormula": 122880,
+    "drift_ticks_naiveRoundFormula": 0
+  }
+}
+PPQ 480 factorization: {"2":5,"3":1,"5":1}

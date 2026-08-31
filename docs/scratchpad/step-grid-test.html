@@ -1,0 +1,246 @@
+<!doctype html>
+<!--
+  step-grid-test.html — throwaway DONE-CHECK page for `grid` (P2/S4).
+  Not owned by any lane rule (it lives in docs/scratchpad, LLM space) and is not part of
+  the shipped app. Deletable at any time.
+
+  Imports `core/audio.js`, `core/clock.js`, and `surfaces/step-grid.js` — the file this
+  seat owns.
+
+  ⚠ There is no `instruments/drum-synth.js` or `instruments/drum-sampler.js` on disk yet —
+  those are `drum-synth` and `drum-sampler` (P2/S4), running in parallel with this seat per
+  STAGE.md, and this seat's brief forbids waiting on another seat or touching their files.
+  `StubDrumKit` below is NOT a drum machine. It is the smallest possible thing that
+  satisfies CONTRACTS §2 (Instrument) + §14.1 (the eight fixed roles) — one oscillator
+  click per piece — built ONLY to prove step-grid.js's seat question 5 claim: "the grid
+  must not know whether it is driving a synth kit or a sampler." Swapping this stub for
+  the real drum-synth.js or drum-sampler.js later requires zero changes to step-grid.js,
+  by construction — that is the whole point of §14.5.
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<title>step-grid DONE-CHECK</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0d13; --panel: #1b2332; --line: #3a485f;
+    --text: #f2f6fc; --text-dim: #93a1b8; --accent: #34e5b4; --warn: #ff7a1a;
+  }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 20px; }
+  h1 { font-size: 16px; }
+  .row { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+  button { font: inherit; padding: 6px 12px; background: var(--panel); color: var(--text);
+           border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #gridHost { max-width: 900px; margin-top: 16px; }
+  #gridHostCompact { max-width: 900px; margin-top: 16px; }
+  #log { max-width: 900px; height: 160px; overflow-y: auto; background: var(--panel);
+         border: 1px solid var(--line); border-radius: 4px; padding: 8px; font-size: 11px;
+         font-family: ui-monospace, monospace; color: var(--text-dim); white-space: pre-wrap; }
+  .check { color: var(--accent); }
+  .fail { color: var(--warn); }
+  label { font-size: 13px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+<h1>step-grid.js — DONE-CHECK page</h1>
+
+<div class="row">
+  <button id="btnUnlock">1. Unlock audio (click first)</button>
+  <button id="btnPlay">Play</button>
+  <button id="btnStop">Stop</button>
+  <label>BPM <input id="bpm" type="number" value="96" min="40" max="240" style="width:56px"></label>
+  <span id="posReadout" style="font-variant-numeric: tabular-nums;">1.1.000</span>
+</div>
+
+<div class="row">
+  <button id="btnTriplet">Toggle triplet (all lanes)</button>
+  <button id="btnOverlay">Toggle syllable overlay</button>
+  <button id="btnLoadDemo">Load demo pattern (kick/snare/hat)</button>
+  <button id="btnRoundtrip">getPattern → setPattern round-trip check</button>
+</div>
+
+<h2 style="font-size:13px;">Expanded (standalone)</h2>
+<div id="gridHost"></div>
+
+<h2 style="font-size:13px;">Compact (DAW lane)</h2>
+<div id="gridHostCompact"></div>
+
+<h2 style="font-size:13px;">Event log — noteOn calls only come from the scheduler ('tick'), never from rAF</h2>
+<div id="log"></div>
+
+<script type="module">
+import { audio, ctx, createChannel } from '../../src/core/audio.js';
+import { clock } from '../../src/core/clock.js';
+import StepGrid from '../../src/surfaces/step-grid.js';
+
+const log = document.getElementById('log');
+function logLine(text, cls) {
+  const el = document.createElement('div');
+  if (cls) el.className = cls;
+  el.textContent = text;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+// -----------------------------------------------------------------------------------------
+// STUB DRUM KIT — CONTRACTS §2 + §14.1, minimal. See the file header above for why this
+// exists instead of importing a real drum machine.
+// -----------------------------------------------------------------------------------------
+const PIECES = [
+  { index: 0, label: 'Kick',       note: 36 },
+  { index: 1, label: 'Snare',      note: 38 },
+  { index: 2, label: 'Closed Hat', note: 42 },
+  { index: 3, label: 'Open Hat',   note: 46 },
+  { index: 4, label: 'Clap',       note: 39 },
+  { index: 5, label: 'Low Tom',    note: 45 },
+  { index: 6, label: 'High Tom',   note: 50 },
+  { index: 7, label: 'Crash',      note: 49 },
+];
+
+class StubDrumKit {
+  static id = 'stub-drum-kit';
+  static label = 'Stub Drum Kit (test-only)';
+  static playable = true;
+  static needsLoad = false;
+  static pieces = PIECES;
+  static emitsNotes = false;
+
+  constructor(ctxRef, out) {
+    this.ctx = ctxRef;
+    this.out = out;
+    this._voiceCount = 0;
+  }
+
+  async ready() { /* resolves immediately — §2 default */ }
+
+  noteOn(note, velocity = 0.8, atTime) {
+    const t = Math.max(atTime ?? this.ctx.currentTime, this.ctx.currentTime);
+    const piece = PIECES.find((p) => p.note === note);
+    const label = piece ? piece.label : `note ${note}`;
+    logLine(`noteOn  ${label.padEnd(10)} v=${velocity.toFixed(2)}  t=${t.toFixed(3)}`);
+
+    // One oscillator click per hit, pitched roughly by role, level AND brightness driven
+    // by velocity so it is audibly a hit, not just a level change — a real drum machine
+    // seat's job in full, done here in three lines only so the page makes real sound.
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = note <= 40 ? 'sine' : 'triangle';
+    osc.frequency.setValueAtTime(note <= 40 ? 90 : 220 + note * 4, t);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.02, velocity), t + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.09 + velocity * 0.05);
+    osc.connect(gain);
+    gain.connect(this.out);
+    osc.start(t);
+    osc.stop(t + 0.2);
+    this._voiceCount++;
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); this._voiceCount--; };
+  }
+
+  noteOff() {}
+  allNotesOff() {}
+  setParam() {}
+  getParam() { return undefined; }
+  getState() { return {}; }
+  setState() {}
+  get voiceCount() { return this._voiceCount; }
+  get cpuWeight() { return 10; }
+  getAnalyser() { return null; }
+  mountCompact() {}
+  mountExpanded() {}
+  unmount() {}
+  dispose() {}
+}
+
+const kitOut = createChannel();
+const kit = new StubDrumKit(ctx, kitOut);
+
+// -----------------------------------------------------------------------------------------
+// THE GRID — the file under test
+// -----------------------------------------------------------------------------------------
+const grid = new StepGrid(null, clock);
+grid.bindInstrument(kit);
+grid.mountExpanded(document.getElementById('gridHost'));
+
+const gridCompact = new StepGrid(null, clock);
+gridCompact.bindInstrument(kit);
+gridCompact.mountCompact(document.getElementById('gridHostCompact'));
+
+// Exposed for the automated smoke check only (docs/scratchpad, not shipped code).
+window.__grid = grid;
+window.__gridCompact = gridCompact;
+window.__clock = clock;
+
+// -----------------------------------------------------------------------------------------
+// CONTROLS
+// -----------------------------------------------------------------------------------------
+document.getElementById('btnUnlock').addEventListener('click', () => {
+  audio.unlock().then(() => logLine(`audio.state = ${audio.state}`, 'check'));
+});
+
+document.getElementById('btnPlay').addEventListener('click', () => clock.play());
+document.getElementById('btnStop').addEventListener('click', () => clock.stop());
+document.getElementById('bpm').addEventListener('input', (e) => {
+  clock.bpm = Number(e.target.value) || 96;
+});
+
+document.getElementById('btnTriplet').addEventListener('click', () => {
+  const next = grid.rulerDivision === 3 ? 4 : 3;
+  grid.setDivisionAll(next);
+  gridCompact.setDivisionAll(next);
+  logLine(`division set to ${next} on both grids — same component, no second implementation`, 'check');
+});
+
+document.getElementById('btnOverlay').addEventListener('click', () => {
+  grid.overlay = grid.overlay === 'syllable' ? 'none' : 'syllable';
+  logLine(`overlay = ${grid.overlay}`);
+});
+
+document.getElementById('btnLoadDemo').addEventListener('click', () => {
+  const p = grid.getPattern();
+  const on = (i) => ({ v: 0.8 });
+  // basic backbeat, §14.1: "The first three carry the curriculum on their own" — kick,
+  // snare, hat. 16 steps at division 4.
+  [0, 4, 8, 12].forEach((s) => (p.lanes[0].steps[s] = on()));         // kick
+  [4, 12].forEach((s) => (p.lanes[1].steps[s] = on()));               // snare
+  [0, 2, 4, 6, 8, 10, 12, 14].forEach((s) => (p.lanes[2].steps[s] = { v: 0.5 })); // hat
+  grid.setPattern(p);
+  gridCompact.setPattern(p);
+  logLine('demo pattern loaded', 'check');
+});
+
+document.getElementById('btnRoundtrip').addEventListener('click', () => {
+  const before = JSON.stringify(grid.getPattern());
+  const ok = grid.setPattern(JSON.parse(before));
+  const after = JSON.stringify(grid.getPattern());
+  logLine(`round-trip ${ok && before === after ? 'OK' : 'FAILED'}`, ok && before === after ? 'check' : 'fail');
+});
+
+// position readout, itself an rAF reader — separate from the grid's own internal rAF loop,
+// here only so this page shows the same "visual reads clock.positionTicks" discipline the
+// grid follows internally.
+function tickReadout() {
+  const p = clock.position;
+  document.getElementById('posReadout').textContent =
+    `${p.bar}.${p.beat}.${String(p.tick).padStart(3, '0')}`;
+  requestAnimationFrame(tickReadout);
+}
+requestAnimationFrame(tickReadout);
+
+logLine('Page ready. Click "Unlock audio" first (browser gesture gate), then Play.');
+logLine('DONE-CHECK map:');
+logLine('  16-step pattern in time      → Load demo pattern, Play');
+logLine('  triplets, stays in time      → Toggle triplet while playing');
+logLine('  per-step velocity, audible   → drag a cell vertically, watch/hear noteOn log');
+logLine('  time signature display       → toolbar reads "4/4" — digits only, no bottom');
+logLine('                                  symbol, per CONTRACTS §13.4 overruling this');
+logLine('                                  seat’s own brief (Brandon’s D-20 answer)');
+logLine('  syllable overlay toggle      → Toggle syllable overlay');
+logLine('  rAF playhead, zero audio     → watch the moving line while stopped: it moves');
+logLine('                                  only while clock plays, and never logs a noteOn');
+logLine('                                  by itself — only \'tick\' does, above');
+</script>
+</body>
+</html>

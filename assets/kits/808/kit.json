@@ -1,0 +1,55 @@
+{
+  "format": "chromebook-daw-kit",
+  "version": 1,
+  "name": "808",
+  "pieces": [
+    {
+      "index": 0,
+      "label": "808 Kick",
+      "note": 36,
+      "file": "kick.wav"
+    },
+    {
+      "index": 1,
+      "label": "808 Snare",
+      "note": 38,
+      "file": "snare.wav"
+    },
+    {
+      "index": 2,
+      "label": "808 Closed Hat",
+      "note": 42,
+      "file": "hat-closed.wav"
+    },
+    {
+      "index": 3,
+      "label": "808 Open Hat",
+      "note": 46,
+      "file": "hat-open.wav"
+    },
+    {
+      "index": 4,
+      "label": "808 Clap",
+      "note": 39,
+      "file": "clap.wav"
+    },
+    {
+      "index": 5,
+      "label": "808 Low Tom",
+      "note": 45,
+      "file": "tom-low.wav"
+    },
+    {
+      "index": 6,
+      "label": "808 High Tom",
+      "note": 50,
+      "file": "tom-high.wav"
+    },
+    {
+      "index": 7,
+      "label": "808 Crash",
+      "note": 49,
+      "file": "crash.wav"
+    }
+  ]
+}

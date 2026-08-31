@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>drum-sampler DONE-CHECK harness</title></head>
+<body>
+<div id="compact-mount" style="width:400px"></div>
+<div id="expanded-mount" style="width:700px"></div>
+<script type="module">
+  import { ctx, createChannel, voicePool, governor } from '/src/core/audio.js';
+  import DrumSampler from '/src/instruments/drum-sampler.js';
+
+  const PIECES = [
+    { index: 0, note: 36 }, { index: 1, note: 38 }, { index: 2, note: 42 },
+    { index: 3, note: 46 }, { index: 4, note: 39 }, { index: 5, note: 45 },
+    { index: 6, note: 50 }, { index: 7, note: 49 },
+  ];
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  async function waitFor(fn, timeoutMs = 4000, stepMs = 20) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < timeoutMs) {
+      const v = fn();
+      if (v) return v;
+      await sleep(stepMs);
+    }
+    throw new Error('waitFor timed out');
+  }
+
+  window.__runDoneCheck = async function () {
+    const log = [];
+    const ok = (name, cond, extra) => { log.push({ name, pass: !!cond, extra: extra ?? null }); };
+    let threwUnexpectedly = null;
+
+    try {
+      await ctx.resume().catch(() => {});
+
+      const out = createChannel();
+      const inst = new DrumSampler(ctx, out);
+
+      // 1 — kits.json discovered without blocking construction
+      ok('constructor did not throw / instrument exists', !!inst);
+      await waitFor(() => inst.listKits().length > 0);
+      ok('kits.json discovered 808 + acoustic', inst.listKits().includes('808') && inst.listKits().includes('acoustic'), inst.listKits());
+
+      // 2 — mount compact and expanded, verify 8 pads each
+      const compactEl = document.getElementById('compact-mount');
+      const expandedEl = document.getElementById('expanded-mount');
+      inst.mountCompact(compactEl);
+      inst.mountExpanded(expandedEl);
+      ok('mountCompact drew 8 pads', compactEl.querySelectorAll('.ds-pad').length === 8);
+      ok('mountExpanded drew 8 pads', expandedEl.querySelectorAll('.ds-pad').length === 8);
+
+      // 3 — ready() before any kit load resolves immediately (nothing to await)
+      await inst.ready();
+      ok('ready() resolves with no kit loaded', true);
+
+      // 4 — load kit "808" via setParam, matches CONTRACTS §2's dotted-path convention
+      inst.setParam('kit', '808');
+      ok('kitStatus reflects loading immediately after setParam (no block)', inst.kitStatus.status === 'loading' || inst.kitStatus.status === 'ready');
+      await inst.ready();
+      ok('kit "808" reached ready status', inst.kitStatus.status === 'ready', inst.kitStatus);
+      ok('getState() records kit name', inst.getState().kit === '808');
+      ok('getParam("kit") matches getState().kit', inst.getParam('kit') === '808');
+
+      // 5 — JSON round-trip
+      const json = JSON.stringify(inst.getState());
+      const parsed = JSON.parse(json);
+      ok('getState() is JSON-safe and round-trips', parsed.kit === '808');
+
+      // 6 — trigger all eight pieces by index/note, exactly the call the grid makes (§14.5)
+      let voiceCountAfterEach = [];
+      for (const p of PIECES) {
+        inst.noteOn(p.note, 0.8, ctx.currentTime);
+        voiceCountAfterEach.push(inst.voiceCount);
+      }
+      ok('triggering all 8 pieces threw nothing and registered voices', voiceCountAfterEach.every(v => v >= 1), voiceCountAfterEach);
+      ok('cpuWeight is live and non-zero while voices sound', inst.cpuWeight > 0, inst.cpuWeight);
+
+      // let one-shots finish naturally
+      await sleep(1800);
+      ok('voices free themselves after playing out', inst.voiceCount === 0, inst.voiceCount);
+
+      // 7 — velocity moves more than level: playbackRate differs across the velocity range
+      // (indirect check: construct two voices at extreme velocities and read the actual
+      // AudioBufferSourceNode.playbackRate each ends up with)
+      {
+        const before = inst.voiceCount;
+        inst.noteOn(36, 0.0, ctx.currentTime);
+        inst.noteOn(36, 1.0, ctx.currentTime);
+        // reach into the live voice set via a debug hook is not exposed on purpose (§11.1:
+        // "never exposes them outside itself") — instead confirm indirectly: two hits at the
+        // velocity extremes did not throw and both registered as live voices.
+        ok('extreme-velocity hits (0.0 and 1.0) both registered without throwing', inst.voiceCount >= before + 1);
+        await sleep(1500);
+      }
+
+      // 8 — a note NOT in the 8-piece table is a silent no-op, not a throw
+      const beforeUnknown = inst.voiceCount;
+      inst.noteOn(999, 0.8, ctx.currentTime);
+      ok('unknown note is a silent no-op', inst.voiceCount === beforeUnknown);
+
+      // 9 — missing kit: request a kit that was never in kits.json
+      inst.setParam('kit', 'does-not-exist-kit');
+      await inst.ready();
+      ok('missing kit reaches error status, not a throw', inst.kitStatus.status === 'error', inst.kitStatus);
+      ok('page still responsive after missing-kit attempt', document.getElementById('compact-mount') !== null);
+      // previously loaded kit must still be intact (a failed switch must not destroy a working one)
+      ok('previous working kit ("808") survives a failed switch attempt', inst.getState().kit === '808');
+      const beforeAfterFail = inst.voiceCount;
+      inst.noteOn(36, 0.8, ctx.currentTime);
+      ok('previous kit still triggers sound after a failed switch attempt', inst.voiceCount === beforeAfterFail + 1);
+      await sleep(600);
+
+      // 10 — one bad file in an otherwise-good kit: other seven still play, page survives
+      inst.setParam('kit', '_test-broken');
+      await inst.ready();
+      ok('partially-broken kit still reaches ready (not error) with 7/8 good', inst.kitStatus.status === 'ready', inst.kitStatus);
+      const brokenIdx = 3; // built with role index 3 deliberately missing its file
+      const beforeBroken = inst.voiceCount;
+      inst.noteOn(46, 0.8, ctx.currentTime); // the missing piece's note
+      ok('triggering the missing piece makes no sound and does not throw', inst.voiceCount === beforeBroken);
+      inst.noteOn(36, 0.8, ctx.currentTime); // a good piece in the same kit
+      ok('the other 7 pieces in a partially-broken kit still play', inst.voiceCount === beforeBroken + 1);
+      await sleep(700);
+
+      // 11 — second kit, "acoustic", swapped with zero code edit (only asset files + this test)
+      inst.setParam('kit', 'acoustic');
+      await inst.ready();
+      ok('second kit "acoustic" loads with no code change', inst.kitStatus.status === 'ready', inst.kitStatus);
+      const beforeAc = inst.voiceCount;
+      inst.noteOn(36, 0.8, ctx.currentTime);
+      ok('acoustic kit triggers sound', inst.voiceCount === beforeAc + 1);
+      await sleep(600);
+
+      // 12 — allNotesOff panic-stops without throwing
+      inst.setParam('kit', '808');
+      await inst.ready();
+      for (const p of PIECES) inst.noteOn(p.note, 0.8, ctx.currentTime);
+      const beforePanic = inst.voiceCount;
+      inst.allNotesOff();
+      await sleep(60);
+      ok('allNotesOff fired without throwing and left voices >= 0', beforePanic > 0 && inst.voiceCount >= 0);
+      await sleep(50);
+      ok('allNotesOff eventually silences everything', inst.voiceCount === 0, inst.voiceCount);
+
+      // 13 — governor participation: burst past 32 total live voices across the whole DAW
+      // does not throw and voicePool.count never exceeds the 32-voice default (§8, §11.2)
+      const beforeBurst = voicePool.count;
+      for (let i = 0; i < 40; i++) inst.noteOn(36, 0.8, ctx.currentTime);
+      ok('40-hit synchronous burst did not throw', true);
+      ok('voicePool.count never exceeds the 32-voice governor default', voicePool.count <= 32, voicePool.count);
+      await sleep(1200);
+
+      // 14 — compact/expanded mount, unmount, dispose to zero
+      const beforeDisposeVoices = inst.voiceCount;
+      inst.noteOn(36, 0.8, ctx.currentTime);
+      const result = inst.dispose();
+      ok('dispose() returns nodesDisconnected/listenersDropped', typeof result.nodesDisconnected === 'number' && typeof result.listenersDropped === 'number', result);
+      ok('dispose() clears mount DOM', compactEl.innerHTML === '' && expandedEl.innerHTML === '');
+      ok('dispose() frees all live voices', inst.voiceCount === 0);
+      ok('noteOn after dispose is a silent no-op, not a throw', (() => { try { inst.noteOn(36, 0.8, ctx.currentTime); return true; } catch (e) { return false; } })());
+
+    } catch (e) {
+      threwUnexpectedly = String(e && e.stack || e);
+    }
+
+    return { log, threwUnexpectedly, allPassed: threwUnexpectedly === null && log.every(r => r.pass) };
+  };
+</script>
+</body>
+</html>

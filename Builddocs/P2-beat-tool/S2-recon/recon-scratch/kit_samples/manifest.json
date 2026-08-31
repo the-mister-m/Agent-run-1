@@ -1,0 +1,50 @@
+[
+  {
+    "file": "01_kick.wav",
+    "duration_s": 0.35,
+    "frames": 15434,
+    "bytes_on_disk": 30912
+  },
+  {
+    "file": "02_snare.wav",
+    "duration_s": 0.22,
+    "frames": 9702,
+    "bytes_on_disk": 19448
+  },
+  {
+    "file": "03_hihat_closed.wav",
+    "duration_s": 0.06,
+    "frames": 2646,
+    "bytes_on_disk": 5336
+  },
+  {
+    "file": "04_hihat_open.wav",
+    "duration_s": 0.45,
+    "frames": 19845,
+    "bytes_on_disk": 39734
+  },
+  {
+    "file": "05_clap.wav",
+    "duration_s": 0.18,
+    "frames": 7938,
+    "bytes_on_disk": 15920
+  },
+  {
+    "file": "06_tom_low.wav",
+    "duration_s": 0.28,
+    "frames": 12348,
+    "bytes_on_disk": 24740
+  },
+  {
+    "file": "07_tom_high.wav",
+    "duration_s": 0.24,
+    "frames": 10584,
+    "bytes_on_disk": 21212
+  },
+  {
+    "file": "08_rim.wav",
+    "duration_s": 0.05,
+    "frames": 2205,
+    "bytes_on_disk": 4454
+  }
+]

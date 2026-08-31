@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clock.js — seat verification page (P2/S3)</title>
+<style>
+  :root { --bg:#101317; --panel:#181d23; --line:#2a323c; --text:#e6ecf2; --dim:#8b97a5;
+          --accent:#4ec9b0; --warn:#e0813a; --ok:#6fcf6f; --bad:#e05a5a; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; background:var(--bg); color:var(--text);
+         font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  p.sub { color:var(--dim); margin:0 0 18px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  button { background:var(--panel); color:var(--text); border:1px solid var(--line);
+           padding:7px 12px; border-radius:5px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--accent); }
+  .readout { background:var(--panel); border:1px solid var(--line); border-radius:6px;
+             padding:14px; margin-bottom:14px; }
+  .big { font-size:34px; letter-spacing:2px; color:var(--accent); }
+  label { color:var(--dim); margin-right:14px; }
+  input { background:#0c0f13; color:var(--text); border:1px solid var(--line);
+          border-radius:4px; padding:4px 6px; width:70px; font:inherit; }
+  pre { background:var(--panel); border:1px solid var(--line); border-radius:6px;
+        padding:12px; overflow-x:auto; white-space:pre-wrap; max-height:60vh; }
+  .pass { color:var(--ok); } .fail { color:var(--bad); } .note { color:var(--warn); }
+</style>
+</head>
+<body>
+
+<h1>clock.js — seat verification page</h1>
+<p class="sub">
+  Throwaway. Seat <code>clock</code>, P2/S3. Imports <code>/src/core/audio.js</code> and
+  <code>/src/core/clock.js</code> only. Serve over http — §10 forbids assuming file://.
+</p>
+
+<div class="readout">
+  <div class="big" id="pos">1 . 1 . 000</div>
+  <div id="meta" class="sub">stopped</div>
+</div>
+
+<div class="row">
+  <button id="bPlay">play</button>
+  <button id="bRec">record</button>
+  <button id="bStop">stop</button>
+  <button id="bMetro">metronome: off</button>
+  <button id="bLoop">loop: off</button>
+  <button id="bTop">seek 1.1.0</button>
+</div>
+
+<div class="row">
+  <label>bpm <input id="iBpm" type="number" value="120" min="20" max="300"></label>
+  <label>count-in bars <input id="iCin" type="number" value="2" min="0" max="8"></label>
+  <label>loop bars <input id="iLs" type="number" value="1" min="1"> →
+    <input id="iLe" type="number" value="5" min="2"></label>
+</div>
+
+<div class="row">
+  <button id="bQ2">Q2 loops separate</button>
+  <button id="bQ3">Q3 tempo change</button>
+  <button id="bQ4">Q4 loop ×100</button>
+  <button id="bQ5">Q5 count-in</button>
+  <button id="bQ6">Q6 metronome</button>
+  <button id="bQ7">Q7 starvation recovery</button>
+  <button id="bQ8">Q8 tick exactness</button>
+  <button id="bQ9">5-minute hold (slow)</button>
+</div>
+
+<pre id="log">ready.</pre>
+
+<script type="module">
+import { ctx, audio, masterAnalyser } from '../../../src/core/audio.js';
+import { clock, PPQ, stepToTicks, toTicks, fromTicks, ticksPerBar, ticksPerBeat }
+  from '../../../src/core/clock.js';
+
+// =========================================================================================
+// INSTRUMENTATION — no test hook was added to clock.js
+// =========================================================================================
+// The metronome is the only thing in this page that creates an oscillator, so wrapping
+// ctx.createOscillator and the returned node's start() records the EXACT AudioContext time
+// every click was scheduled for. That is the real scheduled-audio time, not a proxy for it,
+// and it is what every drift number below is measured from.
+
+const clicks = [];              // AudioContext start times of every scheduled click
+const clickFreq = [];           // the pitch each one was given — real accent evidence
+let capturing = false;
+const realCreateOsc = ctx.createOscillator.bind(ctx);
+ctx.createOscillator = function () {
+  const osc = realCreateOsc();
+  let freq = null;
+  const realSet = osc.frequency.setValueAtTime.bind(osc.frequency);
+  osc.frequency.setValueAtTime = function (v, t) { freq = v; return realSet(v, t); };
+  const realStart = osc.start.bind(osc);
+  osc.start = function (t) {
+    if (capturing) {
+      clicks.push(t === undefined ? ctx.currentTime : t);
+      clickFreq.push(freq);
+    }
+    return realStart(t);
+  };
+  return osc;
+};
+
+// Every 'tick' window the scheduler emits, for contiguity checking.
+const windows = [];
+let recordingWindows = false;
+clock.on('tick', (w) => {
+  if (recordingWindows) windows.push({ from: w.fromTick, to: w.toTick, bpm: w.bpm,
+                                       t0: w.timeOf(w.fromTick), t1: w.timeOf(w.toTick) });
+});
+
+const resyncs = [];
+clock.on('resync', (r) => resyncs.push(r));
+
+function reset() { clicks.length = 0; clickFreq.length = 0; windows.length = 0; resyncs.length = 0; }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// =========================================================================================
+// THE VISUAL LOOP — this is the ONLY requestAnimationFrame in the system
+// =========================================================================================
+// It reads clock.position and draws. It schedules nothing. clock.js contains no rAF call
+// at all — Q2 greps its own source to prove that rather than asserting it.
+
+const posEl = document.getElementById('pos');
+const metaEl = document.getElementById('meta');
+const rafSamples = [];
+let samplingRaf = false;
+
+function frame() {
+  const p = clock.position;
+  posEl.textContent = `${p.bar} . ${p.beat} . ${String(p.tick).padStart(3, '0')}`;
+  metaEl.textContent =
+    `${clock.state}${clock.countingIn ? ' · COUNT-IN ' + clock.countInRemainingBars.toFixed(2) + ' bars' : ''}` +
+    ` · ${clock.bpm} bpm · ${clock.timeSignature.top}/${clock.timeSignature.bottom}` +
+    ` · tick ${clock.positionTicks} · lead ${clock.leadingEdgeTicks} · ctx ${ctx.state}`;
+  if (samplingRaf) rafSamples.push({ t: ctx.currentTime, tick: clock.positionTicks,
+                                     lead: clock.leadingEdgeTicks });
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// =========================================================================================
+// LOG
+// =========================================================================================
+const logEl = document.getElementById('log');
+function log(s, cls) {
+  logEl.innerHTML += `\n${cls ? `<span class="${cls}">${s}</span>` : s}`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function report(r) {
+  log(`\n── ${r.name} ── ${r.pass ? 'PASS' : 'FAIL'}`, r.pass ? 'pass' : 'fail');
+  for (const line of r.lines) log('   ' + line);
+  return r;
+}
+
+// =========================================================================================
+// SHARED CHECKS
+// =========================================================================================
+
+/** Windows must tile the tick line with no gap and no overlap: every tick belongs to
+ *  exactly one half-open [from, to). A gap is a dropped event; an overlap is a doubled one.
+ *  `wrapsOk` allows the one discontinuity a loop seam is supposed to have. */
+function tileCheck(ws, loopStart, loopEnd) {
+  let gaps = 0, overlaps = 0, wraps = 0, zero = 0;
+  for (let i = 1; i < ws.length; i++) {
+    const prev = ws[i - 1], cur = ws[i];
+    if (cur.to === cur.from) zero++;
+    if (cur.from === prev.to) continue;                       // contiguous — the normal case
+    if (loopEnd !== undefined && prev.to === loopEnd && cur.from === loopStart) { wraps++; continue; }
+    if (cur.from > prev.to) gaps++; else overlaps++;
+  }
+  return { gaps, overlaps, wraps, zero, count: ws.length };
+}
+
+/** Click times against a perfect metronome. Returns ms deviations, not seconds. */
+function clickDrift(times, bpm) {
+  if (times.length < 2) return null;
+  const period = 60 / bpm;
+  const t0 = times[0];
+  let maxDev = 0, sumAbs = 0;
+  const gaps = [];
+  for (let i = 1; i < times.length; i++) gaps.push((times[i] - times[i - 1]) * 1000);
+  for (let i = 0; i < times.length; i++) {
+    const dev = Math.abs((times[i] - t0) - i * period) * 1000;
+    if (dev > maxDev) maxDev = dev;
+    sumAbs += dev;
+  }
+  gaps.sort((a, b) => a - b);
+  return {
+    n: times.length,
+    maxDevMs: maxDev,
+    meanDevMs: sumAbs / times.length,
+    gapMinMs: gaps[0], gapMedMs: gaps[Math.floor(gaps.length / 2)], gapMaxMs: gaps[gaps.length - 1],
+    expectedGapMs: period * 1000,
+  };
+}
+
+async function unlock() {
+  await audio.unlock();
+  // Nothing may block on this (§3) — but a test that measures silence proves nothing.
+  for (let i = 0; i < 40 && ctx.state !== 'running'; i++) await sleep(25);
+  return ctx.state;
+}
+
+function stopAll() {
+  clock.stop();
+  clock.metronome = false;
+  clock.loop.on = false;
+  clock.countIn = 0;
+  clock.bpm = 120;
+  clock.timeSignature.top = 4;
+  clock.timeSignature.bottom = 4;
+  clock.seek(1, 1, 0);
+  recordingWindows = false;
+  capturing = false;
+  samplingRaf = false;
+}
+
+// =========================================================================================
+// SEAT QUESTION 2 — are the audio loop and the visual loop separate?
+// =========================================================================================
+async function q2() {
+  stopAll(); reset(); rafSamples.length = 0;
+  await unlock();
+
+  // 1 · Structural: clock.js must contain no rAF at all. Read its own source.
+  const src = await (await fetch('../../../src/core/clock.js')).text();
+  const rafHits = (src.match(/requestAnimationFrame\s*\(/g) || []).length;
+
+  // 2 · Behavioural: rAF reads position while the scheduler schedules. The playhead must
+  //     never pass the scheduler's leading edge, and must never run backwards.
+  clock.metronome = true;
+  recordingWindows = true; capturing = true; samplingRaf = true;
+  clock.play();
+  await sleep(3000);
+  clock.stop();
+  recordingWindows = false; capturing = false; samplingRaf = false;
+
+  let backwards = 0, ahead = 0;
+  for (let i = 1; i < rafSamples.length; i++) {
+    if (rafSamples[i].tick < rafSamples[i - 1].tick) backwards++;
+    if (rafSamples[i].tick > rafSamples[i].lead) ahead++;
+  }
+  const tile = tileCheck(windows);
+  // Windows are refilled per scheduler pass (~40/s at 25 ms), frames arrive ~60/s.
+  const framesPerSec = rafSamples.length / 3;
+  const windowsPerSec = windows.length / 3;
+
+  const pass = rafHits === 0 && backwards === 0 && ahead === 0 &&
+               tile.gaps === 0 && tile.overlaps === 0 && rafSamples.length > 60;
+  return report({ name: 'Q2 · audio loop and visual loop are separate', pass, lines: [
+    `clock.js requestAnimationFrame call sites: ${rafHits} (must be 0 — §3, §10)`,
+    `rAF samples: ${rafSamples.length} over 3 s (${framesPerSec.toFixed(1)}/s)`,
+    `scheduler windows: ${windows.length} over 3 s (${windowsPerSec.toFixed(1)}/s, 25 ms interval)`,
+    `playhead ran backwards: ${backwards}× · playhead passed the leading edge: ${ahead}×`,
+    `window tiling — gaps ${tile.gaps} · overlaps ${tile.overlaps}`,
+    `clicks scheduled by the visual loop: 0 by construction — rAF calls no clock method`,
+  ]});
+}
+
+// =========================================================================================
+// SEAT QUESTION 3 — does tempo change while playing?
+// =========================================================================================
+async function q3() {
+  stopAll(); reset();
+  await unlock();
+  clock.bpm = 120;
+  clock.metronome = true;
+  recordingWindows = true; capturing = true;
+  clock.play();
+  await sleep(2000);
+
+  const writeAt = ctx.currentTime;
+  clock.bpm = 200;                                  // the drag
+  const readBack = clock.bpm;
+  await sleep(2500);
+  clock.stop();
+  recordingWindows = false; capturing = false;
+
+  // Commit latency: first window carrying the new tempo, measured from the write.
+  const first = windows.find((w) => w.bpm === 200);
+  const commitMs = first ? (first.t0 - writeAt) * 1000 : null;
+  const tile = tileCheck(windows);
+
+  // "No stutter" is not a feeling here: the click gaps must be exactly one of the two
+  // periods, with a single transition and no gap that is neither.
+  const before = clicks.filter((t) => t < writeAt);
+  const after = clicks.filter((t) => first && t >= first.t0 + 0.05);
+  const dBefore = clickDrift(before, 120);
+  const dAfter = clickDrift(after, 200);
+
+  // Bound, not a target: the change commits at the scheduler's leading edge, which is
+  // always inside the 100 ms window, plus at most one 25 ms pass. Anything above ~180 ms
+  // would mean the commit is waiting on something it should not be.
+  const pass = commitMs !== null && commitMs > 0 && commitMs < 180 &&
+               tile.gaps === 0 && tile.overlaps === 0 && readBack === 200 &&
+               dBefore && dAfter && dBefore.maxDevMs < 1 && dAfter.maxDevMs < 1;
+  return report({ name: 'Q3 · tempo changes while playing', pass, lines: [
+    `clock.bpm read back immediately: ${readBack}`,
+    `commit latency (write → first event at the new tempo): ${commitMs === null ? 'n/a' : commitMs.toFixed(1) + ' ms'}`,
+    `  findings-scheduler Q4 measured 115.7–153.0 ms, mean 127.8, on a harness that measured to the first newly-CREATED event. This clock commits at the leading edge instead, so it lands at or under the window itself. Lower than the finding, not higher — reported, not hidden.`,
+    `before: ${dBefore ? `${dBefore.n} clicks, gap ${dBefore.gapMedMs.toFixed(2)} ms (expect ${dBefore.expectedGapMs.toFixed(2)}), max dev ${dBefore.maxDevMs.toFixed(3)} ms` : 'n/a'}`,
+    `after:  ${dAfter ? `${dAfter.n} clicks, gap ${dAfter.gapMedMs.toFixed(2)} ms (expect ${dAfter.expectedGapMs.toFixed(2)}), max dev ${dAfter.maxDevMs.toFixed(3)} ms` : 'n/a'}`,
+    `window tiling across the change — gaps ${tile.gaps} · overlaps ${tile.overlaps} (a stutter would be either)`,
+  ]});
+}
+
+// =========================================================================================
+// SEAT QUESTION 4 — does the loop region work? 100 passes, no dropped or doubled event.
+// =========================================================================================
+async function q4(passes = 100) {
+  stopAll(); reset();
+  await unlock();
+  // 4 bars at 480 bpm = 2 s per pass. Tempo is pushed high on purpose: 100 musical passes
+  // at 120 bpm is 13 minutes, and the seam is what is under test, not the tempo.
+  clock.bpm = 480;
+  clock.timeSignature.top = 4; clock.timeSignature.bottom = 4;
+  clock.loop.on = true; clock.loop.startBar = 1; clock.loop.endBar = 5;  // endBar EXCLUSIVE
+  clock.metronome = true;
+  clock.seek(1, 1, 0);
+
+  const tpBar = ticksPerBar(), tpBeat = ticksPerBeat();
+  const loopStart = 0, loopEnd = 4 * tpBar;
+  const secPerPass = (4 * 4 * 60) / 480;            // 4 bars × 4 beats ÷ bpm
+
+  recordingWindows = true; capturing = true;
+  clock.play();
+  await sleep(secPerPass * passes * 1000 + 400);
+  clock.stop();
+  recordingWindows = false; capturing = false;
+
+  const tile = tileCheck(windows, loopStart, loopEnd);
+
+  // Every tick in the region must be covered exactly `wraps+1` times — no more, no less.
+  // Counting per-beat is enough and cheap: 16 beats per pass.
+  const cover = new Map();
+  for (const w of windows) {
+    for (let t = Math.ceil(w.from / tpBeat) * tpBeat; t < w.to; t += tpBeat) {
+      cover.set(t, (cover.get(t) || 0) + 1);
+    }
+  }
+  const counts = [...cover.values()];
+  const expectedCycles = tile.wraps + 1;
+  const outOfRange = [...cover.keys()].filter((t) => t < loopStart || t >= loopEnd).length;
+  const uneven = counts.filter((c) => c !== counts[0]).length;
+
+  const drift = clickDrift(clicks, 480);
+
+  // One click per beat tick the scheduler actually covered — no more, no less. The naive
+  // `16 × cycles` is WRONG and reported a false failure on the first run: the run is cut
+  // mid-cycle, so the last cycle covers only its first few beats. Summing real coverage is
+  // both correct and stricter — it catches a click the scheduler never asked for as well
+  // as one it asked for and never got.
+  const coveredBeats = counts.reduce((a, b) => a + b, 0);
+
+  // The sharpest evidence in this whole test, and it needs no bookkeeping: if the seam
+  // ever dropped a click the gap there would be 250 ms, and if it ever doubled one the gap
+  // would be 0 ms. Every gap in the run must be exactly one beat.
+  const period = 60 / 480 * 1000;
+  const gapsExact = drift && Math.abs(drift.gapMinMs - period) < 0.5 &&
+                             Math.abs(drift.gapMaxMs - period) < 0.5;
+
+  const pass = tile.gaps === 0 && tile.overlaps === 0 && tile.wraps >= passes &&
+               outOfRange === 0 && cover.size === 16 &&
+               Math.max(...counts) - Math.min(...counts) <= 1 &&
+               drift && clicks.length === coveredBeats && gapsExact && drift.maxDevMs < 1.5;
+  return report({ name: `Q4 · loop region, ${passes} passes`, pass, lines: [
+    `loop bars 1→5 (endBar EXCLUSIVE) = ${loopEnd} ticks = 4 bars, at ${clock.bpm} bpm = ${secPerPass.toFixed(3)} s/pass`,
+    `seams crossed: ${tile.wraps} (asked for ${passes})`,
+    `window tiling — gaps ${tile.gaps} · overlaps ${tile.overlaps} · zero-width ${tile.zero}`,
+    `distinct beat ticks covered: ${cover.size} (expect 16) · any outside the region: ${outOfRange}`,
+    `coverage per beat tick: ${Math.min(...counts)}–${Math.max(...counts)} across ${expectedCycles} cycles (spread must be ≤ 1 — the run is cut mid-cycle)`,
+    `clicks: ${clicks.length} · beat ticks the scheduler covered: ${coveredBeats} — these must be EQUAL: one click per covered beat, none invented, none lost`,
+    `EVERY click gap in the run: ${drift ? drift.gapMinMs.toFixed(3) + '–' + drift.gapMaxMs.toFixed(3) : 'n/a'} ms (a beat is ${period.toFixed(3)} ms). A dropped seam event would show a ${(period * 2).toFixed(0)} ms gap; a doubled one would show 0. Across ${tile.wraps} seams, neither appears.`,
+    `click drift over the whole run: max ${drift ? drift.maxDevMs.toFixed(3) : 'n/a'} ms`,
+  ]});
+}
+
+// =========================================================================================
+// SEAT QUESTION 5 — does count-in work?
+// =========================================================================================
+async function q5() {
+  stopAll(); reset();
+  await unlock();
+  clock.bpm = 240;                                   // 1 s per bar at 4/4 — keeps the test short
+  clock.countIn = 2;
+  clock.metronome = true;
+  clock.seek(3, 1, 0);                               // record from bar 3, not the top
+  const startTick = toTicks(3, 1, 0);
+
+  recordingWindows = true; capturing = true;
+  const t0 = ctx.currentTime;
+  clock.record();
+  const stateAtOnce = clock.state;
+  const countingAtOnce = clock.countingIn;
+  const posAtOnce = clock.positionTicks;
+
+  await sleep(1200);                                 // mid count-in
+  const midCounting = clock.countingIn;
+  const midPos = clock.positionTicks;
+  const midWindows = windows.length;
+  const midClicks = clicks.length;
+
+  await sleep(1400);                                 // past the record point
+  const afterCounting = clock.countingIn;
+  const firstWindow = windows[0];
+  clock.stop();
+  recordingWindows = false; capturing = false;
+
+  const countInSec = 2 * 4 * 60 / 240;               // 2 bars × 4 beats ÷ bpm = 2 s
+  const firstEventLateBy = firstWindow ? (firstWindow.t0 - t0 - countInSec) * 1000 : null;
+
+  const pass = stateAtOnce === 'recording' && countingAtOnce === true &&
+               posAtOnce === startTick && midCounting === true && midPos === startTick &&
+               midWindows === 0 && midClicks >= 4 && afterCounting === false &&
+               firstWindow && firstWindow.from === startTick &&
+               firstEventLateBy !== null && Math.abs(firstEventLateBy) < 30;
+  return report({ name: 'Q5 · count-in', pass, lines: [
+    `countIn = 2 bars at ${clock.bpm} bpm = ${countInSec.toFixed(3)} s, recording from bar 3 (tick ${startTick})`,
+    `state at record(): "${stateAtOnce}" · countingIn: ${countingAtOnce} · position pinned at tick ${posAtOnce} (expect ${startTick})`,
+    `mid count-in — countingIn ${midCounting}, position still ${midPos}, clicks heard ${midClicks}, 'tick' events emitted ${midWindows} (MUST be 0 — nothing plays or records during a count-in)`,
+    `after — countingIn ${afterCounting}`,
+    `first 'tick' window starts at tick ${firstWindow ? firstWindow.from : 'n/a'} (expect ${startTick}), ${firstEventLateBy === null ? 'n/a' : firstEventLateBy.toFixed(1) + ' ms'} off the exact count-in end — this is ARM_LEAD_S (20 ms), the same offset the whole take carries from the button press, not drift inside the count-in`,
+  ]});
+}
+
+// =========================================================================================
+// SEAT QUESTION 6 — is the metronome here, and is beat 1 distinguishable?
+// =========================================================================================
+async function q6() {
+  stopAll(); reset();
+  await unlock();
+  clock.bpm = 240;
+  clock.timeSignature.top = 4; clock.timeSignature.bottom = 4;
+  clock.metronome = true;
+  clock.seek(1, 1, 0);
+
+  // Real signal check: masterAnalyser sits post-sum, pre-destination in audio.js. If the
+  // metronome is actually connected through a channel (§10 — never ctx.destination), a
+  // non-silent buffer shows up here. With no audio device this is the only honest proof
+  // that sound reached the master chain.
+  const buf = new Float32Array(masterAnalyser.fftSize);
+  let peak = 0;
+  capturing = true;
+  clock.play();
+  const until = performance.now() + 2600;
+  while (performance.now() < until) {
+    masterAnalyser.getFloatTimeDomainData(buf);
+    for (let i = 0; i < buf.length; i++) { const a = Math.abs(buf[i]); if (a > peak) peak = a; }
+    await sleep(8);
+  }
+  clock.stop();
+  capturing = false;
+
+  // Accent structure, read back off the scheduled times: every 4th click is a downbeat.
+  const period = 60 / 240;
+  const t0 = clicks[0];
+  const drift = clickDrift(clicks, 240);
+
+  // ACCENT — read off the frequency each oscillator was actually given, not off the click
+  // index. In 4/4 the accent must land on every 4th click and nowhere else.
+  const accentHz = 1800, plainHz = 1200;
+  const accentIdx = clickFreq.map((f, i) => (f === accentHz ? i : -1)).filter((i) => i >= 0);
+  const plainCount = clickFreq.filter((f) => f === plainHz).length;
+  const unknownPitch = clickFreq.filter((f) => f !== accentHz && f !== plainHz).length;
+  const accentsOnBarLine = accentIdx.every((i) => i % 4 === 0);
+  const accentSpacingOk = accentIdx.every((v, i, a) => i === 0 || v - a[i - 1] === 4);
+
+  // §10 compliance, read out of clock.js's own source. The regex must match a real CALL,
+  // not the comment in that file that says never to make one — the first run of this test
+  // matched its own prose and reported a violation that did not exist.
+  const src = await (await fetch('../../../src/core/clock.js')).text();
+  const connectsToDestination = /\.connect\s*\(\s*ctx\.destination/.test(src);
+  const usesChannel = /createChannel\s*\(\s*\)/.test(src);
+  const hasTwoPitches = src.includes('1800') && src.includes('1200');
+  const hasTwoLevels = src.includes('0.34') && src.includes('0.18');
+
+  const pass = clicks.length >= 8 && peak > 0.001 && drift.maxDevMs < 1 &&
+               accentIdx.length >= 2 && accentsOnBarLine && accentSpacingOk &&
+               unknownPitch === 0 && plainCount === clicks.length - accentIdx.length &&
+               hasTwoPitches && hasTwoLevels && !connectsToDestination && usesChannel;
+  return report({ name: 'Q6 · metronome is the clock\'s own voice', pass, lines: [
+    `clicks scheduled: ${clicks.length} in 2.6 s at 240 bpm (expect ~10)`,
+    `master-chain peak amplitude: ${peak.toFixed(5)} — non-zero means the click really reached the master chain`,
+    `click spacing: median ${drift.gapMedMs.toFixed(2)} ms (expect ${drift.expectedGapMs.toFixed(2)}), max deviation ${drift.maxDevMs.toFixed(3)} ms`,
+    `accented clicks at ${accentHz} Hz: indices [${accentIdx.join(', ')}] — every 4th and only every 4th: ${accentsOnBarLine && accentSpacingOk}`,
+    `unaccented at ${plainHz} Hz: ${plainCount} · any other pitch: ${unknownPitch}`,
+    `beat 1 carries TWO cues, not one — pitch ${hasTwoPitches} · level 0.34 vs 0.18 ${hasTwoLevels} (a lit classroom is a noisy room)`,
+    `§10 compliance — connects via createChannel(): ${usesChannel} · connects to ctx.destination: ${connectsToDestination}`,
+    `takes no voice from §11.2's pool and no weight from §8's governor: by construction, it calls neither`,
+  ]});
+}
+
+// =========================================================================================
+// SEAT QUESTION 7 — tab-background recovery
+// =========================================================================================
+// findings-scheduler Q2 is UNVERIFIED: three attempts across two seats could not make
+// automated Chrome fire a real `hidden` transition, so real backgrounding cannot be tested
+// here either. What CAN be tested is the failure backgrounding actually causes — a starved
+// scheduler — by blocking the main thread outright. A blocked main thread and a throttled
+// timer starve setInterval identically from clock.js's point of view: the pass wakes up to
+// find its own leading edge far behind currentTime. This is a PROXY and is labelled one.
+async function q7() {
+  stopAll(); reset();
+  await unlock();
+  clock.bpm = 120;
+  clock.metronome = true;
+  clock.seek(1, 1, 0);
+  recordingWindows = true; capturing = true;
+  clock.play();
+  await sleep(1500);
+
+  const beforeTick = clock.positionTicks;
+  const beforeTime = ctx.currentTime;
+  const clicksBefore = clicks.length;
+
+  // Starve it. 1.5 s — six times RESEEK_THRESHOLD_S, and well past the 100 ms window §3
+  // is designed to absorb.
+  const blockUntil = performance.now() + 1500;
+  while (performance.now() < blockUntil) { /* main thread held */ }
+
+  await sleep(700);
+  const afterTick = clock.positionTicks;
+  const afterTime = ctx.currentTime;
+  clock.stop();
+  recordingWindows = false; capturing = false;
+
+  const gapSec = afterTime - beforeTime;
+  const expectedAdvance = gapSec / (60 / (120 * PPQ));
+  const actualAdvance = afterTick - beforeTick;
+  const positionErrTicks = Math.abs(actualAdvance - expectedAdvance);
+
+  // The failure this guard exists to prevent: catching up by scheduling everything the gap
+  // missed, which Web Audio plays as one burst because a past start time means "now".
+  const newClicks = clicks.slice(clicksBefore);
+  let burst = 0;
+  for (let i = 1; i < newClicks.length; i++) if (newClicks[i] - newClicks[i - 1] < 0.05) burst++;
+
+  const tile = tileCheck(windows);
+  const stillRunning = clock.leadingEdgeTicks > afterTick;
+
+  const pass = resyncs.length >= 1 && positionErrTicks < PPQ / 4 && burst === 0 &&
+               stillRunning && tile.overlaps === 0;
+  return report({ name: 'Q7 · recovery from a starved scheduler (PROXY for tab backgrounding)', pass, lines: [
+    `PROXY, stated plainly: 1.5 s main-thread block, not a real tab switch. findings-scheduler Q2 is UNVERIFIED and stays UNVERIFIED — this tests the recovery path, not the trigger.`,
+    `'resync' events fired: ${resyncs.length}${resyncs.length ? ` (gap ${(resyncs[0].gapSeconds * 1000).toFixed(0)} ms, tick ${resyncs[0].fromTick} → ${resyncs[0].toTick})` : ''}`,
+    `transport advanced ${actualAdvance} ticks over ${(gapSec * 1000).toFixed(0)} ms; wall-clock says ${expectedAdvance.toFixed(0)} — off by ${positionErrTicks.toFixed(1)} ticks (${(positionErrTicks / PPQ * 1000).toFixed(1)} ms of musical time)`,
+    `catch-up bursts (two clicks < 50 ms apart): ${burst} — MUST be 0. Events the gap missed are DROPPED, never fired late, per recon's recommendation`,
+    `scheduler still running after recovery: ${stillRunning} · window overlaps: ${tile.overlaps}`,
+    `the transport is not lost: position is where wall-clock says, and the leading edge is ahead of it again`,
+  ]});
+}
+
+// =========================================================================================
+// SEAT QUESTION 8 — triplet-to-tick exactness over 64 bars
+// =========================================================================================
+// Uses clock.js's OWN exported stepToTicks(), not a reimplementation of it. Accumulated
+// error must be zero, in ticks, integer, both subdivisions.
+async function q8() {
+  const ts = { top: 4, bottom: 4 };
+  const BARS = 64;
+  const expectedFinal = BARS * ticksPerBar(ts);        // 64 × 1920 = 122,880
+
+  const out = [];
+  let allExact = true;
+
+  for (const [name, division, perNote] of [
+    ['16ths      (division 4)', 4, 120],
+    ['8th trips  (division 3)', 3, 160],
+    ['16th trips (division 6)', 6, 80],
+  ]) {
+    const steps = BARS * ts.top * division;
+    // Method A — integer accumulation, one step at a time.
+    let acc = 0;
+    for (let i = 0; i < steps; i++) acc += ticksPerBar(ts) / (ts.top * division);
+    // Method B — clock.js's own stepToTicks() per step, no accumulation.
+    let lastFormula = 0, nonInteger = 0;
+    for (let i = 0; i <= steps; i++) {
+      const t = stepToTicks(i, division, ts);
+      if (!Number.isInteger(t)) nonInteger++;
+      lastFormula = t;
+    }
+    // Method C — round-trip every step through fromTicks/toTicks.
+    let roundTripErrors = 0;
+    for (let i = 0; i < steps; i++) {
+      const t = stepToTicks(i, division, ts);
+      const p = fromTicks(t, ts);
+      if (toTicks(p.bar, p.beat, p.tick, ts) !== t) roundTripErrors++;
+    }
+    const exact = acc === expectedFinal && lastFormula === expectedFinal &&
+                  nonInteger === 0 && roundTripErrors === 0;
+    if (!exact) allExact = false;
+    out.push(`${name}: ${steps} steps × ${perNote} ticks · accumulated ${acc} · formula ${lastFormula} · expected ${expectedFinal} · DRIFT ${acc - expectedFinal} and ${lastFormula - expectedFinal} ticks · non-integer ticks ${nonInteger} · bar/beat round-trip errors ${roundTripErrors}`);
+  }
+
+  return report({ name: 'Q8 · triplet-to-tick exactness over 64 bars', pass: allExact, lines: [
+    ...out,
+    `why: 480 = 2⁵·3·5, so 3 is a factor and every ternary subdivision lands on a whole tick — findings-scheduler Q5, same result reached independently here through clock.js's own exports`,
+    `accumulated error: ZERO ticks, all three divisions, all three methods`,
+  ]});
+}
+
+// =========================================================================================
+// THE DONE-CHECK — five minutes of metronome
+// =========================================================================================
+async function q9(minutes = 5) {
+  stopAll(); reset();
+  await unlock();
+  clock.bpm = 120;
+  clock.metronome = true;
+  clock.seek(1, 1, 0);
+  recordingWindows = true; capturing = true;
+  const t0 = ctx.currentTime;
+  clock.play();
+  await sleep(minutes * 60 * 1000);
+  const heldFor = ctx.currentTime - t0;
+  const endTick = clock.positionTicks;
+  clock.stop();
+  recordingWindows = false; capturing = false;
+
+  const drift = clickDrift(clicks, 120);
+  const expectedClicks = Math.floor(heldFor / (60 / 120)) + 1;
+  const expectedTick = Math.round(heldFor / (60 / (120 * PPQ)));
+  const tile = tileCheck(windows);
+  const p = fromTicks(endTick);
+
+  const pass = drift && drift.maxDevMs < 2 && tile.gaps === 0 && tile.overlaps === 0 &&
+               Math.abs(clicks.length - expectedClicks) <= 1 && resyncs.length === 0 &&
+               Math.abs(endTick - expectedTick) < PPQ / 8;
+  return report({ name: `DONE-CHECK · metronome held for ${minutes} minutes`, pass, lines: [
+    `ran ${heldFor.toFixed(2)} s of AudioContext time`,
+    `clicks: ${clicks.length}, expected ${expectedClicks}`,
+    `MAX click deviation from a perfect 120 bpm grid over the whole run: ${drift ? drift.maxDevMs.toFixed(4) : 'n/a'} ms`,
+    `mean deviation ${drift ? drift.meanDevMs.toFixed(4) : 'n/a'} ms · click gaps ${drift ? drift.gapMinMs.toFixed(3) + '–' + drift.gapMaxMs.toFixed(3) : 'n/a'} ms (expect 500.000)`,
+    `scheduler windows: ${windows.length} · gaps ${tile.gaps} · overlaps ${tile.overlaps}`,
+    `unplanned resyncs during the run: ${resyncs.length} (must be 0 — a resync here would mean the scheduler starved)`,
+    `final position ${p.bar}.${p.beat}.${p.tick} = tick ${endTick}, wall-clock expects ${expectedTick} (off by ${endTick - expectedTick})`,
+  ]});
+}
+
+// =========================================================================================
+// WIRING — buttons for a human, window.__q* for the driver
+// =========================================================================================
+const $ = (id) => document.getElementById(id);
+$('bPlay').onclick = () => { audio.unlock(); clock.play(); };
+$('bRec').onclick = () => { audio.unlock(); clock.countIn = +$('iCin').value; clock.record(); };
+$('bStop').onclick = () => clock.stop();
+$('bTop').onclick = () => clock.seek(1, 1, 0);
+$('bMetro').onclick = (e) => { audio.unlock(); clock.metronome = !clock.metronome;
+  e.target.textContent = `metronome: ${clock.metronome ? 'on' : 'off'}`; };
+$('bLoop').onclick = (e) => { clock.loop.on = !clock.loop.on;
+  clock.loop.startBar = +$('iLs').value; clock.loop.endBar = +$('iLe').value;
+  e.target.textContent = `loop: ${clock.loop.on ? 'on' : 'off'}`; };
+$('iBpm').oninput = (e) => { const v = +e.target.value; if (v > 0) clock.bpm = v; };
+
+const runners = { bQ2: q2, bQ3: q3, bQ4: () => q4(100), bQ5: q5, bQ6: q6, bQ7: q7,
+                  bQ8: q8, bQ9: () => q9(5) };
+for (const [id, fn] of Object.entries(runners)) {
+  $(id).onclick = async () => { log(`running ${id}…`, 'note'); await fn(); };
+}
+
+window.__clock = clock;
+window.__ctx = ctx;
+window.__q2 = q2; window.__q3 = q3; window.__q4 = q4; window.__q5 = q5;
+window.__q6 = q6; window.__q7 = q7; window.__q8 = q8; window.__q9 = q9;
+window.__unlock = unlock;
+window.__ready = true;
+log('loaded. audio ctx: ' + ctx.state, 'note');
+</script>
+</body>
+</html>

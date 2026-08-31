@@ -1,0 +1,225 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>wave-voice test — P1/S3</title>
+<style>
+  body { font: 13px/1.4 monospace; background: #111; color: #ddd; padding: 16px; }
+  button { font: 13px monospace; padding: 8px 16px; }
+  #results { white-space: pre-wrap; margin-top: 16px; }
+  .pass { color: #6f6; }
+  .fail { color: #f66; }
+  #compact-mount { width: 320px; border: 1px dashed #444; margin-top: 10px; }
+  #expanded-mount { width: 640px; height: 260px; border: 1px dashed #444; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h3>wave-synth (P1/S3) — throwaway verification page</h3>
+<p>Imports <code>/src/core/audio.js</code> (frozen) and
+   <code>/src/instruments/wave-synth.js</code>. Click to run: this click is the real user
+   gesture the autoplay-unlock test needs.</p>
+<button id="run">Run Test</button>
+<div id="results"></div>
+<div>compact mount:</div>
+<div id="compact-mount"></div>
+<div>expanded mount:</div>
+<div id="expanded-mount"></div>
+
+<script type="module">
+import { ctx, audio, createChannel, releaseChannel, voicePool, governor } from '../../../src/core/audio.js';
+import WaveSynth from '../../../src/instruments/wave-synth.js';
+
+const results = [];
+const el = document.getElementById('results');
+
+function log(step, pass, detail) {
+  results.push({ step, pass, detail });
+  const line = document.createElement('div');
+  line.className = pass ? 'pass' : 'fail';
+  line.textContent = `[${pass ? 'PASS' : 'FAIL'}] ${step} — ${detail}`;
+  el.appendChild(line);
+  window.__RESULTS__ = results;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function maxDeviationFromSilence(analyser) {
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+  let max = 0;
+  for (let i = 0; i < data.length; i++) max = Math.max(max, Math.abs(data[i] - 128));
+  return max;
+}
+
+async function run() {
+  log('start', true, `ctx.state at load = "${ctx.state}" (expect "suspended")`);
+
+  await audio.unlock();
+  await wait(20);
+  log('unlock-on-gesture', ctx.state === 'running', `audio.state after unlock() = "${ctx.state}"`);
+
+  const channel = createChannel();
+  const synth = new WaveSynth(ctx, channel);
+
+  // ---- §2 static surface ----
+  log('static-id-label-playable', WaveSynth.id === 'wave-synth' && WaveSynth.label === 'Wave Synth' && WaveSynth.playable === true,
+    `id="${WaveSynth.id}" label="${WaveSynth.label}" playable=${WaveSynth.playable}`);
+  log('static-amendment-fields', WaveSynth.needsLoad === false && WaveSynth.pieces === null && WaveSynth.emitsNotes === false,
+    `needsLoad=${WaveSynth.needsLoad} pieces=${WaveSynth.pieces} emitsNotes=${WaveSynth.emitsNotes}`);
+
+  const readyResult = await synth.ready();
+  log('ready-resolves-immediately', readyResult === undefined, 'ready() resolved with no error, synchronously available');
+
+  // ---- Q1: four waveforms play, each produces a real non-silent signal ----
+  const analyser = synth.getAnalyser('spectrum');
+  log('getAnalyser-spectrum-not-null', analyser !== null, 'getAnalyser("spectrum") returned an AnalyserNode');
+  log('getAnalyser-scope-is-null', synth.getAnalyser('scope') === null,
+    'getAnalyser("scope") returned null — Wave Synth is spectrum-only, §11.4');
+
+  const waves = ['sine', 'triangle', 'square', 'saw'];
+  for (const w of waves) {
+    synth.setParam('osc.wave', w);
+    log(`setParam-osc.wave-${w}`, synth.getParam('osc.wave') === w, `getParam('osc.wave') = "${synth.getParam('osc.wave')}"`);
+    synth.noteOn(60, 0.9);
+    await wait(60);
+    const dev = maxDeviationFromSilence(analyser);
+    log(`noteOn-${w}-produces-signal`, dev > 0,
+      `wave="${w}": analyser max deviation from silence = ${dev}/128 (voiceCount=${synth.voiceCount}). ` +
+      `NOT verified by ear: this environment has no audio output device (outputLatency === 0).`);
+    synth.noteOff(60);
+    await wait(220); // let release (default 0.15s) + steal buffer complete
+  }
+  log('voices-cleared-after-releases', synth.voiceCount === 0, `voiceCount = ${synth.voiceCount} (expect 0)`);
+
+  // ---- Q2: getState/setState lossless round-trip through JSON ----
+  synth.setParam('osc.wave', 'triangle');
+  synth.setParam('osc.octave', -1);
+  synth.setParam('out.gain', 0.55);
+  synth.setParam('env.attack', 0.02);
+  synth.setParam('env.decay', 0.3);
+  synth.setParam('env.sustain', 0.4);
+  synth.setParam('env.release', 0.9);
+
+  const stateBefore = synth.getState();
+  const json = JSON.stringify(stateBefore);
+  const parsed = JSON.parse(json);
+  const isPlainJSONSafe = Object.values(stateBefore).every(
+    (v) => typeof v === 'number' || typeof v === 'string'
+  );
+  log('getState-is-json-safe', isPlainJSONSafe, `getState() = ${json}`);
+
+  // mutate away from stateBefore, then restore via setState and compare
+  synth.setParam('osc.wave', 'saw');
+  synth.setParam('osc.octave', 2);
+  synth.setParam('out.gain', 0.1);
+  synth.setState(parsed);
+  const stateAfter = synth.getState();
+  const roundTripEqual = JSON.stringify(stateAfter) === json;
+  log('getState-setState-round-trip', roundTripEqual,
+    `before=${json} after=${JSON.stringify(stateAfter)}`);
+
+  // ---- Q3/Q4: voice cap + stealing + honest governor reporting ----
+  synth.setParam('env.release', 4.0); // hold voices open (near max release) so the cap fills before any free
+  synth.setParam('env.attack', 0.001);
+  synth.setParam('env.decay', 0.001);
+
+  // drain any other live voices in the shared DAW-wide pool first, so this test owns the
+  // full 32-voice budget cleanly (voicePool is shared across every instrument, §11.2).
+  log('pool-empty-before-cap-test', voicePool.count === 0, `voicePool.count = ${voicePool.count} before filling`);
+
+  for (let i = 0; i < 32; i++) {
+    synth.noteOn(40 + i, 0.7);
+  }
+  await wait(30);
+  log('fills-to-32-voice-cap', voicePool.count === 32 && synth.voiceCount === 32,
+    `voicePool.count=${voicePool.count} synth.voiceCount=${synth.voiceCount} (expect 32/32)`);
+  log('cpuWeight-honest-at-cap', synth.cpuWeight === 32 * 10 + 2,
+    `cpuWeight=${synth.cpuWeight} (expect 32 voices * 10 + 2 for the always-on analyser = 322)`);
+
+  const refused = governor.request(10);
+  log('governor-refuses-at-cap', refused === false, `governor.request(10) at count=32 -> ${refused}`);
+
+  // the 33rd note must still sound — steal-and-retry, never a dead key (§10-A)
+  synth.noteOn(90, 0.9);
+  await wait(30);
+  log('note-never-refused-steals-correctly', voicePool.count === 32,
+    `voicePool.count = ${voicePool.count} after a 33rd noteOn (expect still 32 — one stolen, one new)`);
+
+  synth.allNotesOff();
+  await wait(4300); // release=4.0s + steal buffer, generous margin
+  log('voices-cleared-after-allNotesOff', synth.voiceCount === 0 && voicePool.count === 0,
+    `synth.voiceCount=${synth.voiceCount} voicePool.count=${voicePool.count} (expect 0/0)`);
+
+  synth.setState(parsed); // restore sane defaults for the mount demo below
+
+  // ---- Q5: mountCompact vs mountExpanded, both live, both reading tokens.css vars ----
+  const compactEl = document.getElementById('compact-mount');
+  const expandedEl = document.getElementById('expanded-mount');
+  synth.mountCompact(compactEl);
+  synth.mountExpanded(expandedEl);
+
+  const compactRoot = compactEl.querySelector('.ws-root');
+  const expandedRoot = expandedEl.querySelector('.ws-root');
+  log('mountCompact-rendered', !!compactRoot && compactRoot.classList.contains('ws-compact'),
+    'compact container has a .ws-root.ws-compact child');
+  log('mountExpanded-rendered', !!expandedRoot && expandedRoot.classList.contains('ws-expanded'),
+    'expanded container has a .ws-root.ws-expanded child');
+
+  // clicking a wave button in the compact mount must update state AND the expanded mount
+  const compactSquareBtn = compactRoot.querySelector('[data-wave-btn="square"]');
+  compactSquareBtn.click();
+  await wait(10);
+  const expandedSquareBtn = expandedRoot.querySelector('[data-wave-btn="square"]');
+  log('mounts-share-instrument-state', synth.getParam('osc.wave') === 'square' &&
+    compactSquareBtn.classList.contains('active') && expandedSquareBtn.classList.contains('active'),
+    `getParam='${synth.getParam('osc.wave')}', both mounts show "square" active — same instrument, two layouts`);
+
+  // compact never animates; expanded does, while a voice is live
+  synth.noteOn(60, 0.8);
+  await wait(10);
+  log('expanded-animates-compact-does-not',
+    expandedRoot.classList.contains('ws-playing') && !compactRoot.classList.contains('ws-playing'),
+    `expanded ws-playing=${expandedRoot.classList.contains('ws-playing')}, compact ws-playing=${compactRoot.classList.contains('ws-playing')}`);
+  synth.noteOff(60);
+  await wait(400);
+
+  // ---- Q6: analysis tap only — confirm no drawing surface was added ----
+  log('no-canvas-or-drawing-added-by-instrument',
+    !compactRoot.querySelector('canvas') && !expandedRoot.querySelector('canvas'),
+    'neither mount contains a <canvas> — this file exposes the tap only, scopes draws it');
+
+  // ---- Q7: unmount, then dispose — zero leaked nodes/listeners, verifiable by count ----
+  const listenersDroppedByUnmount = synth.unmount();
+  log('unmount-clears-both-containers', compactEl.innerHTML === '' && expandedEl.innerHTML === '',
+    `both containers empty after unmount(); reported listenersDropped=${listenersDroppedByUnmount}`);
+
+  // remount briefly to prove dispose() itself also tears down cleanly even while mounted
+  synth.mountCompact(compactEl);
+  synth.mountExpanded(expandedEl);
+
+  const teardown = synth.dispose();
+  log('dispose-returns-counts', teardown.nodesDisconnected === 2,
+    `dispose() -> nodesDisconnected=${teardown.nodesDisconnected} (mixGain+analyser=2), ` +
+    `listenersDropped=${teardown.listenersDropped}`);
+  log('dispose-clears-mounts', compactEl.innerHTML === '' && expandedEl.innerHTML === '',
+    'both mount containers empty after dispose()');
+  log('dispose-clears-voices', synth.voiceCount === 0, `voiceCount after dispose = ${synth.voiceCount}`);
+
+  releaseChannel(channel);
+
+  const allPassed = results.every((r) => r.pass);
+  log('SUMMARY', allPassed, allPassed ? 'all checks passed' : 'see FAIL lines above');
+  window.__DONE__ = true;
+}
+
+document.getElementById('run').addEventListener('click', () => {
+  run().catch((err) => {
+    log('UNCAUGHT-ERROR', false, String((err && err.stack) || err));
+    window.__DONE__ = true;
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+/* =====================================================================================
+   skin-smoketest.css — the S2 DONE-CHECK skin. Owning spec: Builddocs/skinspecs/S2 §DONE.
+
+   THIS IS NOT A SKIN ANYONE SHIPS. It is deliberately hideous and deliberately EXTREME:
+   every knob is slammed to the opposite of the default so that any site the sweep missed
+   is impossible to miss by eye. A tasteful test skin proves nothing — a 1px difference
+   hides, a serif-on-cream-with-square-corners difference does not.
+
+   HOW TO RUN: load AFTER ui/tokens.css in each of the four tools, change nothing else.
+       <link rel="stylesheet" href="../src/ui/tokens.css">
+       <link rel="stylesheet" href="../docs/scratchpad/skin-smoketest.css">   <!-- add -->
+
+   PASS: every tool goes light, square, airy, serif, flat and still.
+   FAIL: anything that stays dark, round, tight, sans, shadowed or animated is a site S2
+         missed. Note the selector in your receipt's SKIN CHECK.
+
+   It only overrides :root custom properties. It contains no selectors of its own. That
+   constraint IS the test — see S3 §2, rule 1.
+   ===================================================================================== */
+
+:root {
+  /* --- the four dials, all slammed --------------------------------------------- */
+  --fs-root: 17px;   /* 12 → 17 : every text in the app must visibly grow          */
+  --sp-unit: 5px;    /*  2 →  5 : everything must visibly spread apart             */
+  --r-unit:  0px;    /*  2 →  0 : every rounded corner must go SQUARE              */
+  --bw:      3px;    /*  1 →  3 : every border must go heavy                       */
+
+  /* --- faces ------------------------------------------------------------------- */
+  --font-ui:   Georgia, "Times New Roman", serif;   /* sans → serif, unmissable    */
+  --font-mono: Courier, monospace;
+
+  /* --- motion: a still skin ---------------------------------------------------- */
+  --dur-fast: 0ms;
+  --dur-med:  0ms;
+
+  /* --- depth: a flat skin ------------------------------------------------------ */
+  --shadow-raised: none;
+  --shadow-lifted: none;
+  --glow: 0 0 0;
+  --ring-w: 4px;
+
+  /* --- ground: dark → light, the loudest possible signal ------------------------ */
+  --bg:       #fdf6e3;
+  --panel:    #eee8d5;
+  --line:     #93a1a1;
+  --text:     #002b36;
+  --text-dim: #657b83;
+
+  /* --- degree colours -----------------------------------------------------------
+     NOTE: these are shifted only enough to be visibly different. This file is a
+     PLUMBING test, not a candidate palette — it does NOT satisfy the teaching
+     invariant in S3 §3 and must never be validated, shipped, or copied as a
+     starting point for a real skin. Start from S3's template instead.          */
+  --deg-major:   #b58900;
+  --deg-minor:   #268bd2;
+  --deg-dim:     #d33682;
+  --deg-aug:     #dc322f;
+  --deg-altered: #6c71c4;
+
+  --accent:    #2aa198;
+  --warn:      #cb4b16;
+  --meter-ok:  #859900;
+  --meter-hot: #dc322f;
+}

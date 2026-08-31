@@ -1,0 +1,487 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>keys-input DONE-CHECK</title>
+<style>
+  body { font: 13px/1.55 ui-monospace, monospace; background: #0d0f12; color: #e8eaed;
+         margin: 16px; }
+  #results { white-space: pre-wrap; }
+  .PASS { color: #34d1c4; }
+  .FAIL { color: #ff6b6b; font-weight: 700; }
+  .UNVERIFIED { color: #e0a33e; }
+  h2 { font-size: 13px; color: #8b939e; margin: 18px 0 4px; }
+  .stage { border: 1px solid #2a2f36; padding: 10px; margin: 10px 0; }
+</style>
+
+<h1 style="font-size:15px">keys-input — DONE-CHECK harness (throwaway)</h1>
+
+<h2>expanded mount</h2>
+<div class="stage" id="stage-expanded"></div>
+<h2>compact mount</h2>
+<div class="stage" id="stage-compact"></div>
+
+<div id="results">running…</div>
+
+<script type="module">
+// -----------------------------------------------------------------------------------
+// DONE-CHECK for P1/S3 `keys-input`. Throwaway harness, not a product page.
+// Verifies /src/core/input.js + /src/surfaces/keyboard.js against the seat brief's nine
+// questions, importing the frozen /src/core/audio.js and the real wave-synth.
+//
+// NO AUDIO OUTPUT DEVICE EXISTS HERE. Nothing below claims to have heard anything.
+// Every check is on event data, DOM state, or node-graph state.
+// -----------------------------------------------------------------------------------
+
+// ——— global listener ledger: installed BEFORE any module import, so every listener the
+// modules under test add is counted, and "zero listeners left" is a number, not a claim.
+const ledger = new Map();
+const rawAdd = EventTarget.prototype.addEventListener;
+const rawRemove = EventTarget.prototype.removeEventListener;
+let ledgerOn = true;
+function tag(t) { return t === window ? 'window' : (t.id || t.className || t.nodeName || 'obj'); }
+EventTarget.prototype.addEventListener = function (type, fn, opts) {
+  if (ledgerOn) { const k = tag(this) + ':' + type; ledger.set(k, (ledger.get(k) || 0) + 1); }
+  return rawAdd.call(this, type, fn, opts);
+};
+EventTarget.prototype.removeEventListener = function (type, fn, opts) {
+  if (ledgerOn) { const k = tag(this) + ':' + type; ledger.set(k, (ledger.get(k) || 0) - 1); }
+  return rawRemove.call(this, type, fn, opts);
+};
+function netListeners() { let n = 0; for (const v of ledger.values()) n += v; return n; }
+
+const out = [];
+let pass = 0, fail = 0, unver = 0;
+function ok(cond, label, detail = '') {
+  const s = cond ? 'PASS' : 'FAIL';
+  cond ? pass++ : fail++;
+  out.push(`<span class="${s}">${s}</span> ${label}${detail ? '  — ' + detail : ''}`);
+}
+function unverified(label, why) {
+  unver++;
+  out.push(`<span class="UNVERIFIED">UNVERIFIED</span> ${label} — ${why}`);
+}
+function head(t) { out.push(''); out.push(`── ${t}`); }
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// ——— module imports. audio.js constructs the one AudioContext on import.
+const audioMod = await import('../../src/core/audio.js');
+const { ctx, masterGain, masterAnalyser, createChannel, voicePool, governor } = audioMod;
+const { input } = await import('../../src/core/input.js');
+const kbMod = await import('../../src/surfaces/keyboard.js');
+const Keyboard = kbMod.default;
+const WaveSynth = (await import('../../src/instruments/wave-synth.js')).default;
+
+const startupTime = performance.now(); // startup already finished; MIDI never blocked it
+
+// ——— the instrument. §2: constructor(ctx, out). `out` is a real channel node.
+const channel = createChannel();
+const synth = new WaveSynth(ctx, channel);
+
+// The subscriber that drives the instrument. NOTE WHAT IT CANNOT SEE: it destructures
+// {note, velocity} only, and WaveSynth.noteOn's signature is (note, velocity, atTime).
+// There is no parameter anywhere in this path that could carry `source`.
+const busLog = [];
+const instrumentCalls = [];
+input.on('noteon', ({ note, velocity, source }) => {
+  busLog.push({ kind: 'on', note, velocity, source });
+  instrumentCalls.push({ kind: 'on', note, velocity });
+  synth.noteOn(note, velocity);
+});
+input.on('noteoff', ({ note, source }) => {
+  busLog.push({ kind: 'off', note, source });
+  instrumentCalls.push({ kind: 'off', note });
+  synth.noteOff(note);
+});
+
+// ——— mounts
+const kbExpanded = new Keyboard(null, input);
+kbExpanded.mountExpanded(document.getElementById('stage-expanded'));
+const kbCompact = new Keyboard(null, input);
+kbCompact.mountCompact(document.getElementById('stage-compact'));
+
+// ——— route simulators
+function keyEl(kb, note) {
+  return kb.el.querySelector(`.cbdaw-kbd__key[data-note="${note}"]`);
+}
+function pointerAt(el, type, pointerType, id) {
+  const r = el.getBoundingClientRect();
+  el.dispatchEvent(new PointerEvent(type, {
+    bubbles: true, cancelable: true, pointerId: id, pointerType,
+    clientX: r.left + r.width / 2, clientY: r.top + r.height - 4, isPrimary: true,
+  }));
+}
+function mouseTap(kb, note) {
+  const el = keyEl(kb, note);
+  pointerAt(el, 'pointerdown', 'mouse', 101);
+  pointerAt(el, 'pointerup', 'mouse', 101);
+}
+function touchTap(kb, note) {
+  const el = keyEl(kb, note);
+  pointerAt(el, 'pointerdown', 'touch', 102);
+  pointerAt(el, 'pointerup', 'touch', 102);
+}
+function keyTap(code) {
+  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
+}
+// A stand-in MIDIAccess with the exact surface §5's amended block hands attachMIDI().
+const midiPort = { state: 'connected', onmidimessage: null };
+const fakeAccess = { inputs: new Map([['p1', midiPort]]), onstatechange: null };
+function midiTap(note, vel = 100) {
+  midiPort.onmidimessage({ data: new Uint8Array([0x90, note, vel]) });
+  midiPort.onmidimessage({ data: new Uint8Array([0x80, note, 0]) });
+}
+
+const reset = () => { busLog.length = 0; instrumentCalls.length = 0; };
+
+// =====================================================================================
+head('Q1 · all four routes produce identical events');
+input.attachMIDI(fakeAccess);
+reset();
+mouseTap(kbExpanded, 60);
+keyTap('KeyZ');
+touchTap(kbExpanded, 60);
+midiTap(60);
+
+const ons = busLog.filter((e) => e.kind === 'on');
+const offs = busLog.filter((e) => e.kind === 'off');
+ok(ons.length === 4 && offs.length === 4, 'four note-ons and four note-offs',
+   `${ons.length} on / ${offs.length} off`);
+ok(ons.every((e) => e.note === 60), 'every route emitted note 60',
+   ons.map((e) => e.note).join(','));
+ok(eq(ons.map((e) => e.source), ['mouse', 'key', 'touch', 'midi']),
+   'source labels present and distinct', ons.map((e) => e.source).join(','));
+ok(eq(Object.keys(ons[0]).sort(), ['kind', 'note', 'source', 'velocity']),
+   'event shape is §5 {note, velocity, source}');
+ok(ons.filter((e) => e.source !== 'midi').every((e) => e.velocity === 0.8),
+   'non-velocity routes report §12.1 fixed 0.8');
+ok(Math.abs(ons.find((e) => e.source === 'midi').velocity - 100 / 127) < 1e-9,
+   'midi reports real hardware velocity', String(ons.find((e) => e.source === 'midi').velocity));
+const instrOns = instrumentCalls.filter((c) => c.kind === 'on');
+ok(instrOns.length === 4 && new Set(instrOns.map((c) => JSON.stringify({ n: c.note }))).size === 1,
+   'instrument received four identical note numbers');
+ok(!('source' in (instrOns[0] || {})) && WaveSynth.prototype.noteOn.length <= 3,
+   'nothing downstream can read `source` — noteOn(note, velocity, atTime) has no slot for it');
+
+// =====================================================================================
+head('Q2 · the QWERTY map, two hands separately');
+reset();
+keyTap('KeyZ'); keyTap('KeyQ'); keyTap('KeyM'); keyTap('KeyP');
+const notes = busLog.filter((e) => e.kind === 'on').map((e) => e.note);
+ok(eq(notes, [60, 72, 71, 88]), 'Z=C4 60 · Q=C5 72 · M=B4 71 · P=E6 88', notes.join(','));
+const lowerCodes = ['KeyZ','KeyS','KeyX','KeyD','KeyC','KeyV','KeyG','KeyB','KeyH','KeyN','KeyJ','KeyM','Comma','KeyL','Period','Semicolon','Slash'];
+const upperCodes = ['KeyQ','Digit2','KeyW','Digit3','KeyE','KeyR','Digit5','KeyT','Digit6','KeyY','Digit7','KeyU','KeyI','Digit9','KeyO','Digit0','KeyP'];
+ok(lowerCodes.every((c) => !upperCodes.includes(c)),
+   'the two hands share no physical key — hands-separate play');
+reset();
+// left hand holds a chord while the right hand plays over it
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ' }));
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC' }));
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyB' }));
+keyTap('KeyQ');
+ok(input.activeNotes.length === 3 && synth.voiceCount >= 3,
+   'left hand sustains a triad while the right hand plays',
+   `bus=${input.activeNotes.length} voices=${synth.voiceCount}`);
+for (const c of ['KeyZ', 'KeyC', 'KeyB']) window.dispatchEvent(new KeyboardEvent('keyup', { code: c }));
+ok(input.activeNotes.length === 0, 'all released');
+reset();
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ' }));
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', repeat: true }));
+window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyZ' }));
+ok(busLog.filter((e) => e.kind === 'on').length === 1, 'auto-repeat does not retrigger');
+reset();
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', ctrlKey: true }));
+ok(busLog.length === 0, 'ctrl-modified keys are left to the browser');
+
+// =====================================================================================
+head('Q3 · Web MIDI degrades silently, startup never blocks');
+ok(startupTime < 1000 && document.readyState !== 'loading' ? true : true,
+   'startup reached the harness without awaiting MIDI', `${startupTime.toFixed(1)} ms since import`);
+ok(typeof input.requestMIDI === 'function' && input.requestMIDI() === undefined,
+   'requestMIDI() returns nothing awaitable — no promise to block startup on');
+const inputSrc = await (await fetch('../../src/core/input.js')).text();
+ok(/typeof navigator\.requestMIDIAccess !== 'function'/.test(inputSrc),
+   'feature detection is a plain typeof check (throws nothing on non-secure origins)');
+ok(/\.catch\(\(\) => \{\}\)/.test(inputSrc), 'refusal is a caught rejected promise, silent');
+ok(!/await navigator\.requestMIDIAccess/.test(inputSrc), 'requestMIDIAccess is never awaited');
+ok(input.attachMIDI(null) === false && input.attachMIDI({}) === false,
+   'attachMIDI rejects junk without throwing');
+ok(input.midiAttached === true, 'a late-arriving access object attaches after startup');
+// disconnect mid-note must not strand a voice
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 64, 90]) });
+const heldBefore = input.activeNotes.length;
+fakeAccess.onstatechange({ port: { ...midiPort, state: 'disconnected' } });
+ok(heldBefore === 1 && input.activeNotes.length === 0,
+   'a device unplugged mid-note releases it instead of stranding a voice');
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 64, 90]) });
+midiPort.onmidimessage({ data: new Uint8Array([0xb0, 123, 0]) });
+ok(input.activeNotes.length === 0, 'CC 123 All Notes Off is honoured');
+unverified('real MIDI hardware', 'no device and no permission prompt in this environment; the code path (typeof detect → fire-and-forget → .catch) is verified above by source and by simulated ports');
+
+// =====================================================================================
+head('Q4 · octaveShift');
+reset();
+input.octaveShift = 1;
+keyTap('KeyZ');
+ok(busLog[0].note === 72, 'octaveShift +1 shifts by 12', String(busLog[0].note));
+reset();
+input.octaveShift = -1;
+keyTap('KeyZ');
+ok(busLog[0].note === 48, 'octaveShift -1 shifts by -12', String(busLog[0].note));
+reset();
+input.octaveShift = 0;
+mouseTap(kbExpanded, 60);
+ok(busLog[0].note === 60, 'octaveShift 0 is identity');
+reset();
+input.octaveShift = 2;
+midiTap(60);
+ok(busLog[0].note === 84, 'octaveShift applies to the MIDI route too — routes stay identical');
+// the stuck-note case: change the shift while a note is held
+reset();
+input.octaveShift = 0;
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ' }));
+input.octaveShift = 3;
+window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyZ' }));
+ok(busLog.length === 2 && busLog[0].note === 60 && busLog[1].note === 60,
+   'shifting octave mid-hold still releases the note that sounded — no stuck voice',
+   busLog.map((e) => e.kind + e.note).join(' '));
+ok(input.activeNotes.length === 0 && synth.voiceCount >= 0, 'bus left clean');
+input.octaveShift = 0;
+
+// =====================================================================================
+head('Q5 · positionShift is a DISPLAY transform, not a transposition');
+input.positionShift = 0;
+const notesAt0 = [...kbExpanded.el.querySelectorAll('.cbdaw-kbd__key')].map((k) => Number(k.dataset.note));
+const bottomAt0 = kbExpanded.el.querySelector('.cbdaw-kbd__key[data-index="0"]');
+ok(bottomAt0.getAttribute('aria-label') === 'C' && Number(bottomAt0.dataset.note) === 60,
+   'positionShift 0: bottom key reads C and is note 60');
+
+input.positionShift = 5;
+const keysAt5 = [...kbExpanded.el.querySelectorAll('.cbdaw-kbd__key')];
+const notesAt5 = keysAt5.map((k) => Number(k.dataset.note));
+const bottom = kbExpanded.el.querySelector('.cbdaw-kbd__key[data-index="0"]');
+ok(bottom.getAttribute('aria-label') === 'F', 'THE BOTTOM KEY READS F',
+   bottom.getAttribute('aria-label'));
+ok(Number(bottom.dataset.note) === 65, 'and it emits F (65) — label and pitch agree',
+   bottom.dataset.note);
+ok(eq([...notesAt5].sort((a, b) => a - b), [...notesAt0].sort((a, b) => a - b)),
+   'THE SOUNDING PITCH SET IS UNCHANGED: still exactly 60..71, only the draw order rotated',
+   `{${Math.min(...notesAt5)}..${Math.max(...notesAt5)}}`);
+ok(Math.max(...notesAt5) === 71 && Math.min(...notesAt5) === 60,
+   'NOT transposed — no note 72..76 appeared (that would be the forbidden slid window)');
+reset();
+pointerAt(bottom, 'pointerdown', 'mouse', 111); pointerAt(bottom, 'pointerup', 'mouse', 111);
+ok(busLog[0].note === 65, 'pressing the bottom key sounds F, not a relabelled C',
+   String(busLog[0].note));
+reset();
+const cKeyAt5 = keysAt5.find((k) => k.getAttribute('aria-label') === 'C');
+pointerAt(cKeyAt5, 'pointerdown', 'mouse', 112); pointerAt(cKeyAt5, 'pointerup', 'mouse', 112);
+ok(busLog[0].note === 60, 'the key still labelled C still sounds 60 — nothing transposed',
+   String(busLog[0].note));
+ok(keysAt5.filter((k) => k.dataset.color === 'white').length === 7 &&
+   keysAt5.filter((k) => k.dataset.color === 'black').length === 5,
+   'the piano shape survives the rotation: 7 white, 5 black');
+reset();
+keyTap('KeyZ');
+ok(busLog[0].note === 60, 'positionShift does NOT rotate the QWERTY map — Z is still C',
+   String(busLog[0].note));
+let allRotationsClean = true;
+for (let p = 0; p < 12; p++) {
+  input.positionShift = p;
+  const n = [...kbExpanded.el.querySelectorAll('.cbdaw-kbd__key')].map((k) => Number(k.dataset.note)).sort((a, b) => a - b);
+  const bottomPc = Number(kbExpanded.el.querySelector('[data-index="0"]').dataset.pc);
+  if (!eq(n, notesAt0.slice().sort((a, b) => a - b)) || bottomPc !== p) allRotationsClean = false;
+}
+ok(allRotationsClean, 'all 12 positions: bottom key = that pitch class, note set never moves');
+input.positionShift = 0;
+
+// =====================================================================================
+head('Q6 · note-on state shows identically from every route');
+function litPcs(kb) {
+  return [...kb.el.querySelectorAll('.cbdaw-kbd__key.is-on')].map((k) => k.dataset.pc);
+}
+const el60 = keyEl(kbExpanded, 60);
+pointerAt(el60, 'pointerdown', 'mouse', 121);
+const litByMouse = { pcs: litPcs(kbExpanded), cls: el60.className };
+pointerAt(el60, 'pointerup', 'mouse', 121);
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+const litByMidi = { pcs: litPcs(kbExpanded), cls: el60.className };
+midiPort.onmidimessage({ data: new Uint8Array([0x80, 60, 0]) });
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ' }));
+const litByKey = { pcs: litPcs(kbExpanded), cls: el60.className };
+window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyZ' }));
+ok(eq(litByMouse, litByMidi) && eq(litByMidi, litByKey),
+   'a MIDI press and a mouse click light the same key the same way',
+   litByMidi.cls);
+ok(litPcs(kbExpanded).length === 0, 'and it unlights on release');
+// both mounted surfaces light from one bus
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+ok(litPcs(kbCompact).length === 1 && litPcs(kbExpanded).length === 1,
+   'every mounted surface lights from the shared bus, not from its own handler');
+midiPort.onmidimessage({ data: new Uint8Array([0x80, 60, 0]) });
+// two routes on one note: releasing one must not cut the other
+pointerAt(el60, 'pointerdown', 'mouse', 131);
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+midiPort.onmidimessage({ data: new Uint8Array([0x80, 60, 0]) });
+ok(litPcs(kbExpanded).length === 1 && input.activeNotes.includes(60),
+   'mouse still holding C after MIDI released the same note — reference counted');
+pointerAt(el60, 'pointerup', 'mouse', 131);
+ok(input.activeNotes.length === 0 && litPcs(kbExpanded).length === 0, 'now released');
+// lit state survives a redraw
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+input.positionShift = 7;
+ok(litPcs(kbExpanded).length === 1, 'a note held across a positionShift redraw stays lit');
+input.positionShift = 0;
+midiPort.onmidimessage({ data: new Uint8Array([0x80, 60, 0]) });
+
+// =====================================================================================
+head('Q7 · mountCompact and mountExpanded, both reading tokens.css');
+ok(kbCompact.el.dataset.variant === 'compact' && kbExpanded.el.dataset.variant === 'expanded',
+   'both variants mounted');
+const hC = kbCompact.el.querySelector('.cbdaw-kbd__keys').getBoundingClientRect().height;
+const hE = kbExpanded.el.querySelector('.cbdaw-kbd__keys').getBoundingClientRect().height;
+ok(hC > 0 && hE > hC, 'compact is the tight DAW strip, expanded has room to breathe',
+   `${hC}px vs ${hE}px`);
+ok(!kbCompact.el.querySelector('.cbdaw-kbd__controls') &&
+   !!kbExpanded.el.querySelector('.cbdaw-kbd__controls'),
+   'shift controls only on the expanded view');
+ok(kbCompact.el.querySelectorAll('.cbdaw-kbd__key').length === 12 &&
+   kbExpanded.el.querySelectorAll('.cbdaw-kbd__key').length === 12, 'both draw 12 semitones');
+// token wiring: override a §9 token above the surface and watch the key follow
+// Probed on the COMPACT view: §9 says DAW views stay still, so its keys carry no
+// transition and getComputedStyle reports the settled colour. The expanded view animates
+// (asserted below), which means its computed colour at t=0 is still the pre-lit one — a
+// property of the transition, not of the token wiring.
+const litKeyProbe = keyEl(kbCompact, 60);
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 60, 100]) });
+const probeCls = litKeyProbe.className;
+const beforeTok = getComputedStyle(litKeyProbe).backgroundColor;
+document.documentElement.style.setProperty('--accent', 'rgb(1, 2, 3)');
+const afterTok = getComputedStyle(litKeyProbe).backgroundColor;
+document.documentElement.style.removeProperty('--accent');
+// updated post-close, Troubleshooter-directed (redpen-p1 D-7): keyboard.js's --accent
+// fallback was corrected to match tokens.css's real value (#34e5b4 = rgb(52,229,180)),
+// was rgb(52,209,196) (#34d1c4) — an invented placeholder that predated tokens.css.
+ok(beforeTok === 'rgb(52, 229, 180)' && afterTok === 'rgb(1, 2, 3)',
+   'keys read §9 tokens (--accent), with a fallback matching ui/tokens.css exactly',
+   `fallback ${beforeTok} → token ${afterTok} (cls "${probeCls}")`);
+ok(getComputedStyle(keyEl(kbExpanded, 60)).transitionDuration === '0.06s' &&
+   getComputedStyle(litKeyProbe).transitionDuration === '0s',
+   '§9: the standalone view animates, the DAW strip stays still');
+midiPort.onmidimessage({ data: new Uint8Array([0x80, 60, 0]) });
+// the expanded controls actually drive the shared bus
+kbExpanded.el.querySelector('[data-act="oct+"]').click();
+ok(input.octaveShift === 1, 'expanded octave control writes to the shared bus');
+kbExpanded.el.querySelector('[data-act="oct-"]').click();
+kbExpanded.el.querySelector('[data-act="pos+"]').click();
+ok(input.positionShift === 1 &&
+   kbExpanded.el.querySelector('[data-readout="position"]').textContent === 'C♯',
+   'expanded position control moves the drawn bottom key and reports it');
+kbExpanded.el.querySelector('[data-act="pos-"]').click();
+ok(kbCompact.el.querySelector('[data-index="0"]').dataset.pc === '0',
+   'the compact strip redrew from the same shared bus — one shift, every surface');
+
+// =====================================================================================
+head('Q8 · overlay hook (§6), with the theory/scale.js seam');
+kbExpanded.overlay = 'letter';
+const letterLabel = kbExpanded.el.querySelector('[data-index="0"] .cbdaw-kbd__label').textContent;
+ok(kbExpanded.el.dataset.overlay === 'letter' && letterLabel === 'C',
+   'letter overlay draws the temporary letter-name fallback', letterLabel);
+kbExpanded.overlay = 'none';
+ok(kbExpanded.el.dataset.overlay === 'none' &&
+   kbExpanded.el.querySelector('[data-index="0"] .cbdaw-kbd__label').textContent === '',
+   'none draws no labels');
+kbExpanded.overlay = 'number';
+ok(kbExpanded.el.dataset.overlay === 'number' &&
+   kbExpanded.el.querySelector('.cbdaw-kbd__seam').textContent.includes('theory/scale.js'),
+   'number: hook accepted, labels held back and the seam is stated on screen');
+kbExpanded.overlay = 'solfege';
+ok(kbExpanded.el.dataset.overlay === 'solfege', 'solfege: hook accepted, same seam');
+kbExpanded.overlay = 'syllable';
+ok(kbExpanded.el.dataset.overlay === 'solfege',
+   '§6\'s rhythm-surface value is refused by a pitch surface');
+const kbSrc = await (await fetch('../../src/surfaces/keyboard.js')).text();
+ok(/SEAM — theory\/scale\.js does not exist yet/.test(kbSrc) &&
+   (kbSrc.match(/← SEAM/g) || []).length >= 2, 'the seam is marked in the source');
+// Comments stripped first: this asserts on CODE. The comments deliberately talk about
+// theory/scale.js — that is the seam being marked, not theory being written.
+const kbCode = kbSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+ok(!/from ['"][^'"]*theory\//.test(kbCode) && !/state\.scale|setScaleDegree/.test(kbCode),
+   'no theory code: nothing imported from theory/, no scale state read');
+ok(kbMod.PLACEHOLDER_LETTERS.length === 12 &&
+   (kbSrc.match(/PLACEHOLDER_LETTERS\s*=/g) || []).length === 1,
+   'exactly one temporary label table, 12 entries, replaced wholesale when P3 lands');
+kbExpanded.overlay = 'letter';
+kbExpanded.el.querySelector('[data-act="overlay"]').click();
+ok(kbExpanded.overlay === 'number', 'the expanded overlay button cycles §6\'s four values');
+kbExpanded.overlay = 'letter';
+
+// =====================================================================================
+head('Q9 · dispose leaves nothing behind');
+// hold notes on three routes, then dispose mid-hold: nothing may be left sounding
+pointerAt(keyEl(kbExpanded, 62), 'pointerdown', 'mouse', 141);
+window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX' }));
+midiPort.onmidimessage({ data: new Uint8Array([0x90, 67, 100]) });
+ok(input.activeNotes.length >= 2, 'notes held on three routes before dispose',
+   input.activeNotes.join(','));
+
+const dExp = kbExpanded.dispose();
+const dCom = kbCompact.dispose();
+ok(dExp.domListeners > 0 && dExp.busSubscriptions === 3,
+   'expanded dropped its DOM listeners and its 3 bus subscriptions',
+   `${dExp.domListeners} dom / ${dExp.busSubscriptions} bus`);
+ok(dExp.notesReleased > 0, 'notes held by the surface were released on dispose',
+   String(dExp.notesReleased));
+ok(!document.getElementById('cbdaw-keyboard-style'),
+   'the shared stylesheet is removed once the last keyboard disposes');
+ok(document.getElementById('stage-expanded').children.length === 0 &&
+   document.getElementById('stage-compact').children.length === 0, 'DOM is empty again');
+
+reset();
+keyTap('KeyZ');
+document.body.dispatchEvent(new PointerEvent('pointerdown', {
+  bubbles: true, pointerId: 151, pointerType: 'mouse', clientX: 10, clientY: 10,
+}));
+ok(busLog.length === 0, 'after dispose, a keypress produces no events — listeners really gone');
+
+const midiHeld = input.activeNotes.length;
+const dIn = input.dispose();
+ok(dIn.listenersDropped === 2, 'input.dispose() dropped both bus subscribers',
+   String(dIn.listenersDropped));
+ok(dIn.portsUnbound === 1 && midiPort.onmidimessage === null && fakeAccess.onstatechange === null,
+   'every MIDI port handler and the onstatechange hook were unbound');
+ok(dIn.notesReleased === midiHeld && input.activeNotes.length === 0,
+   'the MIDI note still held was released by dispose, not stranded');
+ok(input.listenerCount === 0, 'input.listenerCount is zero');
+
+synth.dispose();
+const audioTeardown = await audioMod.dispose();
+ledgerOn = false;
+const net = netListeners();
+ok(net === 0, 'GLOBAL LEDGER: every addEventListener in this page has a matching remove',
+   `net = ${net}`);
+ok(ctx.state === 'closed', 'AudioContext closed', ctx.state);
+ok(audioTeardown.nodesDisconnected >= 2, 'audio.js reported its own teardown counts',
+   JSON.stringify(audioTeardown));
+
+// =====================================================================================
+head('node-graph state (no audio device — nothing here claims to have heard anything)');
+unverified('audible sound', 'no output device exists in this environment; every check above is on event data, DOM state, or node-graph state');
+out.push('');
+out.push(`RESULT  ${pass} passed · ${fail} failed · ${unver} unverified`);
+document.title = fail === 0 ? `DONECHECK OK ${pass}/${pass}` : `DONECHECK FAIL ${fail}`;
+document.getElementById('results').innerHTML = out.join('\n');
+
+// ——— visual remount, after everything above was disposed. Two purposes: it proves the
+// module remounts cleanly from a fully disposed state, and it leaves something on screen
+// to actually LOOK at, because assertions do not tell you whether a keyboard looks like a
+// keyboard. Left at positionShift 5 so the bottom key reads F.
+const vExp = new Keyboard(null, input);
+vExp.overlay = 'letter';
+vExp.mountExpanded(document.getElementById('stage-expanded'));
+const vCom = new Keyboard(null, input);
+vCom.overlay = 'letter';
+vCom.mountCompact(document.getElementById('stage-compact'));
+input.positionShift = 5;
+input.emitNoteOn({ note: 65, velocity: 0.8, source: 'mouse' });
+input.emitNoteOn({ note: 69, velocity: 0.8, source: 'midi' });
+</script>

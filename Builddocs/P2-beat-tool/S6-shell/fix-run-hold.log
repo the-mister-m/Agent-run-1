@@ -1,0 +1,21 @@
+127.0.0.1 - - [23/Aug/2026 20:22:05] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:22:05] "GET /src/core/audio.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:22:05] "GET /src/core/clock.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:22:05] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:22:05] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+
+=== __regHold(5) ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:22:05] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:22:05] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+REG · 5-minute metronome hold (A-clock.md DONE-CHECK)            PASS
+    ran 5 min: 300.256 s of AudioContext time, 601 beats scheduled
+    position at the end ......... 288226 ticks   expected ≈ 288226.6 (measured from tick 0's anchor, ARM_LEAD_S included)   delta -0.56 ticks (-0.58 ms)
+    worst |beat time − ideal| ... 0.000000 ms   over 601 beats
+    dropped windows 0   doubled windows 0
+    schedulerLoad while metronome-only: min 0.0000 max 0.0006
+    PASS — five minutes, sub-millisecond, no accumulation.
+
+--- 1/1 PASS ---
+results -> /Users/moth3rship/Desktop/AI Design/School stuff/Chromebook DAW/Agent run 1/Builddocs/P2-beat-tool/S6-shell/fix-clock-results-hold.json

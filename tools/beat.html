@@ -1,0 +1,1513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beat — Chromebook DAW</title>
+
+<!--
+  /tools/beat.html — the Beat standalone teaching page.
+  Built by `beat-shell`, P2/S6. CONTRACTS §1 names this exact path.
+
+  NO BUILD STEP (CONTRACTS §10). Plain ES module imports, relative paths, no bundler, no
+  dependency, nothing to compile. Serve the PROJECT ROOT over static HTTP and open this file:
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/tools/beat.html
+
+  It must be HTTP, not file:// — Chrome refuses ES module imports from a file:// origin, and
+  Web MIDI needs a secure context (CONTRACTS §5, §10). 127.0.0.1 counts as secure.
+  It must be served from the PROJECT ROOT, not from /tools — `instruments/drum-sampler.js`
+  fetches `/assets/kits/kits.json` root-relative (§14.2).
+
+  THE LESSON: one pattern, two machines. The same eight rows drive a Drum Synth (built out of
+  Web Audio math) and a Drum Sampler (recorded files), so a student hears a MADE sound against
+  a CAPTURED one on the same beat, at the same instant. §14.1's eight roles are what makes
+  that possible — index 3 is the same role in every kit, so the grid never knows which machine
+  it is driving (§14.5).
+
+  WHAT THIS PAGE ASSEMBLES, AND WHOSE IT IS
+    core/clock.js .............. `clock`, P2/S3 — the transport
+    surfaces/step-grid.js ...... `grid`, P2/S4 — the grid AND the counting ruler
+    instruments/drum-synth.js .. `drum-synth`, P2/S4
+    instruments/drum-sampler.js  `drum-sampler`, P2/S4
+    core/capture.js ............ `capture`, P2/S5 — playing becomes note data
+    ui/shell.js ................ `tone-shell`, P1/S4 — REUSED, NEVER EDITED. This page
+                                 imports its file menu and its CPU meter and writes neither.
+  This seat owns this file and nothing else. Every module above is read and called; not one
+  line of any of them was changed to make this page work.
+-->
+
+<link rel="stylesheet" href="../src/ui/tokens.css">
+<style>
+  /* ═══════════════════════════════════════════════════════════════════════════════════
+     1 · SHELL CHROME — a DUPLICATE, and it is marked as one.
+
+     `ui/shell.js` exports `createFileMenu()` and `createCpuMeter()` for exactly this reuse
+     (its own header: "WRITTEN TO BE REUSED... P2/P3 reuse it"), but the stylesheet those two
+     components need is injected by a module-private `acquireShellStyle()` that only
+     `ToolShell.mount()` calls. A page that reuses the COMPONENTS without mounting a whole
+     P1-shaped ToolShell therefore gets them unstyled.
+
+     So the selectors below are copied byte-identical out of `shell.js`'s STYLE_TEXT, for the
+     exact classes those two components emit and no others. This is a duplicate and duplicates
+     drift. THE FIX IS ONE LINE IN shell.js — exporting `acquireShellStyle`/`releaseShellStyle`
+     (or STYLE_TEXT) — and it is another seat's file, so it is REPORTED, not made. See
+     receipt-beat-shell.md → OPEN DECISIONS.
+     ═══════════════════════════════════════════════════════════════════════════════════ */
+
+  .cbdaw-panel {
+    background: var(--panel, #1b2332);
+    border: 1px solid var(--line, #3a485f);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .cbdaw-panel__head {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+  }
+  .cbdaw-panel__title {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--text, #f2f6fc); margin: 0;
+  }
+  .cbdaw-panel__note { font-size: 12px; color: var(--text-dim, #93a1b8); }
+
+  .cbdaw-menu { position: relative; }
+  .cbdaw-menu__button {
+    font: inherit; font-weight: 600; display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+    border: 1px solid var(--line, #3a485f); border-radius: 6px; cursor: pointer;
+  }
+  .cbdaw-menu__button:hover, .cbdaw-menu__button:focus-visible { border-color: var(--accent, #34e5b4); }
+  .cbdaw-menu__caret { color: var(--text-dim, #93a1b8); font-size: 11px; }
+  .cbdaw-menu__list {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 260px;
+    margin: 0; padding: 6px; list-style: none; background: var(--panel, #1b2332);
+    border: 1px solid var(--line, #3a485f); border-radius: 8px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  }
+  .cbdaw-menu[data-open="false"] .cbdaw-menu__list { display: none; }
+  .cbdaw-menu__item {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+    width: 100%; font: inherit; text-align: left; padding: 8px 10px;
+    color: var(--text, #f2f6fc); background: transparent; border: 0; border-radius: 5px;
+    cursor: pointer;
+  }
+  .cbdaw-menu__item:hover:not(:disabled) { background: var(--bg, #0a0d13); }
+  .cbdaw-menu__item[aria-current="true"] { color: var(--accent, #34e5b4); font-weight: 700; }
+  .cbdaw-menu__item:disabled { color: var(--text-dim, #93a1b8); cursor: not-allowed; opacity: 0.65; }
+  .cbdaw-menu__tag { font-size: 11px; color: var(--text-dim, #93a1b8); letter-spacing: 0.06em; }
+
+  .cbdaw-status { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12px; }
+  .cbdaw-status__group { display: flex; align-items: center; gap: 6px; color: var(--text-dim, #93a1b8); }
+  .cbdaw-status__value { color: var(--text, #f2f6fc); font-variant-numeric: tabular-nums; }
+  .cbdaw-cpu__track {
+    position: relative; width: 120px; height: 10px; background: var(--bg, #0a0d13);
+    border: 1px solid var(--line, #3a485f); border-radius: 5px; overflow: hidden;
+  }
+  .cbdaw-cpu__fill {
+    height: 100%; width: 0%; background: var(--meter-ok, #6ee05a); transition: width 90ms linear;
+  }
+  .cbdaw-cpu__fill[data-band="warn"] { background: var(--warn, #ff7a1a); }
+  .cbdaw-cpu__fill[data-band="hot"] { background: var(--meter-hot, #ff3b30); }
+  .cbdaw-nocap { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .cbdaw-nocap input { accent-color: var(--warn, #ff7a1a); }
+  .cbdaw-nocap[data-on="true"] { color: var(--warn, #ff7a1a); font-weight: 700; }
+  .cbdaw-shell__unlock {
+    font: inherit; font-weight: 700; padding: 6px 12px; color: var(--bg, #0a0d13);
+    background: var(--accent, #34e5b4); border: 0; border-radius: 6px; cursor: pointer;
+  }
+  .cbdaw-shell__unlock[hidden] { display: none; }
+
+  /* ═══════════════════════════════════════════════════════════════════════════════════
+     2 · THIS PAGE'S OWN LAYOUT — `bt-` prefix, this file only.
+     Every colour is `var(--token, fallback)` off ui/tokens.css (§9), fallbacks byte-identical
+     to that file's values. No colour literal, no second palette.
+     ═══════════════════════════════════════════════════════════════════════════════════ */
+
+  html, body { margin: 0; padding: 0; background: var(--bg, #0a0d13); }
+  body {
+    color: var(--text, #f2f6fc);
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+  .bt-page {
+    display: flex; flex-direction: column; gap: 12px;
+    box-sizing: border-box; padding: 10px 14px 28px; min-height: 100vh;
+  }
+  .bt-page *, .bt-page *::before, .bt-page *::after { box-sizing: border-box; }
+
+  /* The top bar and the transport are the two things a teacher must never lose to a scroll,
+     so they are pinned. Everything below them scrolls as an ordinary document — the beat page
+     is TALL (two expanded machines side by side) and a fixed-viewport app layout would squeeze
+     the grid, which is the one thing the lesson is about. */
+  .bt-sticky { position: sticky; z-index: 30; background: var(--bg, #0a0d13); }
+  .bt-top { top: 0; padding-top: 4px; }
+  .bt-transport-wrap { top: 62px; padding-bottom: 4px; }
+  @media (max-width: 1100px) { .bt-transport-wrap { position: static; } }
+
+  .bt-bar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 8px 12px; background: var(--panel, #1b2332);
+    border: 1px solid var(--line, #3a485f); border-radius: 8px;
+  }
+  .bt-titles { flex: 1 1 240px; min-width: 0; }
+  .bt-spacer { flex: 0 1 auto; }
+  .bt-title { font-size: 20px; font-weight: 700; letter-spacing: 0.01em; margin: 0; }
+  .bt-subtitle { font-size: 13px; line-height: 1.35; color: var(--text-dim, #93a1b8); margin: 0; }
+
+  /* The two machines, side by side — seat question 1. Each column scrolls inside itself so
+     one machine's long expanded parameter list cannot push the other off the page. */
+  .bt-machines {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px; align-items: start;
+  }
+  @media (max-width: 900px) { .bt-machines { grid-template-columns: minmax(0, 1fr); } }
+  .bt-machine__host { max-height: 620px; overflow-y: auto; overflow-x: hidden; }
+  .bt-machine__host > * { width: 100%; }
+  .bt-machine[data-hearing="false"] .bt-machine__host { opacity: 0.45; }
+
+  .bt-hear {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer;
+    user-select: none; color: var(--text-dim, #93a1b8);
+  }
+  .bt-hear input { accent-color: var(--accent, #34e5b4); }
+  .bt-hear[data-on="true"] { color: var(--accent, #34e5b4); font-weight: 700; }
+
+  .bt-seam { font-size: 12px; line-height: 1.45; color: var(--warn, #ff7a1a); margin-top: 8px; }
+  .bt-note { font-size: 12px; line-height: 1.45; color: var(--text-dim, #93a1b8); }
+
+  /* ——— controls: transport, record panel, pads ————————————————————————————— */
+  .bt-ctl {
+    display: flex; align-items: center; gap: 6px; font-size: 12px;
+    color: var(--text-dim, #93a1b8); white-space: nowrap;
+  }
+  .bt-ctl__label { text-transform: uppercase; letter-spacing: 0.07em; font-size: 10px; }
+  .bt-ctl__rule { width: 1px; align-self: stretch; background: var(--line, #3a485f); margin: 0 2px; }
+  .bt-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+  .bt-btn {
+    font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px;
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+    border: 1px solid var(--line, #3a485f); border-radius: 6px; cursor: pointer;
+  }
+  .bt-btn:hover:not(:disabled) { border-color: var(--accent, #34e5b4); }
+  .bt-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .bt-btn[aria-pressed="true"] {
+    background: var(--accent, #34e5b4); color: var(--bg, #0a0d13);
+    border-color: var(--accent, #34e5b4); font-weight: 700;
+  }
+  .bt-btn--rec[aria-pressed="true"], .bt-btn--rec.is-live {
+    background: var(--meter-hot, #ff3b30); border-color: var(--meter-hot, #ff3b30);
+    color: var(--text, #f2f6fc);
+  }
+  .bt-btn--small { font-size: 11px; padding: 3px 8px; }
+
+  .bt-num {
+    font: inherit; font-size: 13px; width: 4.6em; padding: 4px 6px; text-align: right;
+    font-variant-numeric: tabular-nums; color: var(--text, #f2f6fc);
+    background: var(--bg, #0a0d13); border: 1px solid var(--line, #3a485f); border-radius: 4px;
+  }
+  .bt-num--narrow { width: 3.2em; }
+  .bt-sel {
+    font: inherit; font-size: 13px; padding: 4px 6px; color: var(--text, #f2f6fc);
+    background: var(--bg, #0a0d13); border: 1px solid var(--line, #3a485f); border-radius: 4px;
+  }
+  .bt-range { accent-color: var(--accent, #34e5b4); width: 120px; }
+
+  .bt-readout {
+    font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent, #34e5b4);
+    font-size: 20px; letter-spacing: 0.02em; min-width: 6.2em; text-align: center;
+  }
+  .bt-readout[data-counting="true"] { color: var(--warn, #ff7a1a); }
+  .bt-readout__sub { display: block; font-size: 10px; font-weight: 400; letter-spacing: 0.06em;
+    color: var(--text-dim, #93a1b8); text-transform: uppercase; }
+
+  /* Time signature: two digits, stacked. NO bottom symbol — CONTRACTS §13.4 / Brandon's
+     D-20. This page renders a digit and invents no glyph. See the receipt. */
+  .bt-timesig {
+    display: inline-flex; flex-direction: column; align-items: center; line-height: 1;
+    font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px;
+    color: var(--text, #f2f6fc); padding: 0 2px;
+  }
+  .bt-timesig span + span { border-top: 1px solid var(--line, #3a485f); margin-top: 1px; padding-top: 1px; }
+
+  .bt-pads { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 760px) { .bt-pads { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  .bt-pad {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font: inherit; font-size: 12px; padding: 16px 6px; cursor: pointer; touch-action: none;
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+    border: 1px solid var(--line, #3a485f); border-radius: 8px;
+    transition: background 70ms ease-out, border-color 70ms ease-out;
+  }
+  .bt-pad:hover { border-color: var(--accent, #34e5b4); }
+  .bt-pad.is-lit { background: var(--accent, #34e5b4); border-color: var(--accent, #34e5b4); color: var(--bg, #0a0d13); }
+  .bt-pad__key { font-size: 10px; color: var(--text-dim, #93a1b8); letter-spacing: 0.08em; }
+  .bt-pad.is-lit .bt-pad__key { color: var(--bg, #0a0d13); }
+
+  .bt-arms { display: flex; gap: 6px; flex-wrap: wrap; }
+  .bt-arm {
+    font: inherit; font-size: 11px; padding: 4px 9px; cursor: pointer;
+    color: var(--text-dim, #93a1b8); background: var(--bg, #0a0d13);
+    border: 1px solid var(--line, #3a485f); border-radius: 999px;
+  }
+  .bt-arm[aria-pressed="true"] {
+    color: var(--bg, #0a0d13); background: var(--meter-hot, #ff3b30);
+    border-color: var(--meter-hot, #ff3b30); font-weight: 700;
+  }
+
+  .bt-report {
+    font-size: 12px; line-height: 1.5; color: var(--text-dim, #93a1b8);
+    font-variant-numeric: tabular-nums; min-height: 2.4em;
+  }
+  .bt-report b { color: var(--text, #f2f6fc); }
+  .bt-report .bt-drift { color: var(--warn, #ff7a1a); }
+
+  .bt-grid-cols {
+    display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 12px; align-items: start;
+  }
+  @media (max-width: 1100px) { .bt-grid-cols { grid-template-columns: minmax(0, 1fr); } }
+
+  .bt-error {
+    padding: 16px; border: 1px solid var(--meter-hot, #ff3b30); border-radius: 8px;
+    background: var(--panel, #1b2332); color: var(--text, #f2f6fc); white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  }
+
+  .cbdaw-boot {
+    margin: 0; padding: 24px; font-family: system-ui, -apple-system, sans-serif;
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+  }
+  .cbdaw-boot code { color: var(--accent, #34e5b4); }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="cbdaw-boot">
+    This tool is a Web Audio instrument and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// IMPORTS — every one relative, every one a plain ES module. No bundler, no dependency.
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+// REUSED FROM P1, NOT REWRITTEN (seat question 4). `shell.js` is this page's file menu and
+// this page's CPU meter. Both are exported components that take their content as arguments —
+// that is what `tone-shell` built them for. This page passes different arguments; it does not
+// pass a patch.
+import { TOOLS, createFileMenu, createCpuMeter } from '../src/ui/shell.js';
+
+import { ctx, unlock, createChannel, releaseChannel } from '../src/core/audio.js';
+import { input } from '../src/core/input.js';
+import { clock, fromTicks, ticksPerBar } from '../src/core/clock.js';
+import StepGrid from '../src/surfaces/step-grid.js';
+import DrumSynth from '../src/instruments/drum-synth.js';
+import DrumSampler from '../src/instruments/drum-sampler.js';
+import Capture from '../src/core/capture.js';
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// SEAT QUESTION 1 — BOTH MACHINES, ONE GRID
+// ═════════════════════════════════════════════════════════════════════════════════════════
+//
+// The grid holds ONE instrument (`StepGrid.bindInstrument`). Two grids would be two patterns,
+// two edits, and two chances to drift — the opposite of what the lesson needs. So this page
+// binds the grid to a PAIR that satisfies §14.5's instrument contract exactly and forwards to
+// both machines:
+//
+//     §14.5, verbatim: "The grid's entire knowledge of an instrument is two frozen §2
+//     members: `Instrument.pieces` and `instrument.noteOn(note, velocity, atTime)`."
+//
+// `KitPair` has both, and nothing else the grid could reach for. It is not an instrument: it
+// owns no AudioNode, allocates no voice, has no cpuWeight of its own, and never touches the
+// AudioContext. It is one `if` and two forwarded calls, and it lives in this page's file
+// because the fan-out is a PAGE decision — which machines this page is auditioning — not a
+// property of either machine.
+//
+// The two `hear` toggles are the A/B itself: mute the sampler and you hear the made sound;
+// mute the synth and you hear the recorded one; leave both and you hear them together, on the
+// same step, off the same pattern, at the same AudioContext time.
+
+/**
+ * §14.5's promise — "index, note and the row order are identical for the Drum Synth and for
+ * every sampled kit" — checked instead of assumed. If a future kit or a future edit moved a
+ * role, one pattern would drive two different sounds per row and a class would hear it before
+ * anyone read a diff. Checked before a single node is built, so a failure leaves nothing
+ * half-built behind.
+ */
+function assertSameRoles(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    throw new Error(
+      `beat.html: DrumSynth.pieces (${a?.length}) and DrumSampler.pieces (${b?.length}) are ` +
+        'not the same length. §14.1 fixes eight roles for every machine.'
+    );
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].index !== b[i].index || a[i].note !== b[i].note) {
+      throw new Error(
+        `beat.html: piece ${i} differs between the two machines — synth {index ${a[i].index}, ` +
+          `note ${a[i].note}} vs sampler {index ${b[i].index}, note ${b[i].note}}. §14.1's ` +
+          'roles are fixed app-wide; one grid cannot drive two different role tables.'
+      );
+    }
+  }
+}
+
+class KitPair {
+  static id = 'kit-pair';
+  static label = 'Drum Synth + Drum Sampler';
+
+  /** §14.5's first frozen member. The same eight for both machines — asserted above, so this
+   *  is a shared reference rather than a third copy of §14.1's table. */
+  static pieces = DrumSynth.pieces;
+
+  constructor(synth, sampler) {
+    this.synth = synth;
+    this.sampler = sampler;
+    /** The A/B. Both on by default: the first thing a student should hear is the difference. */
+    this.hear = { synth: true, sampler: true };
+  }
+
+  /** §14.5's second frozen member, and the only call the grid ever makes. `atTime` is passed
+   *  straight through — the grid computes it from the scheduler's own window and this method
+   *  must not round it, delay it, or replace it with "now". */
+  noteOn(note, velocity, atTime) {
+    if (this.hear.synth) this.synth.noteOn(note, velocity, atTime);
+    if (this.hear.sampler) this.sampler.noteOn(note, velocity, atTime);
+  }
+
+  /** Both machines document `noteOff` as a no-op — a drum piece is a one-shot (§13.5). Present
+   *  and forwarded anyway, because §2 requires the method to exist and be callable. */
+  noteOff(note, atTime) {
+    this.synth.noteOff(note, atTime);
+    this.sampler.noteOff(note, atTime);
+  }
+
+  allNotesOff() {
+    this.synth.allNotesOff();
+    this.sampler.allNotesOff();
+  }
+
+  /** Read by this page's CPU meter (seat question 5). The honest total of both machines'
+   *  live voices — `shell.js`'s meter only ever reads this one property. */
+  get cpuWeight() {
+    return this.synth.cpuWeight + this.sampler.cpuWeight;
+  }
+
+  get voiceCount() {
+    return this.synth.voiceCount + this.sampler.voiceCount;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// SMALL SHARED HELPERS
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+/** Every DOM listener this page attaches goes in here, so teardown drops all of them and
+ *  reports a number instead of a claim (seat question 7). Same discipline every S2/S3/S4 seat
+ *  used inside its own file. */
+function listenerBag() {
+  const bag = [];
+  return {
+    add(target, type, fn, opts) {
+      target.addEventListener(type, fn, opts);
+      bag.push({ target, type, fn, opts });
+    },
+    get size() { return bag.length; },
+    dropAll() {
+      const n = bag.length;
+      for (const { target, type, fn, opts } of bag) target.removeEventListener(type, fn, opts);
+      bag.length = 0;
+      return n;
+    },
+  };
+}
+
+function el(tag, className, html) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (html != null) node.innerHTML = html;
+  return node;
+}
+
+function panel(title, note) {
+  const p = el('section', 'cbdaw-panel');
+  const head = el('div', 'cbdaw-panel__head');
+  head.appendChild(el('h2', 'cbdaw-panel__title', title));
+  if (note) head.appendChild(el('span', 'cbdaw-panel__note', note));
+  p.appendChild(head);
+  return { el: p, head };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// THE PAGE
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+class BeatPage {
+  constructor() {
+    this.root = null;
+    this.listeners = listenerBag();
+    this.busUnsubs = [];
+    this.channels = [];
+    this.synth = null;
+    this.sampler = null;
+    this.pair = null;
+    this.grid = null;
+    this.capture = null;
+    this.menu = null;
+    this.cpu = null;
+    this.hosts = {};
+    this.raf = 0;
+    this.frames = 0;
+    /** Live DOM refs the rAF loop and the event handlers write into. Named, so the rAF loop
+     *  does a handful of property writes per frame and never a querySelector. */
+    this.ui = {};
+    /** The tempo the SCHEDULER is actually using, off the 'tick' payload. `clock.bpm` reads
+     *  back the REQUESTED tempo immediately; the commit lands one window later (clock.js
+     *  documents 115.7–153.0 ms, measured). Showing both is honest; showing one is a lie in
+     *  whichever direction you pick. */
+    this.committedBpm = clock.bpm;
+    this._onClockTick = (payload) => { this.committedBpm = payload.bpm; };
+    this._onClockState = () => this._syncTransport();
+    this.captureUnsubs = [];
+    this._rafLoop = this._rafLoop.bind(this);
+    this.mounted = false;
+  }
+
+  /**
+   * THE VISUAL LOOP, AND IT IS ONLY A VISUAL LOOP.
+   * §3 and §10: "Visuals read `clock.position` from rAF. Audio reads from the scheduler. These
+   * are two different loops and they never cross." Everything this method touches is a pure
+   * read — `clock.position`, `clock.countingIn`, `clock.loop` — and a handful of property
+   * writes into named DOM refs. It schedules nothing, touches no AudioNode, and calls no
+   * `noteOn`. Grep this method: there is no audio in it.
+   */
+  _rafLoop() {
+    this.raf = requestAnimationFrame(this._rafLoop);
+    this.frames++;
+    this._syncTransport();
+  }
+
+  mount(host) {
+    // §14.5's invariant, before anything exists to leak.
+    assertSameRoles(DrumSynth.pieces, DrumSampler.pieces);
+
+    const root = el('div', 'bt-page');
+    root.dataset.tool = 'beat';
+    this.root = root;
+
+    // ——— 1 · audio: one channel per machine ————————————————————————————————
+    // §2: an instrument is handed `(ctx, out)` and never makes its own context and never
+    // connects to `ctx.destination`. Two channels, not one, so the two machines are
+    // independently routable the day P4's mixer arrives — and so `releaseChannel` at teardown
+    // has exactly two things to take back.
+    const synthChannel = createChannel();
+    const samplerChannel = createChannel();
+    this.channels.push(synthChannel, samplerChannel);
+
+    this.synth = new DrumSynth(ctx, synthChannel);
+    this.sampler = new DrumSampler(ctx, samplerChannel);
+    this.pair = new KitPair(this.synth, this.sampler);
+
+    // ——— 2 · top bar ————————————————————————————————————————————————————
+    const top = el('header', 'bt-bar');
+    const topWrap = el('div', 'bt-sticky bt-top');
+    topWrap.appendChild(top);
+
+    // SEAT QUESTION 4 — the file menu carries over from P1. REUSED, NOT REWRITTEN.
+    // `createFileMenu` is `shell.js`'s component, imported and called. This page writes no
+    // menu of its own — grep this file for `menu__list` and you will find only CSS.
+    //
+    // The one wrinkle, and why it is handled HERE and not in shell.js: `shell.js`'s TOOLS
+    // table still carries `{id: 'beat', available: false, phase: 'P2'}`, so the Beat row would
+    // render disabled and tagged "P2 — not built yet" on its own page. shell.js's own comment
+    // says a later phase "flips one boolean" — but that boolean is in another seat's file and
+    // this seat does not edit it (brief: "reuse it, do not edit it"). `createFileMenu` already
+    // takes `items` as a parameter for exactly this reason: the component is TOLD what to
+    // isolate rather than knowing. So this page hands it a copy of TOOLS with its own row
+    // marked available, and reaches into nothing.
+    // THE ONE-LINE FLIP IN shell.js IS STILL NEEDED so the two P1 pages stop calling Beat
+    // unbuilt. Reported, not made. See the receipt's OPEN DECISIONS.
+    const items = TOOLS.map((t) => (t.id === 'beat' ? { ...t, available: true } : { ...t }));
+    this.menu = createFileMenu({
+      items,
+      currentId: 'beat',
+      label: 'Tool',
+      onSelect: (item) => { if (item.href) window.location.href = item.href; },
+    });
+    top.appendChild(this.menu.el);
+
+    const titles = el('div', 'bt-titles');
+    titles.appendChild(el('h1', 'bt-title', 'Beat'));
+    titles.appendChild(el('p', 'bt-subtitle',
+      'One pattern, two machines. The Drum Synth is built out of math; the Drum Sampler plays ' +
+      'recordings. Same eight rows, same step, same instant — so you can hear the difference.'));
+    top.appendChild(titles);
+    top.appendChild(el('div', 'bt-spacer'));
+
+    // SEAT QUESTION 5 — the CPU meter is visible and `noCap` is one click away.
+    // REUSED, NOT REWRITTEN: this is `shell.js`'s meter, the same one both P1 pages carry.
+    // §8: `governor.noCap` "SHIPS ON THE DEPLOYED BUILD… when noCap is on, the meter still
+    // reads and still turns red. Nothing is blocked. Brandon wants the Chromebooks to crash."
+    // So it is a checkbox in the top bar — no dev console, no query string, no hidden gesture.
+    //
+    // The meter reads ONE property off whatever it is handed: `instrument.cpuWeight`. It is
+    // handed the PAIR, whose `cpuWeight` is the honest sum of both machines' live voices — so
+    // the number on screen is what this page is actually costing, not one machine's half of it.
+    this.cpu = createCpuMeter({ instrument: this.pair });
+    top.appendChild(this.cpu.el);
+
+    root.appendChild(topWrap);
+
+    // REPORTED, NOT FIXED — and said out loud on the page, because a green bar that cannot
+    // move is worse than no bar. `governor.load` (core/audio.js) times that module's own
+    // registry bookkeeping — a sweep plus one state read per voice — divided by the 100 ms
+    // window. Measured on this page: 150 live voices and a cpuWeight of 2277 produced
+    // `load = 0.00` and a bar 0% wide, still green. `audio-core`'s own comment predicted this
+    // ("clock.js (P2) does not exist yet… how the two probes reconcile is noted as an open
+    // decision") and `clock.js` now exists but does not time its `pass()` either. So the two
+    // numbers that ARE honest under load are `voices` and `cpuWeight`, and this line says so.
+    // Both files are other seats'. Escalated with the numbers; not patched here.
+    root.appendChild(el('p', 'bt-note',
+      '<b>Pushing it:</b> turn on <b>noCap</b> above and hold down pads. The <em>voices</em> ' +
+      'and <em>w</em> numbers are the honest ones — they climb without limit. The CPU bar reads ' +
+      '<code>governor.load</code>, which today times core/audio.js\'s own bookkeeping rather ' +
+      'than a scheduler pass, so it stays near zero even at 150 voices. A P2 open decision, ' +
+      'reported — not this page\'s to fix.'));
+
+    // ——— 2b · the transport (seat question 3) ————————————————————————————
+    root.appendChild(this._buildTransport());
+
+    // ——— 3 · the grid ————————————————————————————————————————————————————
+    const gridPanel = panel(
+      'Step grid',
+      'eight rows, one per §14.1 piece — tap a cell to turn a step on, press and drag it up ' +
+      'or down for velocity'
+    );
+    const gridHost = el('div');
+    gridPanel.el.appendChild(gridHost);
+    root.appendChild(gridPanel.el);
+
+    this.grid = new StepGrid(gridHost, clock);
+    // §14.5: one grid, and it never learns which machine it is driving. It is handed the pair
+    // and reads the same two members it would read off either machine alone.
+    this.grid.bindInstrument(this.pair);
+
+    // ——— 3b · capture — playing becomes note data —————————————————————————
+    // `capture.js` is handed the grid as its `target` (it duck-types `getPattern`/
+    // `setPattern`, which StepGrid satisfies) and the pair as its `instrument` — from which it
+    // reads `constructor.pieces` ONLY, to map a note number to one of §14.1's eight lanes.
+    // It never calls `noteOn`. See LIVE MONITORING below for why that matters here.
+    this.capture = new Capture({
+      clock,
+      input,
+      target: this.grid,
+      instrument: this.pair,
+    });
+
+    // ——— 3c · the playing surface, and the live monitor ————————————————
+    root.appendChild(this._buildPads());
+    root.appendChild(this._buildRecordPanel());
+    this._wireLiveMonitoring();
+
+    // ——— 4 · the two machines, side by side ——————————————————————————————
+    const machines = el('div', 'bt-machines');
+    machines.appendChild(this._machineColumn('synth', DrumSynth.label,
+      'built out of Web Audio math — no files, no network'));
+    machines.appendChild(this._machineColumn('sampler', DrumSampler.label,
+      'recorded files from /assets/kits — pick a kit'));
+    root.appendChild(machines);
+    this._wireNetworkStatus();
+
+    host.appendChild(root);
+
+    // ——— 5 · mount the expanded views, now that the DOM is in the document ————
+    // SEAT QUESTION 2: `mountExpanded`, never `mountCompact`. The check is
+    // `grep -c '\.mountCompact(' tools/beat.html` → 0; the only occurrences of the word in
+    // this file are in this comment. The compact view of these same modules is P4's view of
+    // them, and P4 builds it. The standalone page has the real estate, so it takes the
+    // detail: the grid's expanded ruler (22 px beat digits, readable from the back of a
+    // classroom — §9's own test), each machine's full per-piece parameter rows, and the
+    // playhead animating over 40 px cells instead of 14 px ones.
+    this.grid.mountExpanded(gridHost);
+    this.synth.mountExpanded(this.hosts.synth);
+    this.sampler.mountExpanded(this.hosts.sampler);
+
+    // §2's async gate. The Drum Synth is `needsLoad = false` and resolves immediately; the
+    // Sampler's resolves when a kit has decoded. NOTHING ON THIS PAGE AWAITS EITHER — §3:
+    // "nothing may block startup. The UI draws, the surfaces respond... Only sound waits."
+    for (const inst of [this.synth, this.sampler]) {
+      if (typeof inst.ready === 'function') {
+        inst.ready().catch((err) => console.error('[beat.html] ready() failed:', err));
+      }
+    }
+
+    // Navigating away IS the teardown a student actually performs — they click the file menu
+    // and go to the Harmony page. `pagehide` fires for that, for a reload, and for a close.
+    this.listeners.add(window, 'pagehide', () => this.dispose());
+
+    this._syncTransport();
+    this._syncRecordPanel();
+    this.raf = requestAnimationFrame(this._rafLoop);
+
+    this.mounted = true;
+    return this;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  // SEAT QUESTION 3 — THE TRANSPORT SHOWS WHAT THE CURRICULUM NAMES
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  //
+  // The brief names five: tempo, time signature, count-in, loop region, record arm. All five
+  // are here, plus the two §3 members without which two of the five are invisible — the
+  // metronome (the count-in IS metronome clicks; with it off, a count-in is silent and a
+  // student cannot tell it ran) and the transport buttons themselves.
+  //
+  // EVERY CONTROL BELOW IS A PUBLIC MEMBER OF §3's TRANSPORT, WRITTEN THE WAY §3 SPELLS IT.
+  // This page invents no transport state, keeps no shadow copy of the tempo or the meter, and
+  // has no behaviour of its own that `clock.js` does not already have. It writes
+  // `clock.bpm`, `clock.timeSignature`, `clock.countIn`, `clock.metronome`, `clock.loop` and
+  // calls `clock.play/stop/record`. That is the whole surface.
+  //
+  // ⚠ TIME SIGNATURE — THE BOTTOM NUMBER IS A DIGIT, NOT A SYMBOL, AND THAT CONTRADICTS THIS
+  //   SEAT'S OWN BRIEF. Seat question 3 asks for "time signature with a symbol bottom."
+  //   CONTRACTS §13.4 rules the other way and cites Brandon directly: open-decisions D-20,
+  //   asking for that exact symbol set, is answered by him — "it doesn't need to be there" —
+  //   and §13.4 states "**Brandon's answer governs. The app stores the digit and does not
+  //   render a bottom symbol. No seat invents a glyph set, and no seat re-opens this.**"
+  //   §13.4 also says outright that this contradicts the brief and puts the contradiction on
+  //   the record rather than resolving it silently. The brief's own sentence points at §13
+  //   for this control. `grid` (P2/S4) hit the identical conflict and followed §13.4; two
+  //   time-signature displays on one page disagreeing would be worse than either choice.
+  //   **This page follows §13.4 — two digits, no glyph.** Logged in OPEN DECISIONS; Brandon
+  //   reopens it if he wants to, and nobody else does.
+
+  _buildTransport() {
+    const wrap = el('div', 'bt-sticky bt-transport-wrap');
+    const bar = el('section', 'bt-bar');
+    wrap.appendChild(bar);
+    const L = this.listeners;
+    const ui = this.ui;
+
+    const group = (labelText) => {
+      const g = el('div', 'bt-ctl');
+      if (labelText) g.appendChild(el('span', 'bt-ctl__label', labelText));
+      bar.appendChild(g);
+      return g;
+    };
+    const rule = () => bar.appendChild(el('div', 'bt-ctl__rule'));
+
+    // ——— play · stop · record ————————————————————————————————————————————
+    const buttons = group(null);
+    // ⏮ IS NOT DECORATION. `clock.stop()` deliberately "leaves the playhead where it stopped,
+    // so `play()` continues from there" — `clock.js`'s own words, and its receipt lists
+    // return-to-zero as an open decision because nothing in §3 or §7 rules on it. With no
+    // return control a student who pressed stop in bar 6 has no way back to bar 1, and — worse
+    // — with the loop on, `clock.play()` from a playhead already PAST `loop.endBar` never
+    // enters the region at all (measured on this page: loop bars 1–1, played from tick ~2400,
+    // ran to 4871 without wrapping; `pass()`'s wrap test is `fromTick < lb.end`). That is
+    // `clock.js`'s behaviour and not this page's to change. So the page gives the student the
+    // control `clock.js` names for exactly this — `seek(1, 1, 0)` — and SAYS on the loop
+    // readout when the playhead is outside the loop, rather than quietly seeking for them.
+    ui.rewind = el('button', 'bt-btn', '⏮');
+    ui.rewind.title = 'Back to bar 1 · clock.seek(1, 1, 0)';
+    ui.play = el('button', 'bt-btn', '▶ Play');
+    ui.stop = el('button', 'bt-btn', '■ Stop');
+    ui.rec = el('button', 'bt-btn bt-btn--rec', '● Record');
+    for (const b of [ui.rewind, ui.play, ui.stop, ui.rec]) { b.type = 'button'; buttons.appendChild(b); }
+    L.add(ui.rewind, 'click', () => clock.seek(1, 1, 0));
+
+    // §3's amended startup block: the FIRST user gesture of any kind calls `audio.unlock()`,
+    // and it is safe to call repeatedly. A transport button is a real gesture.
+    L.add(ui.play, 'click', () => { unlock(); clock.play(); });
+    L.add(ui.stop, 'click', () => { unlock(); clock.stop(); });
+    L.add(ui.rec, 'click', () => {
+      unlock();
+      // `capture.record()` opens the take AND puts §3's transport into 'recording' (running
+      // `clock.countIn` bars of count-in first, if set). Pressing stop ends the take: capture
+      // watches 'statechange' and commits. Two buttons, not four.
+      if (clock.state === 'recording') clock.stop();
+      else this.capture.record();
+    });
+
+    // ——— position — the one readout a class watches ————————————————————
+    const pos = group(null);
+    ui.position = el('div', 'bt-readout',
+      '<span data-pos>1 . 1 . 000</span><span class="bt-readout__sub" data-poslabel>bar · beat · tick</span>');
+    pos.appendChild(ui.position);
+    ui.positionValue = ui.position.querySelector('[data-pos]');
+    ui.positionLabel = ui.position.querySelector('[data-poslabel]');
+    rule();
+
+    // ——— TEMPO ————————————————————————————————————————————————————————
+    const tempo = group('Tempo');
+    ui.bpm = el('input');
+    ui.bpm.type = 'number';
+    ui.bpm.className = 'bt-num';
+    ui.bpm.min = '20'; ui.bpm.max = '300'; ui.bpm.step = '1';
+    ui.bpm.value = String(clock.bpm);
+    ui.bpmSlider = el('input');
+    ui.bpmSlider.type = 'range';
+    ui.bpmSlider.className = 'bt-range';
+    ui.bpmSlider.min = '40'; ui.bpmSlider.max = '220'; ui.bpmSlider.step = '1';
+    ui.bpmSlider.value = String(clock.bpm);
+    const setBpm = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= 0) return; // clock.bpm throws on these; never hand it one
+      clock.bpm = n;
+      if (document.activeElement !== ui.bpm) ui.bpm.value = String(n);
+      if (document.activeElement !== ui.bpmSlider) ui.bpmSlider.value = String(n);
+    };
+    L.add(ui.bpm, 'input', () => setBpm(ui.bpm.value));
+    L.add(ui.bpmSlider, 'input', () => setBpm(ui.bpmSlider.value));
+    tempo.appendChild(ui.bpm);
+    tempo.appendChild(el('span', null, 'BPM'));
+    tempo.appendChild(ui.bpmSlider);
+    // Honest about the one latency `clock.js` cannot remove: a tempo change commits at the
+    // next window boundary because Web Audio cannot un-schedule a node that already has a
+    // start time. This blinks for that ~130 ms instead of pretending it was instant.
+    ui.bpmCommit = el('span', 'bt-ctl__label', '');
+    tempo.appendChild(ui.bpmCommit);
+    rule();
+
+    // ——— TIME SIGNATURE — digits only, §13.4 ————————————————————————————
+    const ts = group('Meter');
+    const tsMinus = el('button', 'bt-btn bt-btn--small', '&minus;');
+    const tsPlus = el('button', 'bt-btn bt-btn--small', '+');
+    tsMinus.type = 'button'; tsPlus.type = 'button';
+    ui.tsDisplay = el('span', 'bt-timesig', '<span data-ts-top>4</span><span data-ts-bottom>4</span>');
+    ui.tsTop = ui.tsDisplay.querySelector('[data-ts-top]');
+    ui.tsBottom = ui.tsDisplay.querySelector('[data-ts-bottom]');
+    ui.tsBottomSel = el('select', 'bt-sel');
+    // §13.4's supported bottoms, and only those: "32 and any non-power-of-two are not
+    // supported." `clock.validateMeter` throws on anything else, so the control cannot offer
+    // one.
+    for (const b of [2, 4, 8, 16]) {
+      const o = el('option', null, String(b));
+      o.value = String(b);
+      if (b === clock.timeSignature.bottom) o.selected = true;
+      ui.tsBottomSel.appendChild(o);
+    }
+    const applyMeter = (top, bottom) => {
+      // Mutated in place, not replaced — `clock.js` re-reads `timeSignature` every pass and
+      // pushes a new segment when the geometry changes, and `step-grid.js`'s rAF loop notices
+      // the change and resizes every lane (§13.5's grow/shrink rule). Neither needs an event.
+      clock.timeSignature.top = Math.max(1, Math.min(16, Math.trunc(top)));
+      clock.timeSignature.bottom = bottom;
+      this._syncTransport();
+    };
+    L.add(tsMinus, 'click', () => applyMeter(clock.timeSignature.top - 1, clock.timeSignature.bottom));
+    L.add(tsPlus, 'click', () => applyMeter(clock.timeSignature.top + 1, clock.timeSignature.bottom));
+    L.add(ui.tsBottomSel, 'change', () => applyMeter(clock.timeSignature.top, Number(ui.tsBottomSel.value)));
+    ts.appendChild(tsMinus);
+    ts.appendChild(ui.tsDisplay);
+    ts.appendChild(tsPlus);
+    ts.appendChild(ui.tsBottomSel);
+    rule();
+
+    // ——— COUNT-IN and METRONOME ————————————————————————————————————————
+    const counting = group('Count-in');
+    ui.countIn = el('input');
+    ui.countIn.type = 'number';
+    ui.countIn.className = 'bt-num bt-num--narrow';
+    ui.countIn.min = '0'; ui.countIn.max = '4'; ui.countIn.step = '1';
+    ui.countIn.value = String(clock.countIn);
+    L.add(ui.countIn, 'input', () => {
+      clock.countIn = Math.max(0, Math.min(4, Math.trunc(Number(ui.countIn.value) || 0)));
+    });
+    counting.appendChild(ui.countIn);
+    counting.appendChild(el('span', null, 'bars'));
+
+    const metro = group(null);
+    ui.metroBtn = el('button', 'bt-btn bt-btn--small', 'Metronome');
+    ui.metroBtn.type = 'button';
+    ui.metroBtn.setAttribute('aria-pressed', String(clock.metronome));
+    L.add(ui.metroBtn, 'click', () => {
+      unlock();
+      clock.metronome = !clock.metronome;
+      ui.metroBtn.setAttribute('aria-pressed', String(clock.metronome));
+    });
+    metro.appendChild(ui.metroBtn);
+    rule();
+
+    // ——— LOOP REGION ————————————————————————————————————————————————————
+    // `clock.loop.endBar` is EXCLUSIVE — `clock.js`'s own LOOP GEOMETRY note and §7's example
+    // `{startBar: 1, endBar: 5}` are a FOUR-bar loop. Nobody should have to remember that, so
+    // the control takes a start bar and a LENGTH IN BARS and does the arithmetic itself. The
+    // readout says "bars 1–4", which is what a student would say out loud.
+    const loop = group('Loop');
+    ui.loopBtn = el('button', 'bt-btn bt-btn--small', 'Loop');
+    ui.loopBtn.type = 'button';
+    ui.loopBtn.setAttribute('aria-pressed', String(clock.loop.on));
+    L.add(ui.loopBtn, 'click', () => {
+      clock.loop.on = !clock.loop.on;
+      this._syncTransport();
+    });
+    ui.loopStart = el('input');
+    ui.loopStart.type = 'number';
+    ui.loopStart.className = 'bt-num bt-num--narrow';
+    ui.loopStart.min = '1'; ui.loopStart.step = '1';
+    ui.loopStart.value = String(clock.loop.startBar);
+    ui.loopBars = el('input');
+    ui.loopBars.type = 'number';
+    ui.loopBars.className = 'bt-num bt-num--narrow';
+    ui.loopBars.min = '1'; ui.loopBars.step = '1';
+    ui.loopBars.value = String(clock.loop.endBar - clock.loop.startBar);
+    const applyLoop = () => {
+      const start = Math.max(1, Math.trunc(Number(ui.loopStart.value) || 1));
+      const len = Math.max(1, Math.trunc(Number(ui.loopBars.value) || 1));
+      clock.loop.startBar = start;
+      clock.loop.endBar = start + len; // exclusive, per clock.js's LOOP GEOMETRY
+      this._syncTransport();
+    };
+    L.add(ui.loopStart, 'input', applyLoop);
+    L.add(ui.loopBars, 'input', applyLoop);
+    ui.loopFit = el('button', 'bt-btn bt-btn--small', '= pattern');
+    ui.loopFit.type = 'button';
+    ui.loopFit.title = 'Set the loop length to the grid pattern length';
+    L.add(ui.loopFit, 'click', () => {
+      ui.loopStart.value = '1';
+      ui.loopBars.value = String(this.grid ? this.grid.bars : 1);
+      applyLoop();
+    });
+    loop.appendChild(ui.loopBtn);
+    loop.appendChild(el('span', null, 'from bar'));
+    loop.appendChild(ui.loopStart);
+    loop.appendChild(el('span', null, 'for'));
+    loop.appendChild(ui.loopBars);
+    loop.appendChild(el('span', null, 'bars'));
+    loop.appendChild(ui.loopFit);
+    ui.loopReadout = el('span', 'bt-ctl__label', '');
+    loop.appendChild(ui.loopReadout);
+    rule();
+
+    // ——— RECORD ARM — the summary lives here, the switches live in the record panel ——
+    const arm = group('Record arm');
+    ui.armSummary = el('span', 'cbdaw-status__value', 'all 8 rows');
+    arm.appendChild(ui.armSummary);
+
+    // §3's two events. `clock.on()` is a bare `Set.add` with no unsubscribe closure, so both
+    // come off with `clock.off(event, fn)` at teardown — the same shape `step-grid.js` and
+    // `capture.js` both handle it with.
+    clock.on('tick', this._onClockTick);
+    clock.on('statechange', this._onClockState);
+
+    return wrap;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  // THE PLAYING SURFACE, AND LIVE MONITORING
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  //
+  // WHY THIS PAGE HAS PADS OF ITS OWN, when both machines already draw eight pads each.
+  //   Each machine's own pads call that machine's `noteOn` DIRECTLY. They audition that one
+  //   machine and nothing else: they do not reach the other machine and they never touch
+  //   `core/input.js`'s bus, so `capture.js` — which listens to the bus and only the bus —
+  //   never sees them. A student playing a beat in on the Drum Synth's pads would hear one
+  //   machine and record nothing. Reported to the Troubleshooter; NOT fixed here, because
+  //   both instrument files belong to other seats.
+  //   So this page draws ONE row of eight pads that does what a rhythm surface is supposed to
+  //   do (§12.1): it EMITS on the bus and plays nothing itself. Everything downstream — both
+  //   machines, the recorder, a future P3 surface — hangs off that one bus.
+  //
+  // WHY THE MONITOR WIRE IS THIS PAGE'S JOB, explicitly.
+  //   `capture.js`'s own header: "not a second scheduler… Capture never makes a sound. The
+  //   grid schedules the pattern and **the shell wires live monitoring**; if this file also
+  //   called `noteOn`, every captured hit would double." This page is that shell. The two
+  //   lines in `_wireLiveMonitoring` are the whole monitor path, and they call `noteOn` with
+  //   NO `atTime` — so a live hit sounds at `ctx.currentTime`, which is exactly the instant
+  //   `clock.positionTicks` reports and therefore exactly the tick capture stamps.
+  //
+  // VELOCITY: these pads cannot sense it, so they pass none and `input.js` applies its own
+  //   `DEFAULT_VELOCITY` (0.8) — §12.1's rule, and this page does not write a fifth copy of
+  //   the number. A MIDI drum pad on the same bus arrives with REAL velocity through the same
+  //   two lines, and lands in the pattern as a different fill height.
+
+  _buildPads() {
+    const p = panel(
+      'Play',
+      'these pads — and the number keys 1–8 — play BOTH machines through core/input.js, ' +
+      'which is what the recorder hears. A MIDI drum pad plays the same rows with real velocity.'
+    );
+    const pads = el('div', 'bt-pads');
+    this.ui.pads = [];
+    const L = this.listeners;
+
+    KitPair.pieces.forEach((piece, i) => {
+      const pad = el('button', 'bt-pad');
+      pad.type = 'button';
+      pad.dataset.note = String(piece.note);
+      pad.appendChild(el('span', null, piece.label));
+      pad.appendChild(el('span', 'bt-pad__key', `key ${i + 1} · note ${piece.note}`));
+
+      // One pointer, one route. `emitNoteOn`/`emitNoteOff` are reference-counted per
+      // `${source}:${note}` inside input.js, so the note-off MUST carry the same source the
+      // note-on did or the bus keeps the note held forever.
+      let downSource = null;
+      L.add(pad, 'pointerdown', (e) => {
+        e.preventDefault();
+        unlock();
+        downSource = e.pointerType === 'touch' ? 'touch' : 'mouse';
+        try { pad.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+        input.emitNoteOn({ note: piece.note, source: downSource });
+      });
+      const release = () => {
+        if (downSource === null) return;
+        input.emitNoteOff({ note: piece.note, source: downSource });
+        downSource = null;
+      };
+      L.add(pad, 'pointerup', release);
+      L.add(pad, 'pointercancel', release);
+
+      pads.appendChild(pad);
+      this.ui.pads[i] = pad;
+    });
+
+    // QWERTY 1–8. THIS SEAT'S OWN ADDITION, and it is marked as one: §5 names QWERTY as one of
+    // the four routes but `input.js` only maps the twelve PITCH keys, and a rhythm needs two
+    // hands — a mouse can hold exactly one pad. The mapping is the eight §14.1 roles in index
+    // order, which is the same order the pads and the grid rows are already in, so there is
+    // nothing extra to learn. No velocity (see above), and no modifier keys: §10 forbids
+    // inventing an interface and nobody asked for accents.
+    const noteForKey = new Map(KitPair.pieces.map((piece, i) => [String(i + 1), piece.note]));
+    const typing = () => {
+      const a = document.activeElement;
+      return a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
+    };
+    L.add(window, 'keydown', (e) => {
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || typing()) return;
+      const note = noteForKey.get(e.key);
+      if (note === undefined) return;
+      e.preventDefault();
+      unlock();
+      input.emitNoteOn({ note, source: 'key' });
+    });
+    L.add(window, 'keyup', (e) => {
+      const note = noteForKey.get(e.key);
+      if (note === undefined) return;
+      input.emitNoteOff({ note, source: 'key' });
+    });
+
+    p.el.appendChild(pads);
+    p.el.appendChild(el('p', 'bt-note',
+      'Each machine below also has its own pads. Those audition <em>that machine only</em> and ' +
+      'are not recorded — they call the instrument directly instead of going through the input ' +
+      'bus. Use the row above to play the kit.'));
+    return p.el;
+  }
+
+  /** The monitor path. Two lines, and they are the reason a student hears themselves play. */
+  _wireLiveMonitoring() {
+    this.busUnsubs.push(
+      input.on('noteon', (e) => {
+        unlock(); // §3: idempotent, safe from any real gesture, never blocks anything
+        this.pair.noteOn(e.note, e.velocity); // no atTime — sounds NOW, at ctx.currentTime
+        this._litPad(e.note, true);
+      })
+    );
+    this.busUnsubs.push(
+      input.on('noteoff', (e) => {
+        this.pair.noteOff(e.note);
+        this._litPad(e.note, false);
+      })
+    );
+    // A tab-away must not leave a note held on the bus — a key-up that will never arrive is a
+    // stuck note, and `input.allNotesOff()` emits real note-off events so nothing downstream
+    // has to know why.
+    this.listeners.add(window, 'blur', () => input.allNotesOff());
+  }
+
+  /** Lights the pad for a note, wherever the note came from — so a MIDI hit is visible on
+   *  screen too. Cosmetic only; never on the audio path. */
+  _litPad(note, on) {
+    const i = KitPair.pieces.findIndex((p) => p.note === note);
+    const pad = this.ui.pads && this.ui.pads[i];
+    if (pad) pad.classList.toggle('is-lit', on);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  // THE RECORD PANEL — capture.js's controls, made reachable
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  //
+  // `capture.js` answered seven questions and every one of them is a PUBLIC, DOCUMENTED member
+  // with two documented values or a stated range. None of them is a hidden behaviour, and its
+  // seat said so repeatedly: "a CONTROL, deliberately a plain settable property… not something
+  // a student discovers by losing a take." A control nobody can reach is a hidden behaviour
+  // again, so every one of them is on this panel, spelled the way capture.js spells it.
+  //
+  // This panel invents nothing. Every widget writes one named member: `arm`/`disarm`,
+  // `loopMode`, `punch`, `quantize`, `keepLast`, `undo`/`redo`, `discardTake`, `requantize`.
+
+  _buildRecordPanel() {
+    const p = panel('Record', 'what gets written, where, and how it snaps');
+    const L = this.listeners;
+    const ui = this.ui;
+    const cap = this.capture;
+
+    // ——— ARM: which rows ————————————————————————————————————————————————
+    const armRow = el('div', 'bt-row');
+    armRow.appendChild(el('span', 'bt-ctl__label', 'Arm rows'));
+    const arms = el('div', 'bt-arms');
+    ui.armAll = el('button', 'bt-arm', 'all');
+    ui.armAll.type = 'button';
+    L.add(ui.armAll, 'click', () => { cap.arm('all'); this._syncRecordPanel(); });
+    arms.appendChild(ui.armAll);
+    ui.armButtons = KitPair.pieces.map((piece, i) => {
+      const b = el('button', 'bt-arm', piece.label);
+      b.type = 'button';
+      L.add(b, 'click', () => {
+        const armed = cap.armedLanes;
+        const isOn = armed === 'all' || armed.includes(i);
+        if (isOn) cap.disarm(i); else cap.arm(i);
+        this._syncRecordPanel();
+      });
+      arms.appendChild(b);
+      return b;
+    });
+    armRow.appendChild(arms);
+    p.el.appendChild(armRow);
+
+    // ——— LOOP MODE and PUNCH: where ————————————————————————————————————
+    const whereRow = el('div', 'bt-row');
+    const modeGroup = el('div', 'bt-ctl');
+    modeGroup.appendChild(el('span', 'bt-ctl__label', 'Loop passes'));
+    ui.modeOverdub = el('button', 'bt-btn bt-btn--small', 'Overdub');
+    ui.modeReplace = el('button', 'bt-btn bt-btn--small', 'Replace');
+    ui.modeOverdub.type = 'button'; ui.modeReplace.type = 'button';
+    ui.modeOverdub.title = 'Every pass ADDS. Pass 1 stays while pass 2 goes down.';
+    ui.modeReplace.title =
+      'The last pass that had playing in it wins, inside the loop, on armed rows only. ' +
+      'A silent pass replaces nothing.';
+    L.add(ui.modeOverdub, 'click', () => { cap.loopMode = 'overdub'; this._syncRecordPanel(); });
+    L.add(ui.modeReplace, 'click', () => { cap.loopMode = 'replace'; this._syncRecordPanel(); });
+    modeGroup.appendChild(ui.modeOverdub);
+    modeGroup.appendChild(ui.modeReplace);
+    whereRow.appendChild(modeGroup);
+
+    const punchGroup = el('div', 'bt-ctl');
+    punchGroup.appendChild(el('span', 'bt-ctl__label', 'Punch'));
+    ui.punchBtn = el('button', 'bt-btn bt-btn--small', 'Punch');
+    ui.punchBtn.type = 'button';
+    ui.punchStart = el('input');
+    ui.punchStart.type = 'number'; ui.punchStart.className = 'bt-num bt-num--narrow';
+    ui.punchStart.min = '1'; ui.punchStart.step = '1'; ui.punchStart.value = '1';
+    ui.punchBars = el('input');
+    ui.punchBars.type = 'number'; ui.punchBars.className = 'bt-num bt-num--narrow';
+    ui.punchBars.min = '1'; ui.punchBars.step = '1'; ui.punchBars.value = '4';
+    const applyPunch = (on) => {
+      const start = Math.max(1, Math.trunc(Number(ui.punchStart.value) || 1));
+      const len = Math.max(1, Math.trunc(Number(ui.punchBars.value) || 1));
+      // `punchIn(startBar, endBar)` — endBar EXCLUSIVE, identical to clock.loop, so bars 3–4
+      // is punchIn(3, 5). Same "start + length" arithmetic the loop control does, for the same
+      // reason: nobody should have to remember the convention twice.
+      if (on) cap.punchIn(start, start + len); else cap.punchOff();
+      this._syncRecordPanel();
+    };
+    L.add(ui.punchBtn, 'click', () => applyPunch(!cap.punch.on));
+    L.add(ui.punchStart, 'input', () => { if (cap.punch.on) applyPunch(true); });
+    L.add(ui.punchBars, 'input', () => { if (cap.punch.on) applyPunch(true); });
+    punchGroup.appendChild(ui.punchBtn);
+    punchGroup.appendChild(el('span', null, 'from bar'));
+    punchGroup.appendChild(ui.punchStart);
+    punchGroup.appendChild(el('span', null, 'for'));
+    punchGroup.appendChild(ui.punchBars);
+    punchGroup.appendChild(el('span', null, 'bars'));
+    whereRow.appendChild(punchGroup);
+    p.el.appendChild(whereRow);
+
+    // ——— QUANTIZE: how it snaps ————————————————————————————————————————
+    const qRow = el('div', 'bt-row');
+    const qGroup = el('div', 'bt-ctl');
+    qGroup.appendChild(el('span', 'bt-ctl__label', 'Quantize'));
+    ui.qOn = el('button', 'bt-btn bt-btn--small', 'Snap');
+    ui.qOn.type = 'button';
+    L.add(ui.qOn, 'click', () => { cap.quantize.on = !cap.quantize.on; this._syncRecordPanel(); });
+    ui.qStrength = el('input');
+    ui.qStrength.type = 'range'; ui.qStrength.className = 'bt-range';
+    ui.qStrength.min = '0'; ui.qStrength.max = '1'; ui.qStrength.step = '0.05';
+    ui.qStrength.value = String(cap.quantize.strength);
+    ui.qStrengthOut = el('span', 'cbdaw-status__value', '');
+    L.add(ui.qStrength, 'input', () => {
+      cap.quantize.strength = Number(ui.qStrength.value);
+      this._syncRecordPanel();
+    });
+    ui.qDivision = el('select', 'bt-sel');
+    // `null` = each lane's own §13.2 division, which is capture.js's shipped default and the
+    // only value that respects a triplet hat sitting over a straight kick.
+    for (const [value, label] of [['lane', "each row's own"], ['4', '16ths'], ['3', 'triplets'], ['2', '8ths'], ['1', 'beats']]) {
+      const o = el('option', null, label);
+      o.value = value;
+      ui.qDivision.appendChild(o);
+    }
+    L.add(ui.qDivision, 'change', () => {
+      cap.quantize.division = ui.qDivision.value === 'lane' ? null : Number(ui.qDivision.value);
+      this._syncRecordPanel();
+    });
+    ui.qRe = el('button', 'bt-btn bt-btn--small', 'Re-snap takes');
+    ui.qRe.type = 'button';
+    ui.qRe.title =
+      'Re-run the current quantize setting over everything already recorded. Non-destructive ' +
+      'both ways — what was played is kept at its true tick and never overwritten.';
+    L.add(ui.qRe, 'click', () => cap.requantize());
+    qGroup.appendChild(ui.qOn);
+    qGroup.appendChild(ui.qStrength);
+    qGroup.appendChild(ui.qStrengthOut);
+    qGroup.appendChild(ui.qDivision);
+    qGroup.appendChild(ui.qRe);
+    qRow.appendChild(qGroup);
+    p.el.appendChild(qRow);
+
+    // ——— THE TWO OTHER BUTTONS: keep-last, and the ways out of a bad take ————
+    const takeRow = el('div', 'bt-row');
+    const keepGroup = el('div', 'bt-ctl');
+    keepGroup.appendChild(el('span', 'bt-ctl__label', 'Keep'));
+    ui.keepBars = el('input');
+    ui.keepBars.type = 'number'; ui.keepBars.className = 'bt-num bt-num--narrow';
+    ui.keepBars.min = '1'; ui.keepBars.max = '8'; ui.keepBars.step = '1'; ui.keepBars.value = '4';
+    ui.keepBtn = el('button', 'bt-btn bt-btn--small', 'Keep what I just played');
+    ui.keepBtn.type = 'button';
+    ui.keepBtn.title =
+      'capture.keepLast(bars) — a rolling buffer is running the whole time, armed or not. ' +
+      'This is the "I wasn\'t recording but that was the one" button.';
+    L.add(ui.keepBtn, 'click', () => cap.keepLast(Math.max(1, Number(ui.keepBars.value) || 4)));
+    keepGroup.appendChild(ui.keepBars);
+    keepGroup.appendChild(el('span', null, 'bars'));
+    keepGroup.appendChild(ui.keepBtn);
+    takeRow.appendChild(keepGroup);
+
+    const undoGroup = el('div', 'bt-ctl');
+    ui.undo = el('button', 'bt-btn bt-btn--small', '↶ Undo take');
+    ui.redo = el('button', 'bt-btn bt-btn--small', '↷ Redo');
+    ui.discard = el('button', 'bt-btn bt-btn--small', 'Discard take');
+    for (const b of [ui.undo, ui.redo, ui.discard]) { b.type = 'button'; undoGroup.appendChild(b); }
+    L.add(ui.undo, 'click', () => cap.undo());
+    L.add(ui.redo, 'click', () => cap.redo());
+    L.add(ui.discard, 'click', () => cap.discardTake());
+    takeRow.appendChild(undoGroup);
+    p.el.appendChild(takeRow);
+
+    // ——— THE REPORT: what the take did, including what it MOVED ————————————
+    // capture.js's seat question 2 makes this a hard requirement, not a nicety: "Every hit that
+    // moved is reported… so a student who played it loose and watched it snap can SEE that it
+    // snapped, by how much, and in which direction."
+    ui.report = el('p', 'bt-report', 'No take yet. Arm rows, press ● Record, and play.');
+    p.el.appendChild(ui.report);
+
+    this.captureUnsubs = [
+      cap.on('commit', (r) => this._showReport(r)),
+      cap.on('historychange', () => this._syncRecordPanel()),
+      cap.on('armchange', () => { this._syncRecordPanel(); this._syncTransport(); }),
+    ];
+
+    this._syncRecordPanel();
+    return p.el;
+  }
+
+  _showReport(r) {
+    const ui = this.ui;
+    if (!ui.report) return;
+    if (r.refused) {
+      ui.report.innerHTML = `<b>Nothing kept.</b> ${r.reason}`;
+      return;
+    }
+    if (r.discarded) {
+      ui.report.innerHTML = `<b>Take discarded.</b> Nothing was written to the grid.`;
+      return;
+    }
+    const s = r.summary || { moved: 0, meanAbsDriftTicks: 0, meanAbsDriftMs: 0, late: 0, early: 0 };
+    const sources = Object.entries(r.sources || {}).map(([k, n]) => `${n} ${k}`).join(', ');
+    const dropped = r.dropped || {};
+    const droppedBits = [];
+    if (dropped.duringCountIn) droppedBits.push(`${dropped.duringCountIn} during the count-in`);
+    if (dropped.unarmedLane) droppedBits.push(`${dropped.unarmedLane} on rows that weren't armed`);
+    if (dropped.outsidePunch) droppedBits.push(`${dropped.outsidePunch} outside the punch`);
+
+    if (!r.noteCount && !(r.dropped && (r.dropped.duringCountIn || r.dropped.unarmedLane || r.dropped.outsidePunch))) {
+      ui.report.innerHTML = '<b>Nothing played.</b> The take ran and no hits arrived, so the grid is unchanged.';
+      return;
+    }
+    let html = `<b>${r.noteCount} hit${r.noteCount === 1 ? '' : 's'}</b>`;
+    if (sources) html += ` (${sources})`;
+    if (r.passes) html += ` over ${r.passes} loop pass${r.passes === 1 ? '' : 'es'} · ${r.loopMode}`;
+    if (s.moved) {
+      html += ` · <span class="bt-drift">${s.moved} snapped, average ${s.meanAbsDriftTicks} ticks ` +
+        `(${s.meanAbsDriftMs} ms) — ${s.late} late, ${s.early} early</span>`;
+    } else if (r.noteCount) {
+      html += ' · nothing had to move';
+    }
+    if (droppedBits.length) html += ` · <span class="bt-drift">not recorded: ${droppedBits.join(', ')}</span>`;
+    ui.report.innerHTML = html;
+  }
+
+  _syncRecordPanel() {
+    const ui = this.ui;
+    const cap = this.capture;
+    if (!cap || !ui.armAll) return;
+
+    const armed = cap.armedLanes;
+    ui.armAll.setAttribute('aria-pressed', String(armed === 'all'));
+    ui.armButtons.forEach((b, i) => {
+      b.setAttribute('aria-pressed', String(armed === 'all' || armed.includes(i)));
+    });
+
+    ui.modeOverdub.setAttribute('aria-pressed', String(cap.loopMode === 'overdub'));
+    ui.modeReplace.setAttribute('aria-pressed', String(cap.loopMode === 'replace'));
+
+    ui.punchBtn.setAttribute('aria-pressed', String(cap.punch.on));
+    ui.punchStart.disabled = !cap.punch.on;
+    ui.punchBars.disabled = !cap.punch.on;
+
+    ui.qOn.setAttribute('aria-pressed', String(cap.quantize.on));
+    ui.qStrength.disabled = !cap.quantize.on;
+    ui.qStrengthOut.textContent = cap.quantize.on
+      ? (cap.quantize.strength >= 1 ? 'hard' : `${Math.round(cap.quantize.strength * 100)}%`)
+      : 'off';
+    ui.qDivision.value = cap.quantize.division == null ? 'lane' : String(cap.quantize.division);
+
+    ui.undo.disabled = !cap.canUndo;
+    ui.redo.disabled = !cap.canRedo;
+  }
+
+  /** Everything in the transport that reflects state rather than sets it. Called from the
+   *  rAF loop (cheap property writes only) and from the handlers that change state. */
+  _syncTransport() {
+    const ui = this.ui;
+    if (!ui.position) return;
+    const state = clock.state;
+
+    ui.play.setAttribute('aria-pressed', String(state === 'playing'));
+    ui.rec.setAttribute('aria-pressed', String(state === 'recording'));
+    ui.rec.classList.toggle('is-live', state === 'recording' && !clock.countingIn);
+    ui.stop.disabled = state === 'stopped';
+
+    // The count-in is a state a student must be able to SEE, and §3 has no fourth transport
+    // state to carry it — `clock.countingIn` is the extension `clock.js` added for exactly
+    // this. During it the position is pinned at the record point, so showing the position
+    // would be a lie; the bars remaining is the truth.
+    //
+    // THE SECOND HALF OF THAT TEST IS `positionTicks < 0`, AND IT IS NOT DECORATION.
+    // `clock.countingIn` flips false when the SCHEDULER's leading edge reaches the record
+    // point, but `clock.position` deliberately reports the AUDIBLE now — up to one 100 ms
+    // window behind it. For that window the count-in is over as far as the flag is concerned
+    // and the student is still hearing the last clicks, so `position` is still on the negative
+    // side of the record point. Measured on this page before the guard existed: the readout
+    // showed **"0 . 4 . 461"** — bar zero — for about a tenth of a second at the top of every
+    // take. Both numbers are correct and they are correct about different instants; the
+    // display has to pick the one the student is hearing, which is the audible one.
+    // Reported to the Troubleshooter as a `clock.js` seam. Not worked around in `clock.js`.
+    const ticks = clock.positionTicks;
+    if (clock.countingIn || ticks < 0) {
+      const remaining = clock.countingIn
+        ? clock.countInRemainingBars
+        : -ticks / ticksPerBar(clock.timeSignature);
+      ui.positionValue.textContent = remaining.toFixed(1);
+      ui.positionLabel.textContent = 'bars of count-in left';
+      ui.position.dataset.counting = 'true';
+    } else {
+      const p = fromTicks(ticks, clock.timeSignature);
+      ui.positionValue.textContent =
+        `${p.bar} . ${p.beat} . ${String(p.tick).padStart(3, '0')}`;
+      ui.positionLabel.textContent = 'bar · beat · tick';
+      ui.position.dataset.counting = 'false';
+    }
+
+    ui.tsTop.textContent = String(clock.timeSignature.top);
+    ui.tsBottom.textContent = String(clock.timeSignature.bottom);
+
+    const requested = clock.bpm;
+    const committing = Math.round(requested) !== Math.round(this.committedBpm) && clock.state !== 'stopped';
+    ui.bpmCommit.textContent = committing ? `→ ${Math.round(this.committedBpm)} committing…` : '';
+
+    ui.loopBtn.setAttribute('aria-pressed', String(clock.loop.on));
+    const lastBar = clock.loop.endBar - 1; // endBar is exclusive
+    if (!clock.loop.on) {
+      ui.loopReadout.textContent = 'off';
+      ui.loopReadout.style.color = '';
+    } else {
+      const range = lastBar > clock.loop.startBar
+        ? `bars ${clock.loop.startBar}–${lastBar}`
+        : `bar ${clock.loop.startBar}`;
+      // Say it rather than silently seek. `clock.play()` from a playhead already past
+      // `loop.endBar` never enters the region — see the ⏮ comment above.
+      const tpBar = ticksPerBar(clock.timeSignature);
+      const outside = ticks >= (clock.loop.endBar - 1) * tpBar || ticks < (clock.loop.startBar - 1) * tpBar;
+      ui.loopReadout.textContent = outside ? `${range} — playhead is outside, press ⏮` : range;
+      ui.loopReadout.style.color = outside ? 'var(--warn, #ff7a1a)' : '';
+    }
+
+    if (this.capture) {
+      const armed = this.capture.armedLanes;
+      ui.armSummary.textContent = armed === 'all'
+        ? 'all 8 rows'
+        : (armed.length === 0
+            ? 'nothing armed'
+            : armed.map((i) => KitPair.pieces[i].label).join(', '));
+    }
+  }
+
+  /** One machine's column: a header with its A/B toggle, and a scrolling host for its own
+   *  expanded view. The host is a plain div — the instrument paints whatever it likes inside
+   *  it and this page never reaches in. */
+  _machineColumn(key, label, note) {
+    this.hosts = this.hosts || {};
+    const wrap = el('section', 'cbdaw-panel bt-machine');
+    wrap.dataset.machine = key;
+    wrap.dataset.hearing = 'true';
+
+    const head = el('div', 'cbdaw-panel__head');
+    head.appendChild(el('h2', 'cbdaw-panel__title', label));
+    head.appendChild(el('span', 'cbdaw-panel__note', note));
+
+    // The A/B. Muting a machine here stops the GRID and the live monitor from triggering it;
+    // it does not stop, mute, or reconfigure the machine itself — nothing inside either
+    // instrument's file is touched by this switch.
+    const hear = el('label', 'bt-hear');
+    hear.dataset.on = 'true';
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = true;
+    hear.appendChild(box);
+    hear.appendChild(document.createTextNode('hear'));
+    this.listeners.add(box, 'change', () => {
+      this.pair.hear[key] = box.checked;
+      hear.dataset.on = String(box.checked);
+      wrap.dataset.hearing = String(box.checked);
+      if (!box.checked) this.pair[key].allNotesOff();
+    });
+    head.appendChild(hear);
+    wrap.appendChild(head);
+
+    // SEAT QUESTION 6 — the two machines do not have the same relationship with the network,
+    // and the page says which is which instead of leaving a student to find out when it
+    // matters. The Drum Synth is pure Web Audio math: no files, no fetch, no code path that
+    // could reach the network. The Drum Sampler reads `/assets/kits/` and §14.3 already fixes
+    // exactly how it fails — "the sampler offers no kits and says so on its face. The app
+    // still loads and the Drum Synth still works." It does say so, on its own face. This line
+    // adds the one thing the sampler cannot know: whether the browser is offline at all.
+    if (key === 'synth') {
+      wrap.appendChild(el('p', 'bt-note',
+        '<b>Works with the network off.</b> Every piece is built out of oscillators, noise and ' +
+        'filters at trigger time — this machine never fetches anything.'));
+    } else {
+      this.ui.netStatus = el('p', 'bt-note');
+      wrap.appendChild(this.ui.netStatus);
+    }
+
+    const host = el('div', 'bt-machine__host');
+    wrap.appendChild(host);
+    this.hosts[key] = host;
+    return wrap;
+  }
+
+  /** `navigator.onLine` is the browser's own answer and it is the only one available here.
+   *  It is not a guarantee — a captive portal reports "online" — so the line below never
+   *  claims the kits WILL load, only that the browser thinks it has a connection, and it
+   *  always names the machine that is unaffected either way. */
+  _wireNetworkStatus() {
+    const paint = () => {
+      if (!this.ui.netStatus) return;
+      const online = navigator.onLine !== false;
+      this.ui.netStatus.innerHTML = online
+        ? '<b>Needs its files.</b> Kits load from <code>/assets/kits/</code> over the network. ' +
+          'If none appear, the picker says so and the Drum Synth still plays.'
+        : '<b>You are offline.</b> Any kit already decoded keeps playing; a new one will not ' +
+          'load, and the picker will say so. <b>The Drum Synth is unaffected</b> — play it.';
+      this.ui.netStatus.style.color = online ? '' : 'var(--warn, #ff7a1a)';
+    };
+    this.listeners.add(window, 'online', paint);
+    this.listeners.add(window, 'offline', paint);
+    paint();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  // SEAT QUESTION 7 — TEARDOWN. Zero leaks, and it reports a COUNT rather than a claim.
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  //
+  // ORDER IS NOT COSMETIC. Each step stops something that would otherwise reach into what the
+  // next step takes apart:
+  //   1 · the page's own rAF     — stops reading `clock.position` into DOM that is about to go
+  //   2 · the input bus          — stops new notes arriving, then releases everything sounding
+  //   3 · the clock's two subs   — stops the transport reaching this page at all
+  //   4 · capture                — drops its own five bus/clock subscriptions; it writes into
+  //                                the grid's pattern, so it must stop before the grid does
+  //   5 · the grid               — cancels its rAF and its 'tick' subscription; that tick
+  //                                handler is the ONLY thing that calls the machines' noteOn
+  //                                from the scheduler, so it must stop before they disconnect
+  //   6 · both machines          — free every live voice, disconnect every node (§2)
+  //   7 · the two channels       — handed back to core/audio.js
+  //   8 · the shell's chrome     — the CPU meter's rAF, the file menu's document listeners
+  //   9 · this page's listeners  — every one, by count
+  //
+  // WHAT IS DELIBERATELY *NOT* DISPOSED, and why — the same reasoning `shell.js` states for
+  // itself. `core/audio.js`, `core/input.js` and `core/clock.js` are document-lifetime
+  // singletons: one AudioContext (§10), one bus shared by every surface, one transport every
+  // instrument latches to (§3). `clock.dispose()` would clear the module's 25 ms interval for
+  // the whole document, which is right for a page that is truly going away and wrong for a
+  // page a later phase may unmount and remount. So the transport is STOPPED, not disposed —
+  // and the browser tears all three down with the document either way.
+
+  dispose() {
+    if (!this.mounted) return { alreadyDisposed: true };
+    const report = {};
+
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    report.pageRafCancelled = true;
+    clock.stop(); // see above — stopped, never disposed
+
+    for (const off of this.busUnsubs) off();
+    report.busUnsubs = this.busUnsubs.length;
+    this.busUnsubs = [];
+    report.notesReleased = input.allNotesOff();
+
+    clock.off('tick', this._onClockTick);
+    clock.off('statechange', this._onClockState);
+    report.clockSubscriptionsDropped = 2;
+
+    for (const off of this.captureUnsubs) off();
+    report.captureUnsubs = this.captureUnsubs.length;
+    this.captureUnsubs = [];
+    if (this.capture) { report.capture = this.capture.dispose(); this.capture = null; }
+
+    if (this.grid) { report.grid = this.grid.dispose(); this.grid = null; }
+    if (this.synth) { report.synth = this.synth.dispose(); this.synth = null; }
+    if (this.sampler) { report.sampler = this.sampler.dispose(); this.sampler = null; }
+    this.pair = null;
+
+    for (const ch of this.channels) releaseChannel(ch);
+    report.channelsReleased = this.channels.length;
+    this.channels = [];
+
+    if (this.cpu) { report.cpu = this.cpu.dispose(); this.cpu = null; }
+    if (this.menu) { report.menu = this.menu.dispose(); this.menu = null; }
+
+    report.listenersDropped = this.listeners.dropAll();
+    this.root?.remove();
+    this.root = null;
+    this.mounted = false;
+    return report;
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// BOOT — an on-page error instead of a blank screen, because a blank page in front of a class
+// tells nobody anything. `window.cbdawBeat` is the handle `test-p2` and `redpen-p2` need to
+// call `dispose()` and count what came down.
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+const page = new BeatPage();
+try {
+  page.mount(document.body);
+} catch (err) {
+  const box = el('pre', 'bt-error');
+  box.textContent = `beat.html failed to mount:\n\n${err && err.stack ? err.stack : err}`;
+  document.body.appendChild(box);
+  console.error('[beat.html] mount failed:', err);
+}
+window.cbdawBeat = page;
+</script>
+
+</body>
+</html>

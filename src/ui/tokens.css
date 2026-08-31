@@ -1,0 +1,71 @@
+/* =======================================================================================
+   ui/tokens.css — the palette the whole app inherits.
+   CONTRACTS §9. Created by `scopes`, P1/S3. Read by every seat in every remaining phase.
+
+   ⚠ THE COLORS BELOW ARE PROVISIONAL AND AWAIT BRANDON'S CONFIRMATION. ⚠
+   Color carries teaching meaning in this app: CONTRACTS §4's color rule is how a student
+   avoids memorizing which numeral is minor — "Students never memorize which numeral is
+   minor; the color tells them." A seat does not get to decide that. This file is a
+   PROPOSAL, shipped so nothing downstream is blocked, flagged for Brandon to overrule.
+   Changing a value here is a one-line edit and nothing needs rebuilding — every surface
+   reads these variables, none hard-codes a color. See receipt-scopes.md → OPEN DECISIONS.
+
+   THE ONE RULE FOR EVERY OTHER SEAT: never write a color literal in a surface, an
+   instrument, a device, or a visual. Read a token. One palette, every surface, no drift
+   (§9). If you need a color that is not here, that is an escalation, not a hex code.
+
+   THE TEST THIS PALETTE IS BUILT AGAINST (§9): "Everything must read from ten feet away on
+   a projector in a lit room." That is a room test, not a contrast ratio, and it has NOT
+   been run — no projector exists in this build environment. What follows is therefore a
+   DESIGN CLAIM with measured numbers behind it, not a measured fact. The measurable parts
+   were computed and are recorded inline. The claim itself is Brandon's to confirm in a
+   classroom.
+
+   HOW THE ROOM TEST WAS DESIGNED FOR, given it could not be run:
+   - A projector in a lit room crushes blacks and washes out saturation. So the ground is a
+     dark blue-slate, not pure black — pure black plus ambient light reads as muddy grey and
+     takes every dark value down with it.
+   - Panels are separated from the ground by their --line border, NOT by fill brightness.
+     --bg to --panel is only 1.23:1 and a washed-out projector will eat that difference;
+     the border is what survives. Do not rely on the fill alone to delineate a panel.
+   - Teaching colors are chosen bright (L* 63-82) as well as saturated. Projector gamma eats
+     midtones; a "rich" dark teal that looks correct on a laptop disappears on a wall.
+   ======================================================================================= */
+
+:root {
+  color-scheme: dark;
+
+  /* --- GROUND ----------------------------------------------------------------------
+     Measured: --bg/--panel 1.23:1 · --panel/--line 1.70:1 · --text on --panel 14.5:1 */
+  --bg: #0a0d13;      /* the page behind everything */
+  --panel: #1b2332;   /* any raised surface: a strip, a device, a visual's plot area */
+  --line: #3a485f;    /* borders, grid lines, dividers, axis rules */
+
+  /* --- TEXT ------------------------------------------------------------------------
+     Measured on --panel: --text 14.5:1 · --text-dim 6.0:1 */
+  --text: #f2f6fc;      /* anything a student has to read */
+  --text-dim: #93a1b8;  /* axis labels, units, secondary readouts */
+
+  /* --- DEGREE COLORS — all seven tokens set to #93a1b8, unassigned. */
+  --deg-major: #93a1b8;    /* major triad on this degree */
+  --deg-minor: #93a1b8;    /* minor triad on this degree */
+  --deg-dim: #93a1b8;      /* diminished triad on this degree */
+  --deg-altered: #93a1b8;  /* altered quality: stack isn't a recognisable triad (§15.4-A5); "student moved it" is scale.altered[i] (§4), not this token */
+  --deg-aug: #93a1b8;      /* augmented triad on this degree */
+  --deg-flat5: #93a1b8;    /* major triad, flat five */
+  --deg-sharp5: #93a1b8;   /* minor triad, sharp five */
+
+  /* --- SYSTEM ----------------------------------------------------------------------
+     --accent is UI and instrumentation: selection, focus, the spectrum trace, the scope
+     trace. It is deliberately NOT one of the degree hues — the visuals must never borrow a
+     degree color, or a student learns a teaching association that is not true. */
+  --accent: #34e5b4;     /* 9.8:1 on --panel */
+  --warn: #ff7a1a;       /* refusal, over-cap, "this is not going to work" — 6.0:1 */
+
+  /* Meters. §10-B: dBFS peak, range −60 → 0 dB, --meter-hot above −6 dB.
+     Green/red is the universal convention and a meter also carries level as POSITION, so
+     the color is never the only cue. --meter-ok is pulled toward yellow-green so it stays
+     43 ΔE from --accent and a meter never reads as a selection highlight. */
+  --meter-ok: #6ee05a;   /* 9.4:1 on --panel */
+  --meter-hot: #ff3b30;  /* 4.4:1 on --panel — a large fill, not text */
+}

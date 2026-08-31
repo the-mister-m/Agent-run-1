@@ -1,0 +1,183 @@
+<!doctype html>
+<!--
+  piano-roll-testpage.html — THROWAWAY HARNESS for the `piano-roll` seat (P3/S5)
+  Written 2026-08-24 17:51 EDT. NOT PROJECT CODE, not a tool page, nothing links to it.
+  The tool page for P3 is /tools/harmony.html and it is NOT this seat's file to write.
+
+  SERVE IT, DO NOT DOUBLE-CLICK IT. CONTRACTS §10, amended: "Never assume the app is
+  running from file://" — ES modules and the AudioContext both need a real origin.
+
+      cd "<project root>" && python3 -m http.server 8000
+      open http://127.0.0.1:8000/docs/scratchpad/piano-roll-testpage.html
+
+  WHAT TO LOOK AT, in the order the seat's DONE-CHECK asks for it:
+    1  twelve chromatic rows, in-key shaded and out-of-key dimmed — walk all twelve tonics
+       with the tonic buttons and watch the shading move
+    2  the +/- row: alter a degree and the shading moves LIVE, with no reload
+    3  the two rolls side by side (seat question 2) — chromatic and diatonic, both shaded
+    4  the ruler: flip TRIPLET and read the labels against the beat tool's own ruler
+    5  drag a note's right edge — the ruler cells it covers light up. That is the length.
+    6  drag a velocity bar in the lane under each roll
+    7  press CAPTURE to inject notes shaped exactly like capture.js's commit report,
+       including one deliberately off-grid hit (orange outline = kept at its true tick)
+    8  press PLAY — the playhead runs from rAF. Nothing on this page makes a sound,
+       because piano-roll.js contains no audio call at all.
+-->
+<meta charset="utf-8">
+<title>piano-roll — seat harness (P3/S5)</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+  h1 { font-size: 14px; color: var(--text-dim); font-weight: 600; margin: 0 0 12px; }
+  h2 { font-size: 12px; color: var(--text-dim); font-weight: 600; margin: 18px 0 6px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+  button {
+    font: inherit; font-size: 12px; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 4px; padding: 4px 9px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .readout { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+</style>
+
+<h1>piano-roll — P3/S5 seat harness · serve over http, never file://</h1>
+
+<div class="bar" id="tonics"></div>
+<div class="bar" id="degrees"></div>
+<div class="bar">
+  <button id="preset-major">Major</button>
+  <button id="preset-aeolian">Aeolian</button>
+  <button id="preset-locrian">Locrian</button>
+  <button id="capture">CAPTURE (inject capture.js-shaped notes)</button>
+  <button id="play">PLAY</button>
+  <button id="stop">STOP</button>
+  <span class="readout" id="scale-readout"></span>
+</div>
+
+<h2>EXPANDED · chromatic (seat questions 1, 3, 4, 5, 8, 10)</h2>
+<div id="chromatic"></div>
+
+<div class="cols">
+  <div>
+    <h2>EXPANDED · diatonic (seat question 2 — the standalone shows both)</h2>
+    <div id="diatonic"></div>
+  </div>
+  <div>
+    <h2>COMPACT · the DAW lane (seat question 10)</h2>
+    <div id="compact"></div>
+  </div>
+</div>
+
+<script type="module">
+  import PianoRoll from '../../src/surfaces/piano-roll.js';
+  import { clock, ticksPerBar } from '../../src/core/clock.js';
+  import { ctx } from '../../src/core/audio.js';
+  import {
+    createScale, setScaleTonic, setScalePreset, setScaleDegree, resetScaleDegree,
+    scaleName, spellingOf,
+  } from '../../src/theory/scale.js';
+
+  // ---------------------------------------------------------------------------------------
+  // A stand-in for core/state.js, which §1 lists but NOBODY HAS BUILT YET. This is the §4
+  // shape and nothing more — `{ scale, on('scale', fn) }` — living in a throwaway harness
+  // rather than in src/, because this seat's brief names exactly one file it may write.
+  // `piano-roll.js`'s `bindState()` is written against this shape, so the real state.js will
+  // drop in with no change to the surface.
+  // ---------------------------------------------------------------------------------------
+  const state = {
+    scale: createScale(0, 'Major'),
+    _subs: new Set(),
+    on(evt, fn) { if (evt === 'scale') this._subs.add(fn); return () => this._subs.delete(fn); },
+    off(evt, fn) { this._subs.delete(fn); },
+    set(next) { this.scale = next; for (const fn of this._subs) fn({ scale: next }); render(); },
+  };
+
+  const chromatic = new PianoRoll().bindState(state);
+  chromatic.bars = 2;
+  chromatic.overlay = 'letter';
+  chromatic.mountExpanded(document.getElementById('chromatic'));
+
+  const diatonic = new PianoRoll().bindState(state);
+  diatonic.rows = 'diatonic';
+  diatonic.overlay = 'solfege';
+  diatonic.mountExpanded(document.getElementById('diatonic'));
+
+  const compact = new PianoRoll().bindState(state);
+  compact.overlay = 'number';
+  compact.mountCompact(document.getElementById('compact'));
+
+  const rolls = [chromatic, diatonic, compact];
+
+  // ---- twelve tonics, one button each -----------------------------------------------------
+  const tonicBar = document.getElementById('tonics');
+  for (let pc = 0; pc < 12; pc++) {
+    const b = document.createElement('button');
+    b.dataset.pc = String(pc);
+    // the label comes from theory/scale.js, exactly as it does inside the surface
+    b.innerHTML = spellingOf(createScale(pc, 'Major'), 0).text;
+    b.onclick = () => state.set(setScaleTonic(state.scale, pc));
+    tonicBar.appendChild(b);
+  }
+
+  // ---- the +/- per degree — §4's A14 -------------------------------------------------------
+  const degBar = document.getElementById('degrees');
+  for (let i = 0; i < 7; i++) {
+    const minus = document.createElement('button');
+    minus.textContent = `${i + 1}-`;
+    minus.onclick = () => state.set(setScaleDegree(state.scale, i, -1));
+    const plus = document.createElement('button');
+    plus.textContent = `${i + 1}+`;
+    plus.onclick = () => state.set(setScaleDegree(state.scale, i, +1));
+    const reset = document.createElement('button');
+    reset.textContent = `${i + 1}↺`;
+    reset.onclick = () => state.set(resetScaleDegree(state.scale, i));
+    degBar.append(minus, plus, reset);
+  }
+
+  document.getElementById('preset-major').onclick = () => state.set(setScalePreset(state.scale, 'Major'));
+  document.getElementById('preset-aeolian').onclick = () => state.set(setScalePreset(state.scale, 'Aeolian'));
+  document.getElementById('preset-locrian').onclick = () => state.set(setScalePreset(state.scale, 'Locrian'));
+
+  function render() {
+    document.getElementById('scale-readout').textContent =
+      `${scaleName(state.scale)} · degrees [${state.scale.degrees.join(',')}] · altered [${state.scale.altered.map(Number).join('')}]`;
+  }
+  render();
+
+  // ---- SEAT QUESTION 9 — notes shaped exactly like capture.js's commit report --------------
+  // Four §7 fields plus the two metadata keys capture.js carries (`source`, `lane`). The
+  // surface must keep the true ticks (including the deliberate off-grid 127) and must drop
+  // the metadata, per §5's "nothing downstream may branch on source".
+  document.getElementById('capture').onclick = () => {
+    const bar = ticksPerBar();
+    const take = [
+      { tick: 0,         length: 480, note: 60, velocity: 0.9,  source: 'key',  lane: 0 },
+      { tick: 480,       length: 240, note: 64, velocity: 0.55, source: 'key',  lane: 0 },
+      { tick: 720,       length: 240, note: 67, velocity: 0.75, source: 'midi', lane: 0 },
+      { tick: 960 + 7,   length: 360, note: 71, velocity: 0.4,  source: 'midi', lane: 0 },  // OFF-GRID on purpose
+      { tick: bar,       length: 960, note: 72, velocity: 1.0,  source: 'mouse', lane: 0 },
+      { tick: bar + 240, length: 120, note: 61, velocity: 0.35, source: 'midi', lane: 0 },  // out of key on purpose
+    ];
+    for (const r of rolls) r.addNotes(take);
+    console.log('roll.toProjectNotes() =', chromatic.toProjectNotes());
+  };
+
+  // ---- SEAT QUESTION 8 — the playhead ------------------------------------------------------
+  // §3's amended block: the AudioContext starts SUSPENDED and unlocks on a real gesture.
+  // The transport is what makes a sound (a metronome, if one is bound); the ROLL makes none —
+  // it only reads `clock.positionTicks` from its own rAF loop.
+  document.getElementById('play').onclick = async () => {
+    if (ctx.state === 'suspended') await ctx.resume();
+    clock.loop = { on: true, startBar: 1, endBar: 3 };
+    clock.play();
+  };
+  document.getElementById('stop').onclick = () => clock.stop();
+
+  // handy for poking at from the console
+  Object.assign(window, { chromatic, diatonic, compact, state, clock });
+</script>

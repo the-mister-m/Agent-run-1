@@ -1,0 +1,23 @@
+127.0.0.1 - - [23/Aug/2026 18:28:35] "GET /Builddocs/P2-beat-tool/S3-clock/clock-testpage.html HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 18:28:35] "GET /src/core/audio.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 18:28:35] "GET /src/core/clock.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 18:28:35] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 18:28:35] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+ctx state after unlock: running
+
+=== __q4(100) ===
+127.0.0.1 - - [23/Aug/2026 18:28:35] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 18:28:35] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+Q4 · loop region, 100 passes                                 FAIL
+   loop bars 1→5 (endBar EXCLUSIVE) = 7680 ticks = 4 bars, at 480 bpm = 2.000 s/pass
+   seams crossed: 100 (asked for 100)
+   window tiling — gaps 0 · overlaps 0 · zero-width 0
+   distinct beat ticks covered: 16 (expect 16) · any outside the region: 0
+   coverage per beat tick: 100–101 (expect 101, ±1 for the partial final cycle)
+   clicks: 1604, expected 1616 — a dropped seam event loses one, a doubled one gains one
+   click drift over the whole run: max 0.000 ms, gaps 125.00–125.00 ms (expect 125.00)
+
+0/1 passed. FAILED: Q4 · loop region, 100 passes
+wrote /Users/moth3rship/Desktop/AI Design/School stuff/Chromebook DAW/Agent run 1/Builddocs/P2-beat-tool/S3-clock/clock-testresults-loop.json

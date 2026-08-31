@@ -1,0 +1,26 @@
+[
+  {
+    "name": "REG \u00b7 zero tick drift over 64 bars (16ths and triplets)",
+    "pass": true,
+    "lines": [
+      "division 4: 1024 steps over 64 bars \u2014 last step landed on 122880, expected 122880, tick drift 0, max |time \u2212 ideal| 0.000000 ms",
+      "division 3: 768 steps over 64 bars \u2014 last step landed on 122880, expected 122880, tick drift 0, max |time \u2212 ideal| 0.000000 ms",
+      "PASS \u2014 zero accumulated tick drift, both divisions."
+    ]
+  },
+  {
+    "name": "A \u00b7 scheduler-pass cost probe moves under real load",
+    "pass": true,
+    "lines": [
+      "idle          clock.schedulerLoad 0.0000   lastPassMs 0.000   governor.load 0.0000",
+      "under load    clock.schedulerLoad 0.0298   lastPassMs 2.800   governor.load 0.0000",
+      "after load    clock.schedulerLoad 0.0000  (smoothing decays over 20 passes)",
+      "inject  5 ms/pass -> schedulerLoad 0.0501   (\u00a78 expects 0.05)",
+      "inject 10 ms/pass -> schedulerLoad 0.1000   (\u00a78 expects 0.10)",
+      "inject 25 ms/pass -> schedulerLoad 0.2500   (\u00a78 expects 0.25)",
+      "governor.load under the same 150-voice load: 0.0000 \u2014 audio.js's probe cannot see it",
+      "hook present on governor? false  <- false until audio.js gets the addition",
+      "PASS \u2014 near zero idle, rises with real scheduler work, decays after, correctly scaled."
+    ]
+  }
+]

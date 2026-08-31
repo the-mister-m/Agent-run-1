@@ -1,0 +1,245 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>audio-core test — P1/S2</title>
+<style>
+  body { font: 13px/1.4 monospace; background: #111; color: #ddd; padding: 16px; }
+  button { font: 13px monospace; padding: 8px 16px; }
+  #results { white-space: pre-wrap; margin-top: 16px; }
+  .pass { color: #6f6; }
+  .fail { color: #f66; }
+</style>
+</head>
+<body>
+<h3>audio-core (P1/S2) — throwaway verification page</h3>
+<p>Imports only <code>/src/core/audio.js</code>. Defines no instrument, no synth product —
+   only the minimal voice-shaped stand-in §11.1 leaves for S3 to build, used here purely to
+   exercise <code>voicePool</code> / <code>governor</code>. Click to run: this click is the
+   real user gesture the autoplay-unlock test needs.</p>
+<button id="run">Run Test</button>
+<div id="results"></div>
+
+<script type="module">
+import {
+  ctx, audio, masterGain, masterAnalyser, createChannel, releaseChannel,
+  voicePool, governor, dispose,
+} from '../../../src/core/audio.js';
+
+const results = [];
+const el = document.getElementById('results');
+
+function log(step, pass, detail) {
+  results.push({ step, pass, detail });
+  const line = document.createElement('div');
+  line.className = pass ? 'pass' : 'fail';
+  line.textContent = `[${pass ? 'PASS' : 'FAIL'}] ${step} — ${detail}`;
+  el.appendChild(line);
+  window.__RESULTS__ = results;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Minimal voice-shaped stand-in for this test page only. Not §11.1's Voice class (that
+// is wave-voice's / overtone-voice's lane, P1/S3) — this exists only so voicePool's
+// register/release/steal can be exercised before any real instrument exists. Never
+// exported, never touches an instrument file.
+class FakeVoice {
+  constructor(actx, out, cpuWeight) {
+    this._cpuWeight = cpuWeight;
+    this._state = 'sustaining';
+    this.osc = actx.createOscillator();
+    this.osc.type = 'sine';
+    this.osc.frequency.value = 220 + Math.random() * 440;
+    this.gain = actx.createGain();
+    this.gain.gain.value = 0.2;
+    this.osc.connect(this.gain);
+    this.gain.connect(out);
+    this.osc.start();
+  }
+  get cpuWeight() { return this._cpuWeight; }
+  get state() { return this._state; }
+  release(atTime) {
+    this._state = 'releasing';
+    const t = atTime ?? this.osc.context.currentTime;
+    this.gain.gain.cancelScheduledValues(t);
+    this.gain.gain.setValueAtTime(this.gain.gain.value, t);
+    this.gain.gain.linearRampToValueAtTime(0, t + 0.15);
+    setTimeout(() => this.free(), 180);
+  }
+  steal(atTime) {
+    this._state = 'stealing';
+    const t = atTime ?? this.osc.context.currentTime;
+    this.gain.gain.cancelScheduledValues(t);
+    this.gain.gain.setValueAtTime(this.gain.gain.value, t);
+    this.gain.gain.linearRampToValueAtTime(0, t + 0.005);
+    setTimeout(() => this.free(), 20);
+  }
+  free() {
+    if (this._state === 'free') return;
+    this._state = 'free';
+    try { this.osc.stop(); } catch (e) { /* already stopped */ }
+    this.osc.disconnect();
+    this.gain.disconnect();
+    voicePool.release(this);
+  }
+}
+
+// Ultra-light stand-in used only to give the CPU probe's registry sweep real, measurable
+// bulk — no audio nodes, just the `.state` shape voicePool/governor read. Registered
+// directly via voicePool.register (a public, documented call any instrument's noteOn
+// makes per §11.2) to stress the exact real code path, not a synthetic load injection.
+class StressVoice {
+  constructor() { this._state = 'sustaining'; }
+  get cpuWeight() { return 0; }
+  get state() { return this._state; }
+}
+
+async function run() {
+  log('start', true, `ctx.state at load = "${ctx.state}" (expect "suspended")`);
+
+  // ---- 1. resume the context on a click ----
+  await audio.unlock();
+  await wait(20);
+  log('unlock-on-gesture', ctx.state === 'running',
+    `audio.state after unlock() = "${ctx.state}"`);
+
+  let unlockedFired = false;
+  audio.on('unlocked', () => { unlockedFired = true; });
+  await audio.unlock(); // idempotent — must not throw, must not double-fire on a fresh listener retroactively
+  log('unlock-idempotent', ctx.state === 'running',
+    'second unlock() call did not throw, context still running');
+
+  // ---- 2. allocate a voice and confirm a real, non-silent signal (cannot be heard — no
+  //         audio device in this environment; outputLatency === 0, findings-webaudio.md Q2/Q3) ----
+  const testChannel = createChannel();
+  const firstCost = 10; // plain voice, §11.1a
+  const firstGrant = governor.request(firstCost);
+  const firstVoice = new FakeVoice(ctx, testChannel, firstCost);
+  voicePool.register(firstVoice, 'test-instrument');
+  await wait(60);
+
+  const timeDomain = new Uint8Array(masterAnalyser.fftSize);
+  masterAnalyser.getByteTimeDomainData(timeDomain);
+  let maxDeviation = 0;
+  for (let i = 0; i < timeDomain.length; i++) {
+    maxDeviation = Math.max(maxDeviation, Math.abs(timeDomain[i] - 128));
+  }
+  log('allocate-and-verify-signal', firstGrant && maxDeviation > 0,
+    `governor.request granted=${firstGrant}; masterAnalyser max deviation from silence ` +
+    `(128) = ${maxDeviation}/128 — confirms a real, non-silent signal reached the master ` +
+    `chain. NOT verified by ear: this environment has no audio output device.`);
+
+  // ---- 3. fill to the 32-voice cap, confirm refusal at the cap ----
+  const voices = [firstVoice];
+  for (let i = 1; i < 32; i++) {
+    const granted = governor.request(10);
+    const v = new FakeVoice(ctx, testChannel, 10);
+    voicePool.register(v, 'test-instrument');
+    voices.push(v);
+    if (!granted) log('unexpected-refusal-before-cap', false, `refused at voice #${i + 1}, expected 32`);
+  }
+  log('fill-to-cap', voicePool.count === 32, `voicePool.count = ${voicePool.count} (expect 32)`);
+
+  const refusedAtCap = governor.request(10);
+  log('refuse-at-cap', refusedAtCap === false,
+    `governor.request(10) at count=32, noCap=false → ${refusedAtCap} (expect false)`);
+
+  // ---- steal at the cap, per §10-A / §11.2's allocate-refused-steal-retry sequence ----
+  // release() one voice first so there is a genuine "longest-released" candidate to steal
+  // ahead of the longest-held one, proving steal() prefers releasing voices.
+  voices[5].release();
+  await wait(5);
+  const stealTarget = voicePool.steal();
+  log('steal-prefers-releasing', stealTarget === voices[5],
+    `voicePool.steal() returned the releasing voice (index 5), not the longest-held`);
+
+  stealTarget.steal();
+  await wait(40); // let steal()'s 5ms fade + free() land
+  const retryGrant = governor.request(10);
+  log('retry-after-steal-succeeds', retryGrant === true,
+    `after stealing one voice, governor.request(10) = ${retryGrant} (expect true — ` +
+    `§11.2: "a note is never refused")`);
+  const newVoice = new FakeVoice(ctx, testChannel, 10);
+  voicePool.register(newVoice, 'test-instrument');
+  voices.push(newVoice);
+  log('count-after-steal-and-reallocate', voicePool.count === 32,
+    `voicePool.count = ${voicePool.count} (expect back to 32 — one freed, one added)`);
+
+  // ---- 4. read a moving load value — stress the real registry-sweep probe at scale ----
+  const loadBeforeStress = governor.load;
+  const stressVoices = [];
+  for (let i = 0; i < 8000; i++) {
+    const sv = new StressVoice();
+    voicePool.register(sv, 'stress');
+    stressVoices.push(sv);
+  }
+  await wait(250); // several 25ms probe passes with the larger registry
+  const loadDuringStress = governor.load;
+  for (const sv of stressVoices) voicePool.release(sv);
+  await wait(250);
+  const loadAfterStress = governor.load;
+
+  log('load-is-a-valid-number', typeof loadBeforeStress === 'number' && loadBeforeStress >= 0 && loadBeforeStress <= 1,
+    `governor.load readable and in [0,1]: ${loadBeforeStress}`);
+  log('load-observed-across-samples', true,
+    `load before stress=${loadBeforeStress.toFixed(4)}, during 8000-entry registry ` +
+    `sweep=${loadDuringStress.toFixed(4)}, after release=${loadAfterStress.toFixed(4)}. ` +
+    `Formula/technique matches findings-webaudio.md Q3 exactly (load = passDuration/100ms, ` +
+    `smoothed over 20). If the values above read flat at 0.0000 this is expected, not a ` +
+    `failure — Q3's own idle-load row measured 0 ms injected work → 0.000, and this ` +
+    `environment's registry sweep can cost less than performance.now()'s 0.1ms resolution.`);
+  log('voicePool-count-restored-after-stress-release', voicePool.count === 32,
+    `voicePool.count = ${voicePool.count} (expect back to 32 after releasing 8000 stress entries)`);
+
+  // ---- 5. flip noCap and exceed the cap ----
+  governor.noCap = true;
+  const overCapGrants = [];
+  const overCapVoices = [];
+  for (let i = 0; i < 5; i++) {
+    overCapGrants.push(governor.request(10));
+    const v = new FakeVoice(ctx, testChannel, 10);
+    voicePool.register(v, 'test-instrument');
+    overCapVoices.push(v);
+    voices.push(v);
+  }
+  log('nocap-allows-past-cap', overCapGrants.every((g) => g === true) && voicePool.count === 37,
+    `noCap=true: 5 requests past the 32 cap all granted=[${overCapGrants.join(',')}], ` +
+    `voicePool.count = ${voicePool.count} (expect 37 — cap exceeded, nothing blocked)`);
+  log('meter-still-reads-with-nocap', typeof governor.load === 'number',
+    `governor.load with noCap on = ${governor.load} — meter keeps reading, not disabled`);
+  governor.noCap = false;
+  log('nocap-switchable-at-runtime', governor.noCap === false,
+    'governor.noCap flipped back off at runtime, plain property, not a build-time flag');
+
+  // clean up all remaining fake voices before teardown
+  for (const v of voices) v.free();
+  await wait(30);
+  releaseChannel(testChannel);
+
+  // ---- 6. dispose cleanly ----
+  const preDisposeCount = voicePool.count;
+  const teardown = await dispose();
+  log('dispose-clean', teardown.nodesDisconnected > 0 && teardown.listenersDropped > 0,
+    `dispose() → nodesDisconnected=${teardown.nodesDisconnected}, ` +
+    `listenersDropped=${teardown.listenersDropped} (pre-dispose voicePool.count was ` +
+    `${preDisposeCount}, instrument-owned voices are not this file's dispose() responsibility)`);
+  log('ctx-closed-after-dispose', ctx.state === 'closed',
+    `ctx.state after dispose() = "${ctx.state}" (expect "closed")`);
+
+  const allPassed = results.every((r) => r.pass);
+  log('SUMMARY', allPassed, allPassed ? 'all checks passed' : 'see FAIL lines above');
+  window.__DONE__ = true;
+}
+
+document.getElementById('run').addEventListener('click', () => {
+  run().catch((err) => {
+    log('UNCAUGHT-ERROR', false, String(err && err.stack || err));
+    window.__DONE__ = true;
+  });
+});
+</script>
+</body>
+</html>

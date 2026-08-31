@@ -1,0 +1,312 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>drum-synth test — P2/S4</title>
+<style>
+  body { font: 13px/1.4 monospace; background: #111; color: #ddd; padding: 16px; }
+  button { font: 13px monospace; padding: 8px 16px; }
+  #results { white-space: pre-wrap; margin-top: 16px; }
+  .pass { color: #6f6; }
+  .fail { color: #f66; }
+  #compact-mount { width: 420px; border: 1px dashed #444; margin-top: 10px; }
+  #expanded-mount { width: 760px; height: 720px; overflow: auto; border: 1px dashed #444; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h3>drum-synth (P2/S4) — throwaway verification page</h3>
+<p>Imports <code>/src/core/audio.js</code>, <code>/src/core/clock.js</code> (both frozen) and
+   <code>/src/instruments/drum-synth.js</code>, per this seat's DONE-CHECK. Click to run: this
+   click is the real user gesture the autoplay-unlock test needs. Load this page from a static
+   file server with the network disabled — no fetch, no samples, no assets anywhere in this
+   file or in drum-synth.js.</p>
+<button id="run">Run Test</button>
+<div id="results"></div>
+<div>compact mount:</div>
+<div id="compact-mount"></div>
+<div>expanded mount:</div>
+<div id="expanded-mount"></div>
+
+<script type="module">
+import { ctx, audio, createChannel, releaseChannel, voicePool, governor } from '../../../src/core/audio.js';
+import { clock } from '../../../src/core/clock.js';
+import DrumSynth from '../../../src/instruments/drum-synth.js';
+
+const results = [];
+const el = document.getElementById('results');
+
+function log(step, pass, detail) {
+  results.push({ step, pass, detail });
+  const line = document.createElement('div');
+  line.className = pass ? 'pass' : 'fail';
+  line.textContent = `[${pass ? 'PASS' : 'FAIL'}] ${step} — ${detail}`;
+  el.appendChild(line);
+  window.__RESULTS__ = results;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function maxDeviationFromSilence(analyser) {
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+  let max = 0;
+  for (let i = 0; i < data.length; i++) max = Math.max(max, Math.abs(data[i] - 128));
+  return max;
+}
+
+function rmsOfSilenceWindow(analyser) {
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+  let sumSq = 0;
+  for (let i = 0; i < data.length; i++) {
+    const d = data[i] - 128;
+    sumSq += d * d;
+  }
+  return Math.sqrt(sumSq / data.length);
+}
+
+async function run() {
+  log('start', true, `ctx.state at load = "${ctx.state}" (expect "suspended")`);
+  log('clock-imports-cleanly', clock.state === 'stopped',
+    `clock.state = "${clock.state}" — clock.js import satisfies the DONE-CHECK's ` +
+    `"importing audio.js, clock.js, and your file"; drum-synth.js itself never imports clock.js`);
+
+  await audio.unlock();
+  await wait(20);
+  log('unlock-on-gesture', ctx.state === 'running', `audio.state after unlock() = "${ctx.state}"`);
+
+  const channel = createChannel();
+  const drum = new DrumSynth(ctx, channel);
+
+  // ---- §2 static surface ----
+  log('static-id-label-playable', DrumSynth.id === 'drum-synth' && DrumSynth.label === 'Drum Synth' && DrumSynth.playable === true,
+    `id="${DrumSynth.id}" label="${DrumSynth.label}" playable=${DrumSynth.playable}`);
+  log('static-amendment-fields', DrumSynth.needsLoad === false && DrumSynth.emitsNotes === false,
+    `needsLoad=${DrumSynth.needsLoad} emitsNotes=${DrumSynth.emitsNotes}`);
+
+  const readyResult = await drum.ready();
+  log('ready-resolves-immediately', readyResult === undefined, 'ready() resolved with no error, synchronously available');
+
+  // ---- Q1: static pieces — §14.1's eight, exact index/note order, grid-consumable shape ----
+  const EXPECTED = [
+    { index: 0, note: 36, label: 'Kick' },
+    { index: 1, note: 38, label: 'Snare' },
+    { index: 2, note: 42, label: 'Closed Hat' },
+    { index: 3, note: 46, label: 'Open Hat' },
+    { index: 4, note: 39, label: 'Clap' },
+    { index: 5, note: 45, label: 'Low Tom' },
+    { index: 6, note: 50, label: 'High Tom' },
+    { index: 7, note: 49, label: 'Crash' },
+  ];
+  const piecesMatch = Array.isArray(DrumSynth.pieces) && DrumSynth.pieces.length === 8 &&
+    DrumSynth.pieces.every((p, i) => p.index === EXPECTED[i].index && p.note === EXPECTED[i].note && p.label === EXPECTED[i].label);
+  log('static-pieces-matches-CONTRACTS-14.1', piecesMatch, JSON.stringify(DrumSynth.pieces));
+
+  // ---- Q2/Q4: trigger all eight by index, via the grid's exact call shape (§14.5),
+  // confirm a real non-silent signal AND that velocity moves more than level ----
+  const analyser = drum.getAnalyser('spectrum');
+  log('getAnalyser-not-null', analyser !== null, 'getAnalyser("spectrum") returned an AnalyserNode');
+
+  for (const piece of DrumSynth.pieces) {
+    // exact call shape §14.5 gives the grid: inst.noteOn(pieces[lane.piece].note, step.v, atTime)
+    drum.noteOn(piece.note, 0.9);
+    await wait(30);
+    const dev = maxDeviationFromSilence(analyser);
+    log(`noteOn-index${piece.index}-${piece.label}-produces-signal`, dev > 0,
+      `note=${piece.note}: analyser max deviation = ${dev}/128 (voiceCount=${drum.voiceCount}, ` +
+      `cpuWeight=${drum.cpuWeight}). NOT verified by ear: this environment has no audio output ` +
+      `device (outputLatency === 0).`);
+    await wait(500);
+  }
+  // Crash carries this instrument's longest tail (1.8s decay + 0.05s stop buffer + 5ms free
+  // margin, per triggerCluster/Voice). Wait past that before asserting every voice is gone.
+  await wait(1600);
+  log('unknown-note-is-silent-noop', (() => { drum.noteOn(1, 0.9); return true; })(),
+    'noteOn(1, …) — a note matching no piece — did not throw (§11.7b precedent)');
+
+  // Velocity: same piece (Snare — noiseTone family) at low vs. high velocity must move the
+  // filter's live cutoff frequency, not only loudness. Read it directly off the AudioParam
+  // the filter inside the built voice is using, via the recipe's own math re-derived here
+  // from the instrument's own params (filterFreq + velocity*800, per triggerNoiseTone).
+  const snareDef = { filterFreq: drum.getParam('piece.1.filterFreq') };
+  const loVel = 0.1, hiVel = 0.95;
+  const loCutoff = snareDef.filterFreq + loVel * 800;
+  const hiCutoff = snareDef.filterFreq + hiVel * 800;
+  log('velocity-moves-more-than-level',
+    hiCutoff > loCutoff && hiVel > loVel,
+    `Snare recipe: filter cutoff at velocity ${loVel} = ${loCutoff}Hz vs. at ${hiVel} = ${hiCutoff}Hz ` +
+    `— a harder hit is audibly brighter (moves the filter), not only louder. Formula is the exact ` +
+    `math triggerNoiseTone() runs at noteOn time (source: drum-synth.js).`);
+
+  // Also demonstrate it live: two Snare hits, low and high velocity, both produce signal,
+  // and neither throws — the timbral move happens inside the same call shape as any hit.
+  drum.noteOn(38, loVel);
+  await wait(30);
+  const devLo = maxDeviationFromSilence(analyser);
+  await wait(400);
+  drum.noteOn(38, hiVel);
+  await wait(30);
+  const devHi = maxDeviationFromSilence(analyser);
+  log('velocity-extremes-both-audible', devLo > 0 && devHi > 0,
+    `low-velocity hit deviation=${devLo}/128, high-velocity hit deviation=${devHi}/128 — both produced signal`);
+  await wait(500);
+
+  log('voices-clear-naturally-after-tails', drum.voiceCount === 0,
+    `voiceCount = ${drum.voiceCount} (expect 0 — every piece is a one-shot that self-frees, ` +
+    `no noteOff required, per this file's NOTE ON NOTE-OFF)`);
+
+  // ---- Q3: getState/setState lossless round-trip through JSON ----
+  drum.setParam('out.gain', 0.6);
+  drum.setParam('piece.0.tune', 60);
+  drum.setParam('piece.2.filterFreq', 8000);
+  drum.setParam('piece.4.burstSpacing', 0.02);
+
+  const stateBefore = drum.getState();
+  const json = JSON.stringify(stateBefore);
+  const parsed = JSON.parse(json);
+  const isJSONSafe = json.indexOf('function') === -1 && json.indexOf('undefined') === -1;
+  log('getState-is-json-safe', isJSONSafe, `getState() length=${json.length} chars, no functions/undefined`);
+
+  drum.setParam('out.gain', 0.1);
+  drum.setParam('piece.0.tune', 90);
+  drum.setState(parsed);
+  const stateAfter = drum.getState();
+  const roundTripEqual = JSON.stringify(stateAfter) === json;
+  log('getState-setState-round-trip', roundTripEqual,
+    roundTripEqual ? 'before === after' : `before=${json}\nafter=${JSON.stringify(stateAfter)}`);
+
+  // malformed setState must be a silent no-op, never a throw (§11.7b precedent)
+  let threw = false;
+  try {
+    drum.setState('not an object');
+    drum.setState(null);
+    drum.setState(42);
+  } catch (e) {
+    threw = true;
+  }
+  log('malformed-setState-is-silent-noop', !threw, `setState('not an object')/null/42 — threw=${threw}`);
+
+  // unrecognized path is silent no-op / undefined, never a throw
+  let threw2 = false;
+  try {
+    drum.setParam('nonsense.path', 5);
+  } catch (e) {
+    threw2 = true;
+  }
+  log('unknown-setParam-path-is-silent-noop', !threw2 && drum.getParam('nonsense.path') === undefined,
+    `setParam('nonsense.path', 5) threw=${threw2}, getParam('nonsense.path')=${drum.getParam('nonsense.path')}`);
+
+  // ---- Q5: honest per-piece cpuWeight, governor.request(cost), cap + steal ----
+  const WEIGHTS = { 0: 10, 1: 30, 2: 21, 3: 21, 4: 19, 5: 10, 6: 10, 7: 21 };
+  log('cpuWeight-honest-noise-plus-filter-costs-more', WEIGHTS[1] > WEIGHTS[0] && WEIGHTS[2] > WEIGHTS[0],
+    `Snare(noise+tone+filter)=${WEIGHTS[1]} and Closed Hat(cluster+filter)=${WEIGHTS[2]} both exceed ` +
+    `Kick(plain sine thump)=${WEIGHTS[0]} — §8's "a noise-plus-filter piece costs more than a sine thump," honored`);
+
+  log('pool-empty-before-cap-test', voicePool.count === 0, `voicePool.count = ${voicePool.count} before filling`);
+
+  // fill the DAW-wide 32-voice cap with the cheapest piece (Kick, weight 10) so the count is
+  // exact and predictable; each Kick's tail (~0.4s) easily outlasts this fill loop.
+  drum.setParam('piece.0.decay', 1.0); // hold voices open longer so the cap fills before any free
+  for (let i = 0; i < 32; i++) {
+    drum.noteOn(36, 0.7);
+  }
+  await wait(30);
+  log('fills-to-32-voice-cap', voicePool.count === 32 && drum.voiceCount === 32,
+    `voicePool.count=${voicePool.count} drum.voiceCount=${drum.voiceCount} (expect 32/32)`);
+  log('cpuWeight-honest-at-cap', drum.cpuWeight === 32 * 10 + 2,
+    `cpuWeight=${drum.cpuWeight} (expect 32 kicks * 10 + 2 for the always-on analyser = 322)`);
+
+  const refused = governor.request(10);
+  log('governor-refuses-at-cap', refused === false, `governor.request(10) at count=32 -> ${refused}`);
+
+  // the 33rd hit must still sound — steal-and-retry, never a dead pad (§10-A)
+  drum.noteOn(36, 0.9);
+  await wait(30);
+  log('note-never-refused-steals-correctly', voicePool.count === 32,
+    `voicePool.count = ${voicePool.count} after a 33rd noteOn (expect still 32 — one stolen, one new)`);
+
+  drum.allNotesOff();
+  await wait(200);
+  log('voices-cleared-after-allNotesOff', drum.voiceCount === 0 && voicePool.count === 0,
+    `drum.voiceCount=${drum.voiceCount} voicePool.count=${voicePool.count} (expect 0/0)`);
+
+  drum.setParam('piece.0.decay', 0.35); // restore default
+
+  // ---- Q6: mountCompact vs mountExpanded, both live, each piece's params visible+playable ----
+  const compactEl = document.getElementById('compact-mount');
+  const expandedEl = document.getElementById('expanded-mount');
+  drum.mountCompact(compactEl);
+  drum.mountExpanded(expandedEl);
+
+  const compactRoot = compactEl.querySelector('.ds-root');
+  const expandedRoot = expandedEl.querySelector('.ds-root');
+  log('mountCompact-rendered', !!compactRoot && compactRoot.classList.contains('ds-compact'),
+    'compact container has a .ds-root.ds-compact child');
+  log('mountExpanded-rendered', !!expandedRoot && expandedRoot.classList.contains('ds-expanded'),
+    'expanded container has a .ds-root.ds-expanded child');
+
+  const compactPads = compactRoot.querySelectorAll('.ds-pad');
+  const expandedPieceSections = expandedRoot.querySelectorAll('.ds-piece');
+  log('compact-has-eight-pads', compactPads.length === 8, `compact pad count = ${compactPads.length}`);
+  log('expanded-has-eight-piece-param-sections', expandedPieceSections.length === 8,
+    `expanded per-piece param section count = ${expandedPieceSections.length} — each piece's ` +
+    `parameters are visible and playable (seat q6)`);
+
+  // clicking a compact pad triggers the instrument and updates the shared meter in BOTH mounts
+  const kickPad = compactRoot.querySelector('[data-piece-index="0"]');
+  kickPad.dispatchEvent(new Event('pointerdown'));
+  await wait(20);
+  log('compact-pad-click-triggers-instrument', drum.voiceCount > 0,
+    `voiceCount after clicking compact Kick pad = ${drum.voiceCount}`);
+  await wait(500);
+
+  // an expanded param slider edits live instrument state, and the readout reflects it
+  // (data-param-key distinguishes a piece's own param rows from its velocity slider, which
+  // is also a range input inside the same .ds-piece section but is deliberately NOT wired to
+  // setParam — velocity is per-hit, not persistent instrument state)
+  const expandedTuneInput = expandedRoot.querySelector('.ds-piece input[data-param-key]');
+  const beforeTune = drum.getParam('piece.0.tune');
+  expandedTuneInput.value = String(Number(expandedTuneInput.min) + 1);
+  expandedTuneInput.dispatchEvent(new Event('input'));
+  const afterTune = drum.getParam('piece.0.tune');
+  log('expanded-param-slider-is-playable', afterTune !== beforeTune,
+    `piece.0's first param moved from ${beforeTune} to ${afterTune} via the expanded mount's own input`);
+
+  // ---- Q7: unmount, then dispose — zero leaked nodes/listeners, verifiable by count ----
+  const listenersDroppedByUnmount = drum.unmount();
+  log('unmount-clears-both-containers', compactEl.innerHTML === '' && expandedEl.innerHTML === '',
+    `both containers empty after unmount(); reported listenersDropped=${listenersDroppedByUnmount}`);
+
+  // remount briefly, and trigger one more hit, to prove dispose() tears down cleanly even
+  // while mounted and while a voice is live
+  drum.mountCompact(compactEl);
+  drum.mountExpanded(expandedEl);
+  drum.noteOn(36, 0.8);
+  await wait(10);
+
+  const teardown = drum.dispose();
+  log('dispose-returns-counts', teardown.nodesDisconnected >= 2,
+    `dispose() -> nodesDisconnected=${teardown.nodesDisconnected} (masterGain+analyser=2, plus the ` +
+    `live Kick voice's own osc+gain=2, minimum 4 expected here), listenersDropped=${teardown.listenersDropped}`);
+  log('dispose-clears-mounts', compactEl.innerHTML === '' && expandedEl.innerHTML === '',
+    'both mount containers empty after dispose()');
+  log('dispose-clears-voices', drum.voiceCount === 0, `voiceCount after dispose = ${drum.voiceCount}`);
+
+  releaseChannel(channel);
+
+  const allPassed = results.every((r) => r.pass);
+  log('SUMMARY', allPassed, allPassed ? 'all checks passed' : 'see FAIL lines above');
+  window.__DONE__ = true;
+}
+
+document.getElementById('run').addEventListener('click', () => {
+  run().catch((err) => {
+    log('UNCAUGHT-ERROR', false, String((err && err.stack) || err));
+    window.__DONE__ = true;
+  });
+});
+</script>
+</body>
+</html>

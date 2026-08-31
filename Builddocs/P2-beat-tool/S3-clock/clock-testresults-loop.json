@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Q4 \u00b7 loop region, 100 passes",
+    "pass": true,
+    "lines": [
+      "loop bars 1\u21925 (endBar EXCLUSIVE) = 7680 ticks = 4 bars, at 480 bpm = 2.000 s/pass",
+      "seams crossed: 100 (asked for 100)",
+      "window tiling \u2014 gaps 0 \u00b7 overlaps 0 \u00b7 zero-width 0",
+      "distinct beat ticks covered: 16 (expect 16) \u00b7 any outside the region: 0",
+      "coverage per beat tick: 100\u2013101 across 101 cycles (spread must be \u2264 1 \u2014 the run is cut mid-cycle)",
+      "clicks: 1604 \u00b7 beat ticks the scheduler covered: 1604 \u2014 these must be EQUAL: one click per covered beat, none invented, none lost",
+      "EVERY click gap in the run: 125.000\u2013125.000 ms (a beat is 125.000 ms). A dropped seam event would show a 250 ms gap; a doubled one would show 0. Across 100 seams, neither appears.",
+      "click drift over the whole run: max 0.000 ms"
+    ]
+  }
+]

@@ -1,0 +1,74 @@
+[
+  {
+    "name": "Q2 \u00b7 audio loop and visual loop are separate",
+    "pass": true,
+    "lines": [
+      "clock.js requestAnimationFrame call sites: 0 (must be 0 \u2014 \u00a73, \u00a710)",
+      "rAF samples: 181 over 3 s (60.3/s)",
+      "scheduler windows: 122 over 3 s (40.7/s, 25 ms interval)",
+      "playhead ran backwards: 0\u00d7 \u00b7 playhead passed the leading edge: 0\u00d7",
+      "window tiling \u2014 gaps 0 \u00b7 overlaps 0",
+      "clicks scheduled by the visual loop: 0 by construction \u2014 rAF calls no clock method"
+    ]
+  },
+  {
+    "name": "Q3 \u00b7 tempo changes while playing",
+    "pass": true,
+    "lines": [
+      "clock.bpm read back immediately: 200",
+      "commit latency (write \u2192 first event at the new tempo): 100.1 ms",
+      "  findings-scheduler Q4 measured 115.7\u2013153.0 ms, mean 127.8, on a harness that measured to the first newly-CREATED event. This clock commits at the leading edge instead, so it lands at or under the window itself. Lower than the finding, not higher \u2014 reported, not hidden.",
+      "before: 4 clicks, gap 500.00 ms (expect 500.00), max dev 0.000 ms",
+      "after:  8 clicks, gap 300.00 ms (expect 300.00), max dev 0.000 ms",
+      "window tiling across the change \u2014 gaps 0 \u00b7 overlaps 0 (a stutter would be either)"
+    ]
+  },
+  {
+    "name": "Q5 \u00b7 count-in",
+    "pass": true,
+    "lines": [
+      "countIn = 2 bars at 240 bpm = 2.000 s, recording from bar 3 (tick 3840)",
+      "state at record(): \"recording\" \u00b7 countingIn: true \u00b7 position pinned at tick 3840 (expect 3840)",
+      "mid count-in \u2014 countingIn true, position still 3840, clicks heard 6, 'tick' events emitted 0 (MUST be 0 \u2014 nothing plays or records during a count-in)",
+      "after \u2014 countingIn false",
+      "first 'tick' window starts at tick 3840 (expect 3840), 20.0 ms off the exact count-in end \u2014 this is ARM_LEAD_S (20 ms), the same offset the whole take carries from the button press, not drift inside the count-in"
+    ]
+  },
+  {
+    "name": "Q6 \u00b7 metronome is the clock's own voice",
+    "pass": true,
+    "lines": [
+      "clicks scheduled: 11 in 2.6 s at 240 bpm (expect ~10)",
+      "master-chain peak amplitude: 0.31645 \u2014 non-zero means the click really reached the master chain",
+      "click spacing: median 250.00 ms (expect 250.00), max deviation 0.000 ms",
+      "accented clicks at 1800 Hz: indices [0, 4, 8] \u2014 every 4th and only every 4th: true",
+      "unaccented at 1200 Hz: 8 \u00b7 any other pitch: 0",
+      "beat 1 carries TWO cues, not one \u2014 pitch true \u00b7 level 0.34 vs 0.18 true (a lit classroom is a noisy room)",
+      "\u00a710 compliance \u2014 connects via createChannel(): true \u00b7 connects to ctx.destination: false",
+      "takes no voice from \u00a711.2's pool and no weight from \u00a78's governor: by construction, it calls neither"
+    ]
+  },
+  {
+    "name": "Q7 \u00b7 recovery from a starved scheduler (PROXY for tab backgrounding)",
+    "pass": true,
+    "lines": [
+      "PROXY, stated plainly: 1.5 s main-thread block, not a real tab switch. findings-scheduler Q2 is UNVERIFIED and stays UNVERIFIED \u2014 this tests the recovery path, not the trigger.",
+      "'resync' events fired: 1 (gap 1404 ms, tick 1516 \u2192 2863)",
+      "transport advanced 2109 ticks over 2197 ms; wall-clock says 2109 \u2014 off by 0.4 ticks (0.9 ms of musical time)",
+      "catch-up bursts (two clicks < 50 ms apart): 0 \u2014 MUST be 0. Events the gap missed are DROPPED, never fired late, per recon's recommendation",
+      "scheduler still running after recovery: true \u00b7 window overlaps: 0",
+      "the transport is not lost: position is where wall-clock says, and the leading edge is ahead of it again"
+    ]
+  },
+  {
+    "name": "Q8 \u00b7 triplet-to-tick exactness over 64 bars",
+    "pass": true,
+    "lines": [
+      "16ths      (division 4): 1024 steps \u00d7 120 ticks \u00b7 accumulated 122880 \u00b7 formula 122880 \u00b7 expected 122880 \u00b7 DRIFT 0 and 0 ticks \u00b7 non-integer ticks 0 \u00b7 bar/beat round-trip errors 0",
+      "8th trips  (division 3): 768 steps \u00d7 160 ticks \u00b7 accumulated 122880 \u00b7 formula 122880 \u00b7 expected 122880 \u00b7 DRIFT 0 and 0 ticks \u00b7 non-integer ticks 0 \u00b7 bar/beat round-trip errors 0",
+      "16th trips (division 6): 1536 steps \u00d7 80 ticks \u00b7 accumulated 122880 \u00b7 formula 122880 \u00b7 expected 122880 \u00b7 DRIFT 0 and 0 ticks \u00b7 non-integer ticks 0 \u00b7 bar/beat round-trip errors 0",
+      "why: 480 = 2\u2075\u00b73\u00b75, so 3 is a factor and every ternary subdivision lands on a whole tick \u2014 findings-scheduler Q5, same result reached independently here through clock.js's own exports",
+      "accumulated error: ZERO ticks, all three divisions, all three methods"
+    ]
+  }
+]

@@ -1,0 +1,15 @@
+[
+  {
+    "name": "DONE-CHECK \u00b7 metronome held for 5 minutes",
+    "pass": true,
+    "lines": [
+      "ran 300.01 s of AudioContext time",
+      "clicks: 601, expected 601",
+      "MAX click deviation from a perfect 120 bpm grid over the whole run: 0.0000 ms",
+      "mean deviation 0.0000 ms \u00b7 click gaps 500.000\u2013500.000 ms (expect 500.000)",
+      "scheduler windows: 12001 \u00b7 gaps 0 \u00b7 overlaps 0",
+      "unplanned resyncs during the run: 0 (must be 0 \u2014 a resync here would mean the scheduler starved)",
+      "final position 150.4.465 = tick 287985, wall-clock expects 288005 (off by -20)"
+    ]
+  }
+]

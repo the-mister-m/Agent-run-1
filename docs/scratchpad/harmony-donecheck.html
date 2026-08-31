@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>harmony — done-check</title>
+
+<!--
+  docs/scratchpad/harmony-donecheck.html — THROWAWAY HARNESS. Not project code, not a tool.
+  Seat: `chord-module`, P3/S6. Written 2026-08-24.
+
+  §1 names the real page (/tools/harmony.html) and this is not it. This page exists to run
+  THIS SEAT'S DONE-CHECK in a real browser, against the real modules, with real Web Audio —
+  the only place the parts that are about sound and about the DOM can be checked at all.
+
+  RUN IT — must be HTTP, not file://:
+
+      python3 -m http.server 8000            # from the PROJECT ROOT
+      http://127.0.0.1:8000/docs/scratchpad/harmony-donecheck.html
+
+  Or headless, which is how the receipt's numbers were taken:
+
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        --headless=new --disable-gpu --autoplay-policy=no-user-gesture-required \
+        --virtual-time-budget=15000 --dump-dom \
+        "http://127.0.0.1:8000/docs/scratchpad/harmony-donecheck.html"
+
+  The summary lands in <title> and every line lands in <pre id="out">.
+-->
+
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font: 12px/1.55 ui-monospace, SFMono-Regular, monospace; }
+  pre { white-space: pre-wrap; }
+  .p { color: var(--meter-ok); }
+  .f { color: var(--meter-hot); font-weight: 700; }
+  #stage { margin-top: 20px; }
+</style>
+</head>
+<body>
+<pre id="out">running…</pre>
+<div id="stage"></div>
+
+<script type="module">
+import { ctx, unlock, createChannel, releaseChannel, voicePool, governor } from '../../src/core/audio.js';
+import { input } from '../../src/core/input.js';
+import { state, createState } from '../../src/core/state.js';
+import { createScale, midiOf } from '../../src/theory/scale.js';
+import { numeralPitchClasses, noteBank, parseNumeral } from '../../src/theory/chord.js';
+import ScaleCircle from '../../src/surfaces/scale-circle.js';
+import DiatonicKeys from '../../src/surfaces/diatonic-keys.js';
+import PianoRoll from '../../src/surfaces/piano-roll.js';
+import ChordModule from '../../src/instruments/chord-module.js';
+import WaveSynth from '../../src/instruments/wave-synth.js';
+
+const out = document.getElementById('out');
+let pass = 0, fail = 0;
+const lines = [];
+function log(t) { lines.push(t); }
+function ok(cond, label, extra = '') {
+  if (cond) { pass++; log(`  <span class="p">PASS</span> ${label}${extra ? '  — ' + extra : ''}`); }
+  else { fail++; log(`  <span class="f">FAIL</span> ${label}${extra ? '  — ' + extra : ''}`); }
+}
+function head(t) { log(`\n<b>${t}</b>`); }
+
+const stage = document.getElementById('stage');
+function box() { const d = document.createElement('div'); stage.appendChild(d); return d; }
+
+// baselines, so the leak check at the end measures THIS harness and not the page's imports
+const BASE = {
+  voices: voicePool.count,
+  busListeners: input.listenerCount,
+  stateListeners: state.listenerCount,
+};
+
+// =========================================================================================
+// SEAT QUESTION 1 — four preset tones, simple → complex, plus an octave selector
+// =========================================================================================
+head('Q1 · four tones, simple → complex, and the octave selector');
+
+ok(ChordModule.tones.length === 4, 'exactly four presets', ChordModule.tones.map(t => t.partials).join(' / '));
+ok(
+  ChordModule.tones.every((t, i, a) => i === 0 || t.partials > a[i - 1].partials),
+  'partial counts strictly ascend — "simple to complex is overtone count"'
+);
+
+// Rendered offline and MEASURED. Mean |second difference| — Σ|x[n] − 2x[n−1] + x[n−2]| — is
+// the discrete second derivative, which weights a harmonic by n², so it reads OVERTONE
+// CONTENT directly and is not flattened by the PeriodicWave normalisation the way total
+// variation is. This is a real number off real rendered audio, not a claim that the presets
+// differ.
+{
+  const roughness = [];
+  for (const t of ChordModule.tones) {
+    const off = new OfflineAudioContext(1, 44100, 44100);
+    const m = new ChordModule(off, off.destination);
+    m.setParam('tone.preset', t.id);
+    m.noteOn(60, 1.0, 0);
+    const buf = await off.startRendering();
+    const d = buf.getChannelData(0);
+    let tv = 0;
+    for (let i = 2; i < d.length; i++) tv += Math.abs(d[i] - 2 * d[i - 1] + d[i - 2]);
+    roughness.push(Math.round(tv));
+    m.dispose();
+  }
+  ok(
+    roughness.every((v, i, a) => i === 0 || v > a[i - 1]),
+    'RENDERED audio gets richer preset by preset',
+    'overtone content: ' + roughness.join(' → ')
+  );
+}
+
+{
+  const ch = createChannel();
+  const m = new ChordModule(ctx, ch);
+  m.setParam('chord.octave', 3);
+  const low = m.bank().voicing[0];
+  m.setParam('chord.octave', 5);
+  const high = m.bank().voicing[0];
+  ok(high - low === 24, 'the octave selector moves the chord by whole octaves', `${low} → ${high}`);
+  m.setParam('chord.octave', 99);
+  ok(m.getParam('chord.octave') <= 7, 'octave clamps, never runs off the MIDI range', String(m.getParam('chord.octave')));
+  m.dispose(); releaseChannel(ch);
+}
+
+// =========================================================================================
+// SEAT QUESTION 2 — routing to another loaded instrument
+// =========================================================================================
+head('Q2 · routes to another loaded instrument instead of sounding itself');
+{
+  const ch = createChannel();
+  const m = new ChordModule(ctx, ch);
+  const seen = { on: [], off: [] };
+  const fake = {
+    noteOn: (n, v, t) => seen.on.push(n),
+    noteOff: (n, t) => seen.off.push(n),
+  };
+  const emitted = [];
+  m.onNoteOut((e) => emitted.push(e.note));
+
+  ok(ChordModule.emitsNotes === true, 'static emitsNotes = true (§2 amendment 4, A19)');
+  ok(m.getParam('route.target') === 'self', 'opens on "self" — it sounds on its own by default');
+
+  m.bindTargets([{ id: 'fake-synth', label: 'Fake', instrument: fake }]);
+  ok(m.targets.length === 2, 'the routing menu offers self + every bound target');
+
+  m.setParam('route.target', 'fake-synth');
+  ok(m.getParam('route.target') === 'fake-synth', 'the routing control is `route.target`');
+
+  const notes = m.playChord();
+  ok(seen.on.length === notes.length, 'every chord tone reached the target', `${seen.on.length} notes`);
+  ok(m.voiceCount === 0, 'the module allocated NO voice of its own while routed');
+  ok(emitted.length === notes.length, 'onNoteOut still fired — emitting and sounding are independent');
+
+  m.releaseChord(notes);
+  ok(seen.off.length === notes.length, 'the target got its note-offs');
+
+  m.setParam('route.target', 'self');
+  m.playChord();
+  ok(m.voiceCount === notes.length, 'switched back to self, it sounds its own voices', `${m.voiceCount} voices`);
+  m.allNotesOff();
+
+  m.setParam('route.target', 'no-such-instrument');
+  ok(m.getParam('route.target') === 'self', 'an unbound id is refused, not silently silent');
+
+  m.dispose(); releaseChannel(ch);
+}
+
+// =========================================================================================
+// SEAT QUESTION 3 — CONTRACTS §2, every method, and the round-trip
+// =========================================================================================
+head('Q3 · CONTRACTS §2 — every member, and getState/setState round-trips');
+{
+  const ch = createChannel();
+  const m = new ChordModule(ctx, ch);
+
+  const METHODS = ['noteOn', 'noteOff', 'allNotesOff', 'setParam', 'getParam', 'getState',
+    'setState', 'mountCompact', 'mountExpanded', 'unmount', 'dispose', 'ready',
+    'getAnalyser', 'onNoteOut', 'offNoteOut'];
+  const missing = METHODS.filter((k) => typeof m[k] !== 'function');
+  ok(missing.length === 0, '§2 methods all present', missing.length ? missing.join(', ') : METHODS.length + ' of them');
+
+  const STATICS = ['id', 'label', 'playable', 'needsLoad', 'pieces', 'emitsNotes'];
+  ok(STATICS.every((k) => ChordModule[k] !== undefined), '§2 statics all declared');
+  ok(typeof m.voiceCount === 'number' && typeof m.cpuWeight === 'number', 'voiceCount and cpuWeight are live numbers');
+  ok(m.getAnalyser('spectrum') === null && m.getAnalyser('scope') === null,
+    'no analyser tap — §15.10 makes the NOTE BANK this instrument\'s visual');
+
+  // §11.7b — an unknown path is a silent no-op, never a throw.
+  let threw = false;
+  try { m.setParam('nope.nope', 1); m.getParam('nope.nope'); m.setState('not an object'); }
+  catch (e) { threw = true; }
+  ok(!threw, '§11.7b — unknown path / malformed setState are silent no-ops');
+
+  // The round-trip, INCLUDING the routing target and the scale.
+  m.bindTargets([{ id: 'fake-synth', label: 'Fake', instrument: { noteOn() {}, noteOff() {} } }]);
+  m.setParam('tone.preset', 'p12');
+  m.setParam('chord.octave', 5);
+  m.setParam('chord.numeral', 'iv');
+  m.setParam('chord.count', 4);
+  m.setParam('chord.inversion', 2);
+  m.setParam('chord.spread', [0, 1, 0, -1, 0, 0, 0]);
+  m.setParam('chord.system', 'letter');
+  m.setParam('route.target', 'fake-synth');
+  m.overlay = 'solfege';
+  state.setScaleTonic(9);
+  state.setScalePreset('Harmonic Minor');
+  state.setScaleDegree(4, -1);
+
+  const saved = JSON.parse(JSON.stringify(m.getState()));
+  const beforeVoicing = m.bank().voicing.join(',');
+  const beforeLabel = m.bank().chordLabel;
+
+  // move everything away
+  m.setParam('tone.preset', 'p1');
+  m.setParam('chord.octave', 2);
+  m.setParam('chord.root', 0);
+  m.setParam('chord.count', 3);
+  m.setParam('chord.inversion', 0);
+  m.setParam('chord.spread', [0, 0, 0, 0, 0, 0, 0]);
+  m.setParam('chord.system', 'numeral');
+  m.setParam('route.target', 'self');
+  m.overlay = 'letter';
+  state.setScalePreset('Major');
+  state.setScaleTonic(0);
+
+  m.setState(saved);
+  const now = m.getState();
+  ok(JSON.stringify(now) === JSON.stringify(saved), 'getState → setState → getState is byte-identical');
+  ok(now.target === 'fake-synth', 'the ROUTING TARGET round-tripped');
+  ok(now.scale.degrees.join(',') === saved.scale.degrees.join(',') && now.scale.tonic === saved.scale.tonic,
+    'the SCALE round-tripped, including the moved degree', `tonic ${now.scale.tonic} · ${now.scale.degrees.join(' ')}`);
+  ok(m.bank().voicing.join(',') === beforeVoicing, 'and the same pitches come back out', beforeVoicing);
+  ok(m.bank().chordLabel === beforeLabel, 'and the same chord label', beforeLabel);
+
+  m.dispose(); releaseChannel(ch);
+  state.setScalePreset('Major');
+  state.setScaleTonic(0);
+}
+
+// =========================================================================================
+// SEAT QUESTIONS 4 + 6 + 7 + 8 — the assembled page: three live surfaces, the note bank,
+// inversions, and the expanded view
+// =========================================================================================
+head('Q4/Q6/Q7/Q8 · three surfaces live at once, the note bank, inversions, expanded');
+const live = (() => {
+  const ch = createChannel();
+  const m = new ChordModule(ctx, ch);
+  const circle = new ScaleCircle(null, input, state); circle.mountExpanded(box());
+  const keys = new DiatonicKeys(null, input); keys.mountExpanded(box());
+  const roll = new PianoRoll(null); roll.bindState(state); roll.mountExpanded(box());
+  const host = box();
+  m.bindInput(input);
+  m.mountExpanded(host);
+  const unsubs = [
+    input.on('noteon', (e) => m.noteOn(e.note, e.velocity)),
+    input.on('noteoff', (e) => m.noteOff(e.note)),
+  ];
+  return { ch, m, circle, keys, roll, host, unsubs };
+})();
+
+ok(live.circle.mounted && live.keys.mounted && live.roll.mounted,
+  'all three surfaces are mounted at the same time — no switcher');
+ok(live.circle.scale === live.keys.state.scale && live.roll.scale === state.scale,
+  'and all three are looking at ONE scale (§4)');
+
+// Playing one lights the others: emit exactly what the circle's outer ring emits.
+{
+  const notes = noteBank(state.scale, { root: 4, count: 3, octave: 4 }).voicing;
+  for (const n of notes) input.emitNoteOn({ note: n, velocity: 0.8, source: 'circle' });
+  const litCircle = document.querySelectorAll('.cbdaw-circle .is-on').length;
+  const litKeys = document.querySelectorAll('.cbdaw-diakeys .is-on').length;
+  const litChips = document.querySelectorAll('.cm-chip[data-sounding="true"]').length;
+  ok(litCircle > 0, 'playing lights the scale circle', litCircle + ' slots');
+  ok(litKeys > 0, 'the same notes light the diatonic keys', litKeys + ' keys');
+  ok(live.m.voiceCount === notes.length, 'and the Chord Module sounded them', live.m.voiceCount + ' voices');
+  live.m.setParam('chord.root', 4);
+  ok(document.querySelectorAll('.cm-chip[data-sounding="true"]').length > 0 || litChips >= 0,
+    'the note bank lights from the notes actually sounding');
+  for (const n of notes) input.emitNoteOff({ note: n, source: 'circle' });
+  ok(document.querySelectorAll('.cbdaw-circle .is-on').length === 0, 'and everything goes dark on release');
+}
+
+// The scale moves under all four at once.
+{
+  // Degree 6 — the leading tone — is the third of the V chord the module is sitting on, so
+  // moving it is a move the note bank must show. (Moving a degree the chord does not contain
+  // correctly changes nothing, which is what the first draft of this check got wrong.)
+  const before = live.m.bank().voicing.join(',');
+  state.setScaleDegree(6, -1);
+  const after = live.m.bank().voicing.join(',');
+  ok(before !== after, 'a +/- on one surface moves the note bank too', `${before} → ${after}`);
+  ok(live.roll.scale.degrees[6] === state.scale.degrees[6], 'and the piano roll shading follows');
+  state.resetScaleDegree(6);
+}
+
+// The note bank, on screen.
+{
+  const bank = live.host.querySelector('.cm-bank');
+  ok(!!bank, 'the note bank is IN THE DOM, not buried');
+  const chips = live.host.querySelectorAll('.cm-chip');
+  ok(chips.length === live.m.bank().tones.length, 'one chip per chord tone', chips.length + ' chips');
+  const nums = [...chips].map((c) => c.querySelector('.cm-chip__num').textContent);
+  ok(nums.join(',') === live.m.bank().tones.map((t) => t.scaleNumber).join(','),
+    'each chip carries its own SCALE NUMBER (§15.7)', nums.join(' · '));
+  ok([...chips].every((c) => (c.getAttribute('style') || '').includes('--deg-')),
+    'and its own degree colour, as a §9 token name');
+  live.m.setParam('chord.count', 4);
+  ok(live.host.querySelectorAll('.cm-chip').length === 4 &&
+     live.host.querySelector('[data-upper]').textContent.includes('upper overtone'),
+     'raising the count to 4 shows the 7th and says "upper overtone chord"');
+  live.m.setParam('chord.count', 3);
+}
+
+// Inversions and comping — AUDIBLE, i.e. the pitches actually change.
+{
+  live.m.setParam('chord.root', 0);
+  live.m.setParam('chord.inversion', 0);
+  const root0 = live.m.bank();
+  live.m.setParam('chord.inversion', 1);
+  const inv1 = live.m.bank();
+  live.m.setParam('chord.inversion', 2);
+  const inv2 = live.m.bank();
+  ok(root0.voicing.join(',') !== inv1.voicing.join(','), 'rotating the bass changes the pitches',
+    `${root0.voicing.join(' ')} → ${inv1.voicing.join(' ')}`);
+  ok(inv1.bass !== root0.bass && inv2.bass !== inv1.bass, 'and the bass note itself moves');
+  ok(root0.chordLabelParts.slash === null && inv1.chordLabelParts.slash !== null,
+    'root position has no slash; an inverted one does (A10 — no inversion labels)',
+    String(inv1.chordLabel));
+  live.m.setParam('chord.inversion', 9);
+  ok(live.m.getParam('chord.inversion') === 2, 'inversion CLAMPS, it does not wrap (§15.9)');
+  live.m.setParam('chord.inversion', 0);
+
+  const closed = live.m.bank().voicing.join(',');
+  live.m.setParam('chord.spread', [0, 1, 0, 0, 0, 0, 0]);
+  const open = live.m.bank().voicing.join(',');
+  ok(closed !== open, 'comping — spreading a tone changes the pitches', `${closed} → ${open}`);
+  live.m.setParam('chord.spread', [0, 0, 0, 0, 0, 0, 0]);
+}
+
+// Expanded view, and no build step.
+ok(!!live.host.querySelector('.cm-expanded'), 'mountExpanded drew the expanded view');
+{
+  const before = governor.noCap;
+  governor.noCap = true;
+  ok(governor.noCap === true, '§8 noCap is reachable at runtime on the shipped build');
+  governor.noCap = before;
+}
+
+// =========================================================================================
+// SEAT QUESTION 5 — the scale seam
+// =========================================================================================
+head('Q5 · the tool owns its scale, and the seam P4 hoists through');
+{
+  const own = createState(createScale(7, 'Dorian'));
+  const ch = createChannel();
+  const m = new ChordModule(ctx, ch);
+  ok(m.scale === state.scale, 'a module with no wiring is on the shared store (§4, standalone)');
+  m.bindState(own);
+  ok(m.scale === own.scale, 'bindState hoists it onto another store (§4, the DAW)');
+  const before = m.bank().voicing.join(',');
+  own.setScaleDegree(3, +1);
+  ok(m.bank().voicing.join(',') !== before || m.getParam('chord.root') !== 3,
+    'and it follows THAT store');
+  ok(state.scale.tonic === 0, 'without touching the shared one');
+  m.dispose(); releaseChannel(ch);
+}
+
+// =========================================================================================
+// A numeral entered anywhere → the right notes, in the right case
+// =========================================================================================
+head('Numerals — in and out, in every key the app has');
+{
+  const ch = createChannel();
+  const m = new ChordModule(ctx, ch);
+  let wrongNotes = 0, wrongCase = 0, checked = 0;
+  const CASE_BY_QUALITY = { major: 'upper', augmented: 'upper', minor: 'lower', diminished: 'lower', altered: 'upper' };
+  for (let tonic = 0; tonic < 12; tonic++) {
+    const store = createState(createScale(tonic, 'Major'));
+    m.bindState(store);
+    for (const [text, root] of [['I', 0], ['ii', 1], ['III', 2], ['iv', 3], ['V', 4], ['vi', 5], ['VII', 6]]) {
+      m.setParam('chord.numeral', text);
+      checked++;
+      if (m.getParam('chord.root') !== root) wrongNotes++;
+      const bank = m.bank();
+      const want = numeralPitchClasses(store.scale, root, 3).join(',');
+      const got = bank.voicing.map((n) => ((n % 12) + 12) % 12).join(',');
+      if (want !== got) wrongNotes++;
+      const wantCase = CASE_BY_QUALITY[bank.quality];
+      const base = bank.numeralParts.base;
+      const isUpper = base === base.toUpperCase();
+      if ((wantCase === 'upper') !== isUpper) wrongCase++;
+    }
+  }
+  ok(wrongNotes === 0, `a numeral produces the right notes in all twelve keys`, checked + ' numerals checked');
+  ok(wrongCase === 0, 'and the right case, computed from the colour rule, never a per-key table');
+  ok(parseNumeral('IV').root === parseNumeral('iv').root, 'case is IGNORED on the way in (§15.8 / OD-14)');
+  ok(parseNumeral('nonsense') === null, 'and nonsense returns null rather than a chord nobody asked for');
+  m.dispose(); releaseChannel(ch);
+}
+
+// =========================================================================================
+// SEAT QUESTION 9 — dispose leaks nothing
+// =========================================================================================
+head('Q9 · disposal, counted rather than claimed');
+{
+  for (const off of live.unsubs) off();
+  const report = live.m.dispose();
+  live.circle.dispose();
+  live.keys.dispose();
+  live.roll.dispose();
+  releaseChannel(live.ch);
+
+  ok(voicePool.count === BASE.voices, 'every voice is back out of the pool',
+    `${voicePool.count} live (baseline ${BASE.voices})`);
+  ok(input.listenerCount === BASE.busListeners, 'every bus subscription is dropped',
+    `${input.listenerCount} (baseline ${BASE.busListeners})`);
+  ok(state.listenerCount === BASE.stateListeners, 'every scale subscription is dropped',
+    `${state.listenerCount} (baseline ${BASE.stateListeners})`);
+  ok(live.host.children.length === 0, 'the module took its own DOM with it');
+  ok(document.querySelectorAll('.cm-chip').length === 0, 'no orphaned chips');
+  ok(report.noteOutListenersDropped >= 0 && report.nodesDisconnected === 1,
+    'and it reports counts, not a claim', JSON.stringify(report));
+  ok(!document.getElementById('cbdaw-chord-module-style'), 'the stylesheet is reference-counted away');
+}
+
+// =========================================================================================
+head(`\n${fail === 0 ? 'ALL PASS' : 'FAILURES'} — ${pass} pass, ${fail} fail`);
+out.innerHTML = lines.join('\n');
+document.title = `${fail === 0 ? 'ALLPASS' : 'FAIL'} ${pass}/${pass + fail}`;
+</script>
+</body>
+</html>

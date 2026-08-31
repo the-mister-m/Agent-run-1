@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harmony — Chromebook DAW</title>
+
+<!--
+  /tools/harmony.html — the Harmony standalone teaching page.
+  Built by `chord-module`, P3/S6. CONTRACTS §1 names this exact path.
+
+  NO BUILD STEP (CONTRACTS §10). Plain ES module imports, relative paths, no bundler, no
+  dependency, nothing to compile. Serve the PROJECT ROOT over static HTTP and open this file:
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/tools/harmony.html
+
+  It must be HTTP, not file:// — Chrome refuses ES module imports from a file:// origin, and
+  Web MIDI needs a secure context (CONTRACTS §5, §10). 127.0.0.1 counts as secure.
+  Serve from the PROJECT ROOT, not from /tools, so every ../src/ import resolves.
+
+  THE LESSON (PHASE.md): a scale is a shape you can bend, and a chord is what you get when
+  you stack every other note of it. Three surfaces show the SAME scale three ways and all
+  three are live at once — that is Brandon's own decision and it is what makes this page a
+  harmony engine rather than an instrument: **in the DAW and on virtual instruments you
+  SWITCH surfaces; in the harmony engines all three show together.** Play any one of them
+  and the other two light, because all three are on `core/input.js`'s one bus (§5) and
+  `core/state.js`'s one scale (§4).
+
+  WHAT THIS PAGE ASSEMBLES, AND WHOSE EACH PIECE IS
+    theory/scale.js ............ `scale-engine`, P3/S3 — frozen. Read only.
+    theory/chord.js ............ `chord-engine`,  P3/S4 — frozen. Read only.
+    core/state.js .............. the §4 store — the ONE scale all four of the modules below
+                                 are looking at. This page never writes `state.scale`; it
+                                 calls §4's four mutations and lets the store publish.
+    surfaces/scale-circle.js ... `scale-circle`,  P3/S5 — frozen. Read only.
+    surfaces/diatonic-keys.js .. `diatonic-keys`, P3/S5 — frozen. Read only.
+    surfaces/piano-roll.js ..... `piano-roll`,    P3/S5 — frozen. Read only.
+    instruments/chord-module.js  THIS SEAT.
+    instruments/wave-synth.js .. `wave-voice`,     P1/S3 — a ROUTING TARGET. Read only.
+    instruments/overtone-synth.js `overtone-voice`, P1/S3 — a ROUTING TARGET. Read only.
+    ui/shell.js ................ `tone-shell`, P1/S4 — REUSED, NEVER EDITED. This page
+                                 imports its file menu, its CPU meter and its stylesheet and
+                                 writes not one line of it.
+  This seat owns this file and `/src/instruments/chord-module.js`, and nothing else. Every
+  module above is read and called; not one line of any of them was changed to make this page
+  work.
+
+  WHY THIS PAGE DOES NOT CALL `mountStandaloneTool()`
+    `ui/shell.js`'s `ToolShell` is P1's shape and it is right for P1: ONE visual, and a
+    surface SWITCHER that "holds at most ONE live surface and proves it structurally".
+    BUILDPLAN reserves all-three-at-once for the harmony engines, and §15.10 makes the NOTE
+    BANK this module's visual instead of a spectrum or a scope. Both of those are decisions
+    the shell is written to enforce, so this page reuses the shell's COMPONENTS — the file
+    menu, the CPU meter, the stylesheet — and lays itself out. **That is reuse, not a fork:
+    `ui/shell.js` is untouched, and `createFileMenu` / `createCpuMeter` / `acquireShellStyle`
+    are exported by that file for exactly this.** `tools/beat.html` (P2/S6) did the same
+    thing for the same reason.
+-->
+
+<link rel="stylesheet" href="../src/ui/tokens.css">
+<style>
+  html, body { margin: 0; padding: 0; background: var(--bg, #0a0d13); }
+  .cbdaw-boot {
+    margin: 0; padding: 24px;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+  }
+
+  /* SCROLL. `ui/shell.js` pins `.cbdaw-shell` to `height:100vh; overflow:hidden` above a
+     620px-tall window and makes `.cbdaw-shell__columns` the one thing that scrolls beneath
+     the top bar. This page uses that mechanism, so the header stays put and the panels move.
+     What it does NOT want is that class's 2-column grid — these panels stack full width — so
+     the grid is overridden here, scoped to this page. `ui/shell.js` is not edited. */
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-shell__columns {
+    display: flex;
+    flex-direction: column;
+    gap: var(--shell-gap, 12px);
+  }
+
+  /* ——— THE WHEEL, NEUTRALISED — Brandon, this session ————————————————————————————
+     `surfaces/scale-circle.js` is frozen and is NOT edited for any of this. It paints each
+     wedge with `fill: var(--deg-*)` inline (scale-circle.js ~L568) and `tokens.css` maps
+     those names to the teaching colours. Redefining the five names HERE, scoped to this
+     page's shell, turns every wedge one flat neutral and leaves `tools/harmony.html` and the
+     DAW's own compact circles exactly as they were.
+
+     Read together with §9: the teaching colours are a real decision, not decoration. This
+     page opts out of them on purpose. Quality still reads, because A9's `°`/`+` superscript
+     is a GLYPH from chord.js, not a colour — it survives the neutral. */
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle {
+    --deg-major: var(--panel);
+    --deg-minor: var(--panel);
+    --deg-dim: var(--panel);
+    --deg-altered: var(--panel);
+    --deg-aug: var(--panel);
+  }
+
+  /* Both rings, one value. The file holds the outer ring at 0.86 so the teaching colour
+     separates them; with one neutral there is nothing to separate and the `--line` stroke
+     already does the job — same as the mock-up, where the two rings are the same grey. */
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__zone[data-ring="numeral"],
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__zone[data-ring="degree"] { opacity: 1; }
+
+  /* The ring labels are `fill: var(--bg)` in the frozen file — dark ink chosen because
+     `--text` on a bright amber fails the room test. On a `--panel` wedge that ink is
+     invisible, so the pairing flips with the fill. */
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__text { fill: var(--text); }
+
+  /* The +/- per degree, off. `scale-circle.js` already hides it in its compact variant, so
+     this is that same switch thrown from outside. §4's mutations are untouched and still
+     reachable — the Scale panel's keys and presets still drive them. */
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__pm { display: none; }
+
+  /* Page layout only. Every colour is a §9 token name; the fallbacks are byte-identical to
+     `ui/tokens.css` and exist only so the page renders if that file has not loaded. */
+  .hm-surfaces {
+    display: grid; gap: 12px; align-items: start;
+    grid-template-columns: minmax(300px, 0.9fr) minmax(240px, 0.7fr) minmax(340px, 1.4fr);
+  }
+  @media (max-width: 1100px) { .hm-surfaces { grid-template-columns: 1fr; } }
+
+  .hm-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hm-key {
+    font: inherit; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
+    color: var(--text, #f2f6fc); background: transparent;
+    border: 1px solid var(--line, #3a485f); min-width: 3.4em;
+  }
+  .hm-key:hover { border-color: var(--accent, #34e5b4); }
+  .hm-key[aria-pressed="true"] {
+    border-color: var(--accent, #34e5b4);
+    background: color-mix(in srgb, var(--accent, #34e5b4) 18%, transparent);
+  }
+  .hm-scalename { font-size: 13px; color: var(--text, #f2f6fc); }
+  .hm-scalename b { color: var(--accent, #34e5b4); }
+  .hm-targets { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .hm-target { display: flex; flex-direction: column; gap: 5px; }
+  .hm-target[data-active="true"] .hm-target__tag { color: var(--accent, #34e5b4); }
+  .hm-target__tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--text-dim, #93a1b8);
+  }
+  .hm-seam {
+    font-size: 11px; line-height: 1.55; color: var(--text-dim, #93a1b8);
+    border-left: 2px solid var(--line, #3a485f); padding-left: 8px; margin: 4px 0 0;
+  }
+  .hm-err {
+    white-space: pre-wrap; padding: 20px; color: var(--warn, #ff7a1a);
+    background: var(--bg, #0a0d13); font: 13px/1.5 ui-monospace, monospace;
+  }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="cbdaw-boot">
+    This tool is a Web Audio instrument and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+
+// =========================================================================================
+// IMPORTS — every one read-only except this seat's own two files
+// =========================================================================================
+
+import {
+  TOOLS,
+  createFileMenu,
+  createCpuMeter,
+  acquireShellStyle,
+  releaseShellStyle,
+} from '../src/ui/shell.js';
+
+import { ctx, unlock, createChannel, releaseChannel } from '../src/core/audio.js';
+import { input } from '../src/core/input.js';
+import { state } from '../src/core/state.js';
+
+import { PRESETS, createScale, spellingOf } from '../src/theory/scale.js';
+
+import ScaleCircle from '../src/surfaces/scale-circle.js';
+import CompBuilder from '../src/surfaces/comp-builder.js';
+
+import ChordModule from '../src/instruments/chord-module.js';
+import WaveSynth from '../src/instruments/wave-synth.js';
+import OvertoneSynth from '../src/instruments/overtone-synth.js';
+
+// =========================================================================================
+// 1 · SMALL HELPERS — layout only. No music, no labels of this page's own invention.
+// =========================================================================================
+
+function panel(title, note) {
+  const el = document.createElement('section');
+  el.className = 'cbdaw-panel';
+  const head = document.createElement('div');
+  head.className = 'cbdaw-panel__head';
+  head.innerHTML =
+    `<h2 class="cbdaw-panel__title"></h2><span class="cbdaw-panel__note"></span>`;
+  head.querySelector('.cbdaw-panel__title').textContent = title;
+  head.querySelector('.cbdaw-panel__note').textContent = note ?? '';
+  el.appendChild(head);
+  const body = document.createElement('div');
+  el.appendChild(body);
+  el.body = body;
+  return el;
+}
+
+/** Every DOM listener this page attaches, so teardown can drop all of them and say how
+ *  many. Same bag pattern `ui/shell.js` uses; copied rather than imported because
+ *  `listenerBag` is module-private there and this page does not edit that file. */
+function listenerBag() {
+  const held = [];
+  return {
+    add(el, type, fn, opts) {
+      if (!el) return;
+      el.addEventListener(type, fn, opts);
+      held.push({ el, type, fn, opts });
+    },
+    dropAll() {
+      for (const l of held) l.el.removeEventListener(l.type, l.fn, l.opts);
+      const n = held.length;
+      held.length = 0;
+      return n;
+    },
+  };
+}
+
+// =========================================================================================
+// 2 · SEAT QUESTION 5 — THE PAGE OWNS ITS SCALE, AND THIS IS THE SEAM P4 HOISTS
+// =========================================================================================
+// BUILDPLAN / CONTRACTS §4, frozen: "in the DAW, the project header owns `state.scale` and
+// every instrument inherits it. In a standalone tool, that tool owns its own `state.scale`."
+// The tool is the lesson, so the scale control lives on this page and not inside any module.
+//
+// THE SEAM, STATED SO P4 CAN CUT ALONG IT:
+//   · Nothing below computes music. It calls §4's four mutations on the store and redraws
+//     from what the store publishes. Twelve key buttons are `setScaleTonic`; nine preset
+//     buttons are `setScalePreset`; the `+/-` per degree lives on the SURFACES, where §4
+//     puts it, and this control does not duplicate it.
+//   · Every key's name and the scale's name come from `theory/scale.js`. This page picks no
+//     spelling and names no scale (§6, §10-H). `PRESETS` is enumerated with Object.keys, so
+//     adding a preset there grows this control with no edit here (A8).
+//   · P4 hoists by DELETING THIS FUNCTION and its panel, creating the project header's own
+//     store, and calling `chord.bindState(projectStore)` plus `roll.bindState(projectStore)`
+//     and `new ScaleCircle(el, input, projectStore)`. Nothing else on this page changes,
+//     because nothing else on this page knows where the scale came from.
+
+function createScaleControl(store, listeners) {
+  const el = panel(
+    'Scale',
+    'this tool owns its own scale (§4) — in the DAW the project header will'
+  );
+
+  const keysRow = document.createElement('div');
+  keysRow.className = 'hm-keys';
+  el.body.appendChild(keysRow);
+
+  // The twelve keys — §4's 2026-08-24 amendment, "the major scale on each of the twelve
+  // chromatic roots". The NAME of each one is `theory/scale.js`'s spelling of that key's own
+  // tonic, so the tie key reads its composite face (A1) and nothing here spells anything.
+  for (let pc = 0; pc < 12; pc++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'hm-key';
+    b.dataset.tonic = String(pc);
+    b.textContent = spellingOf(createScale(pc, 'Major'), 0).text ?? '';
+    keysRow.appendChild(b);
+    listeners.add(b, 'click', () => store.setScaleTonic(pc));
+  }
+
+  const presetRow = document.createElement('div');
+  presetRow.className = 'hm-keys';
+  presetRow.style.marginTop = '8px';
+  el.body.appendChild(presetRow);
+
+  for (const name of Object.keys(PRESETS)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'hm-key';
+    b.dataset.preset = name;
+    b.style.minWidth = '0';
+    b.textContent = name;
+    presetRow.appendChild(b);
+    listeners.add(b, 'click', () => store.setScalePreset(name));
+  }
+
+  const readout = document.createElement('p');
+  readout.className = 'hm-scalename';
+  readout.style.margin = '10px 0 0';
+  el.body.appendChild(readout);
+
+  const seam = document.createElement('p');
+  seam.className = 'hm-seam';
+  seam.textContent =
+    'The +/- per degree is on the scale circle and on the diatonic keys, where §4 puts it. ' +
+    'Move one and watch all three surfaces, the shading and the note bank move together — ' +
+    'they are one scale, not three copies.';
+  el.body.appendChild(seam);
+
+  function render() {
+    const s = store.scale;
+    for (const b of keysRow.querySelectorAll('[data-tonic]')) {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.tonic) === s.tonic));
+    }
+    for (const b of presetRow.querySelectorAll('[data-preset]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.preset === s.preset));
+    }
+    // `name` is `scaleName()`'s back-match and `preset` is provenance — A8/§15.5 say reading
+    // 'Dorian' and 'Custom' at the same time is correct, not a bug, so both are shown.
+    readout.innerHTML = '';
+    const key = document.createElement('b');
+    key.textContent = spellingOf(s, 0).text ?? '';
+    readout.appendChild(key);
+    readout.appendChild(
+      document.createTextNode(
+        ` · ${s.name}${s.preset === 'Custom' ? ' · you have moved a degree' : ''}`
+      )
+    );
+  }
+
+  const off = store.on('scale', render);
+  render();
+  return { el, render, dispose: off };
+}
+
+// =========================================================================================
+// 3 · BUILD THE PAGE
+// =========================================================================================
+
+function mount(host) {
+  const listeners = listenerBag();
+  acquireShellStyle();
+
+  const root = document.createElement('div');
+  root.className = 'cbdaw-shell';
+  root.dataset.tool = 'harmony';
+
+  // ——— 1 · audio channels and the instruments ————————————————————————————————————
+  // §2: an instrument is handed `(ctx, out)`, never makes its own context (§10) and never
+  // connects to `ctx.destination`. `createChannel()` is what produces `out` until P4's
+  // mixer/strip.js exists.
+  const chordChannel = createChannel();
+  const waveChannel = createChannel();
+  const overtoneChannel = createChannel();
+
+  const chord = new ChordModule(ctx, chordChannel);
+  const wave = new WaveSynth(ctx, waveChannel);
+  const overtone = new OvertoneSynth(ctx, overtoneChannel);
+
+  // SEAT QUESTION 2 — the routing targets. The page is the only thing that knows which
+  // instruments are LOADED, so the page is what hands the module the list. The module owns
+  // the control (`route.target`) and the choice; this is only the menu's contents.
+  chord.bindTargets([
+    { id: WaveSynth.id, label: WaveSynth.label, instrument: wave },
+    { id: OvertoneSynth.id, label: OvertoneSynth.label, instrument: overtone },
+  ]);
+
+  // SEAT QUESTION 4 — the module's own Play button goes out on §5's bus, so playing THERE
+  // lights the three surfaces exactly the way playing a surface does. The bus comes back
+  // into `chord.noteOn` on the wire at the bottom of this function: one path, no double
+  // trigger.
+  chord.bindInput(input);
+
+  // SEAT QUESTION 5's other end. The module already defaults to the shared §4 store, so this
+  // line changes nothing today — it is written out so the hoist point is VISIBLE: P4 passes
+  // the project header's store here and on the two surfaces below, and nothing else moves.
+  chord.bindState(state);
+
+  // ——— 2 · top bar ————————————————————————————————————————————————————————————————
+  const top = document.createElement('header');
+  top.className = 'cbdaw-shell__top';
+
+  // `ui/shell.js`'s TOOLS table still carries `{id:'harmony', available:false, phase:'P3'}`,
+  // so the Harmony row would render disabled on its own page. Flipping that boolean is an
+  // edit to shell.js and this seat does not edit shell.js (brief: "reuse it, do not edit
+  // it"). `createFileMenu` already takes `items` — the component is told what to isolate
+  // rather than knowing — so this page hands it a COPY with its own row marked available and
+  // reaches into nothing. Exactly what `tools/beat.html` did for the Beat row.
+  const items = TOOLS.map((t) => (t.id === 'harmony' ? { ...t, available: true } : { ...t }));
+  const menu = createFileMenu({
+    items,
+    currentId: 'harmony',
+    label: 'Tool',
+    onSelect: (item) => {
+      if (item.href) window.location.href = item.href;
+    },
+  });
+  top.appendChild(menu.el);
+
+  const titles = document.createElement('div');
+  titles.className = 'cbdaw-shell__titles';
+  titles.innerHTML = `<h1 class="cbdaw-shell__title"></h1><p class="cbdaw-shell__subtitle"></p>`;
+  titles.querySelector('.cbdaw-shell__title').textContent = 'Harmony';
+  titles.querySelector('.cbdaw-shell__subtitle').textContent =
+    'One scale, three ways to see it, and every chord it can build. ' +
+    'Colour tells you major from minor so you never memorise which numeral is which.';
+  top.appendChild(titles);
+
+  const spacer = document.createElement('div');
+  spacer.className = 'cbdaw-shell__spacer';
+  top.appendChild(spacer);
+
+  // SEAT QUESTION 8's other half — the CPU meter is visible and `noCap` is one click away,
+  // on the deployed build, per §8. This is `ui/shell.js`'s component, imported and called.
+  const cpu = createCpuMeter({ instrument: chord });
+  top.appendChild(cpu.el);
+  root.appendChild(top);
+
+  // Everything below the top bar goes in here. `.cbdaw-shell__columns` is the only child
+  // `ui/shell.js` gives `overflow-y: auto`, so this is what makes the page scroll with the
+  // header pinned. Its 2-column grid is overridden to a stack in this page's <style>.
+  const columns = document.createElement('div');
+  columns.className = 'cbdaw-shell__columns';
+  root.appendChild(columns);
+
+  // ——— 3 · the scale control (seat question 5) ————————————————————————————————————
+  const scaleControl = createScaleControl(state, listeners);
+  columns.appendChild(scaleControl.el);
+
+  // ——— 4 · SEAT QUESTION 4 — ALL THREE SURFACES, AT ONCE, ALL LIVE ————————————————
+  const surfaces = document.createElement('div');
+  surfaces.className = 'hm-surfaces';
+
+  const circlePanel = panel('Scale circle', 'inner ring plays the degree · outer ring plays the chord on it');
+
+  // Beside the wheel, filling the two grid slots the diatonic keys and the piano roll used
+  // to hold. It spans both because it is one lesson in three boxes, not two surfaces.
+  const compPanel = panel(
+    CompBuilder.label,
+    'build the chords · hear them in root position · re-voice them by hand'
+  );
+  compPanel.style.gridColumn = 'span 2';
+
+  surfaces.append(circlePanel, compPanel);
+  columns.appendChild(surfaces);
+
+  // ——— 5 · the chord module (seat questions 1, 2, 6, 7, 8) ————————————————————————
+  const chordPanel = panel(
+    ChordModule.label,
+    'expanded view — CONTRACTS §2 mountExpanded · the note bank is §15.10'
+  );
+  columns.appendChild(chordPanel);
+
+  // ——— 6 · what it can drive ————————————————————————————————————————————————————
+  const targetPanel = panel(
+    'Routing targets',
+    'the other instruments loaded on this page — §2 mountCompact'
+  );
+  const targetGrid = document.createElement('div');
+  targetGrid.className = 'hm-targets';
+  targetPanel.body.appendChild(targetGrid);
+  columns.appendChild(targetPanel);
+
+  host.appendChild(root);
+
+  // ——— 7 · mount everything, now that the DOM is in the document ————————————————
+  // Order matters for the piano roll: it measures its container at mount.
+  //
+  // ALL THREE SHARE ONE SCALE AND ONE BUS, AND THAT IS THE WHOLE WIRE.
+  //   · `ScaleCircle` takes the §4 store as its third constructor argument (§12.1 keeps a
+  //     surface from importing a singleton on its own).
+  //   · `DiatonicKeys` imports the shared `state` itself — §12.1's two-argument constructor.
+  //   · `PianoRoll` is an editor, not a §12.1 surface, and binds by duck type.
+  //   Three different wirings, ONE store, because §4 says there is one scale.
+  const circle = new ScaleCircle(null, input, state);
+  // The degree numbers now ride OUTSIDE the wheel, so the inner ring showing 'number' too
+  // would print 1..7 twice. `overlay` is the surface's own public setter and the overlay
+  // button in its controls bar still switches all four modes — this only picks where it
+  // starts. Result, reading outward: letter on the ring that plays the NOTE, numeral on the
+  // ring that plays the CHORD, number outside on neither.
+  circle.overlay = 'letter';
+  circle.mountExpanded(circlePanel.body);
+
+  // Same store as everything else (§4: one scale), and its sound goes out through the Wave
+  // Synth that is already on this page as a routing target. The surface makes no audio of
+  // its own — `bindPlayer` takes §2's `noteOn`/`noteOff` shape and nothing more, so P4 can
+  // hand it a mixer strip instead without touching the surface.
+  const comp = new CompBuilder(state);
+  comp.bindPlayer(wave);
+  comp.mountExpanded(compPanel.body);
+
+  chord.mountExpanded(chordPanel.body);
+
+  for (const [instrument, Ctor] of [[wave, WaveSynth], [overtone, OvertoneSynth]]) {
+    const box = document.createElement('div');
+    box.className = 'hm-target';
+    box.dataset.instrumentId = Ctor.id;
+    const name = document.createElement('strong');
+    name.textContent = Ctor.label;
+    name.style.fontSize = '12px';
+    box.appendChild(name);
+    const tag = document.createElement('span');
+    tag.className = 'hm-target__tag';
+    box.appendChild(tag);
+    const mountHost = document.createElement('div');
+    box.appendChild(mountHost);
+    targetGrid.appendChild(box);
+    instrument.mountCompact(mountHost);
+  }
+
+  /** Which target is receiving right now. Read from the module's own param — the module
+   *  owns the decision and this only reflects it. `change` bubbles out of the module's
+   *  <select>, so no polling and no new interface on the module. */
+  function reflectRoute() {
+    const target = chord.getParam('route.target');
+    for (const box of targetGrid.querySelectorAll('[data-instrument-id]')) {
+      const active = box.dataset.instrumentId === target;
+      box.dataset.active = String(active);
+      box.querySelector('.hm-target__tag').textContent = active
+        ? 'receiving the chord — the Chord Module is silent'
+        : 'idle — pick it in the module’s Route control to drive it';
+    }
+  }
+  listeners.add(chordPanel, 'change', reflectRoute);
+  reflectRoute();
+
+  // ——— 8 · THE WIRE: §5's bus → the Chord Module ————————————————————————————————
+  // §5: all four hardware routes produce identical events and an instrument must never know
+  // which one fired. These two lines are the whole routing layer of this page. Whether the
+  // module then sounds the note itself or hands it to the Wave Synth is the MODULE's
+  // decision (`route.target`), not this page's.
+  const busUnsubs = [];
+  busUnsubs.push(
+    input.on('noteon', (e) => {
+      unlock();                       // §3 — idempotent, safe from any gesture, never blocks
+      chord.noteOn(e.note, e.velocity);
+    })
+  );
+  busUnsubs.push(input.on('noteoff', (e) => chord.noteOff(e.note)));
+
+  // A tab-away must not leave a chord ringing. `input.allNotesOff()` emits real note-off
+  // events, so nothing downstream has to know why.
+  listeners.add(window, 'blur', () => input.allNotesOff());
+
+  // §2's async gate. Every instrument here is `needsLoad = false` and resolves immediately;
+  // calling it anyway is what lets a loading instrument drop into this same page later.
+  for (const inst of [chord, wave, overtone]) {
+    inst.ready?.().catch((err) => console.error('[harmony.html] ready() failed:', err));
+  }
+
+  // ——— 9 · SEAT QUESTION 9 — teardown, counted rather than claimed ————————————————
+  // Order is deliberate: stop new notes arriving, release what is sounding, then take the
+  // consumers down before the producers. Deliberately does NOT call `audio.dispose()` (that
+  // closes the one AudioContext for the whole document) or `input.dispose()` (the bus is
+  // module-level and shared) — the same two exclusions `ui/shell.js`'s own unmount makes,
+  // and for the same reasons.
+  function teardown() {
+    const report = { busUnsubs: busUnsubs.length, notesReleased: 0 };
+    for (const off of busUnsubs) off();
+    busUnsubs.length = 0;
+    report.notesReleased = input.allNotesOff();
+
+    report.chord = chord.dispose();
+    report.circle = circle.dispose();
+    report.comp = comp.dispose();
+    report.wave = wave.dispose();
+    report.overtone = overtone.dispose();
+
+    releaseChannel(chordChannel);
+    releaseChannel(waveChannel);
+    releaseChannel(overtoneChannel);
+    report.channelsReleased = 3;
+
+    report.cpu = cpu.dispose();
+    report.menu = menu.dispose();
+    report.scaleControl = scaleControl.dispose();
+    report.listenersDropped = listeners.dropAll();
+
+    root.remove();
+    releaseShellStyle();
+    return report;
+  }
+  listeners.add(window, 'pagehide', teardown);
+
+  return { root, chord, wave, overtone, circle, comp, cpu, menu, state, teardown };
+}
+
+// =========================================================================================
+// 4 · GO — and if anything throws, say so on the page. A blank screen in front of a class
+//     tells nobody anything.
+// =========================================================================================
+
+try {
+  // `test-p3` and `redpen-p3` need a handle to drive this page and count what comes down.
+  // Same reason `ui/shell.js` parks itself on `window.cbdawShell`.
+  window.cbdawHarmony = mount(document.body);
+} catch (err) {
+  const box = document.createElement('pre');
+  box.className = 'hm-err';
+  box.textContent = `harmony failed to mount:\n\n${err && err.stack ? err.stack : err}`;
+  document.body.appendChild(box);
+  console.error('[harmony.html] mount failed:', err);
+}
+
+</script>
+
+</body>
+</html>

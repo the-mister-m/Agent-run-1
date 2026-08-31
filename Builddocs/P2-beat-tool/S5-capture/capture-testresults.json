@@ -1,0 +1,94 @@
+[
+  {
+    "pass": true,
+    "lines": [
+      "pieces 0:36:Kick 1:38:Snare 2:42:Closed Hat 3:46:Open Hat 4:39:Clap 5:45:Low Tom 6:50:High Tom 7:49:Crash",
+      "armed  \"all\"",
+      "grid lanes 8, bars 4"
+    ],
+    "name": "D1 \u00b7 arm a drum machine \u2014 the grid drives 8 \u00a714.1 roles, capture maps note->lane"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "countingIn right after record(): true",
+      "hits during count-in: 4, dropped.duringCountIn = 4",
+      "capture.state while counting: countingIn",
+      "countingIn after 2.2 s: false",
+      "committed notes: 1 (expected 1)"
+    ],
+    "name": "D2 \u00b7 count-in gates the start \u2014 1 bar, nothing written across it"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "kick lane  (0): [[0,0.8],[8,0.8]]",
+      "snare lane (1): [[4,0.95],[12,0.95]]",
+      "sources: {\"key\":2,\"midi\":2}",
+      "snap summary: {\"moved\":3,\"of\":4,\"meanAbsDriftTicks\":14,\"meanAbsDriftMs\":14,\"worstDriftTicks\":-16,\"late\":0,\"early\":3}"
+    ],
+    "name": "D3 \u00b7 a backbeat in from QWERTY and from MIDI \u2014 same bus, same result"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "passes counted: 2",
+      "kick  [[0,0.8]]",
+      "snare [[0,0.8]]",
+      "hat   [[0,0.8]]",
+      "overdub kept all three passes: true"
+    ],
+    "name": "D4 \u00b7 loop four bars and OVERDUB across passes"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "after a playing pass: kick=0 snare=1",
+      "after a silent pass:  kick=0 snare=1",
+      "replace erased the earlier pass, silent pass erased nothing: true"
+    ],
+    "name": "D4r \u00b7 REPLACE mode \u2014 last playing pass wins, and a SILENT pass replaces nothing"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "before \u2014 kick [[0,0.8],[32,0.8]] | hat [[8,0.5]]",
+      "after  \u2014 kick [[0,0.8],[32,0.8]] | hat [[8,0.5]]",
+      "snare  [[33,0.8]]",
+      "dropped {\"outsidePunch\":1,\"unarmedLane\":1,\"duringCountIn\":0}"
+    ],
+    "name": "D5 \u00b7 punch bars 3-4 on ONE piece, everything else untouched"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "take added notes: 2",
+      "pattern changed by take: true",
+      "undo returned: {\"kind\":\"record\",\"takeId\":6}",
+      "pattern restored byte for byte: true",
+      "notes back to 10 (was 10)",
+      "redo restored the take: true"
+    ],
+    "name": "D6 \u00b7 undo the last take \u2014 pattern and notes both come back"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "velocities by note: {\"36\":0.157,\"38\":1,\"42\":0.8}",
+      "velocityRange: {\"min\":0.15748031496062992,\"max\":1}",
+      "kick lane fill: [[0,0.157]] snare: [[2,1]]",
+      "MIDI velocity survived to the \u00a713.5 step: true"
+    ],
+    "name": "D7 \u00b7 velocity captured from MIDI, fixed fallback from QWERTY"
+  },
+  {
+    "pass": true,
+    "lines": [
+      "navigator.mediaDevices.getUserMedia ever called: false",
+      "banned audio-capture identifiers in capture.js CODE (comments stripped): none",
+      "imports: [\"./clock.js\",\"./input.js\"]",
+      "what a take stores: [{\"tick\":0,\"length\":1,\"note\":36,\"velocity\":0.8},{\"tick\":0,\"length\":36,\"note\":36,\"velocity\":0.8}]"
+    ],
+    "name": "D8 \u00b7 ZERO audio recorded anywhere"
+  }
+]

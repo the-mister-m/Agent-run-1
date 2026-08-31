@@ -1,0 +1,8 @@
+{
+  "format": "chromebook-daw-kits",
+  "version": 1,
+  "kits": [
+    "808",
+    "acoustic"
+  ]
+}

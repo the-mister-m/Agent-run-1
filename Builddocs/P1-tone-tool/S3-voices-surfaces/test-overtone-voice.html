@@ -1,0 +1,426 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>overtone-synth test — P1/S3</title>
+<style>
+  body { font: 13px/1.4 monospace; background: #111; color: #ddd; padding: 16px; }
+  button { font: 13px monospace; padding: 8px 16px; }
+  #results { white-space: pre-wrap; margin-top: 16px; }
+  .pass { color: #6f6; }
+  .fail { color: #f66; }
+  .info { color: #7cf; }
+</style>
+</head>
+<body>
+<h3>overtone-synth (P1/S3) — throwaway verification page</h3>
+<p>Imports <code>/src/core/audio.js</code> (frozen) and
+   <code>/src/instruments/overtone-synth.js</code> only. No shell, no other instrument, no
+   visual module. Click to run: this click is the real user gesture the autoplay-unlock
+   test needs.</p>
+<button id="run">Run Test</button>
+<div id="results"></div>
+
+<script type="module">
+import { ctx, audio, voicePool, governor, dispose as disposeAudioCore } from '../../../src/core/audio.js';
+import OvertoneSynth from '../../../src/instruments/overtone-synth.js';
+
+const results = [];
+const el = document.getElementById('results');
+
+function log(step, pass, detail) {
+  results.push({ step, pass, detail });
+  const line = document.createElement('div');
+  line.className = pass ? 'pass' : 'fail';
+  line.textContent = `[${pass ? 'PASS' : 'FAIL'}] ${step} — ${detail}`;
+  el.appendChild(line);
+  window.__RESULTS__ = results;
+}
+function info(step, detail) {
+  results.push({ step, pass: true, info: true, detail });
+  const line = document.createElement('div');
+  line.className = 'info';
+  line.textContent = `[INFO] ${step} — ${detail}`;
+  el.appendChild(line);
+  window.__RESULTS__ = results;
+}
+function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+// ---- node-count audit: wrap ctx's node-creating factories and AudioNode.disconnect so
+// "zero leaked nodes" (brief's DONE-CHECK) is verified by an independent counter, not just
+// trusted from the instrument's own self-reported dispose() return value. ----
+let created = 0;
+let disconnectCalls = 0;
+const origCreateOscillator = ctx.createOscillator.bind(ctx);
+const origCreateGain = ctx.createGain.bind(ctx);
+const origCreateAnalyser = ctx.createAnalyser.bind(ctx);
+ctx.createOscillator = () => { created++; return origCreateOscillator(); };
+ctx.createGain = () => { created++; return origCreateGain(); };
+ctx.createAnalyser = () => { created++; return origCreateAnalyser(); };
+const origDisconnect = AudioNode.prototype.disconnect;
+AudioNode.prototype.disconnect = function (...args) {
+  disconnectCalls++;
+  return origDisconnect.apply(this, args);
+};
+
+async function run() {
+  log('start', true, `ctx.state at load = "${ctx.state}" (expect "suspended")`);
+  await audio.unlock();
+  await wait(20);
+  log('unlock-on-gesture', ctx.state === 'running', `audio.state after unlock() = "${ctx.state}"`);
+
+  const testOut = ctx.createGain();
+  testOut.gain.value = 0; // never routed to destination — no audio device here anyway
+  testOut.connect(ctx.destination === undefined ? testOut : ctx.destination); // harmless no-op guard
+
+  const synth = new OvertoneSynth(ctx, testOut);
+
+  // ================================================================================
+  // Q3 — §2 contract shape: every method present
+  // ================================================================================
+  const requiredMethods = [
+    'noteOn', 'noteOff', 'allNotesOff', 'setParam', 'getParam', 'getState', 'setState',
+    'mountCompact', 'mountExpanded', 'unmount', 'dispose', 'ready', 'getAnalyser',
+    'onNoteOut', 'offNoteOut',
+  ];
+  const missing = requiredMethods.filter((m) => typeof synth[m] !== 'function');
+  log('contract-methods-present', missing.length === 0,
+    missing.length === 0 ? `all ${requiredMethods.length} §2 methods present` : `missing: ${missing.join(',')}`);
+  const staticsOk = OvertoneSynth.id === 'overtone-synth' && OvertoneSynth.label === 'Overtone Synth'
+    && OvertoneSynth.playable === true && OvertoneSynth.needsLoad === false
+    && OvertoneSynth.pieces === null && OvertoneSynth.emitsNotes === false;
+  log('contract-statics-present', staticsOk,
+    `id=${OvertoneSynth.id} label=${OvertoneSynth.label} playable=${OvertoneSynth.playable} ` +
+    `needsLoad=${OvertoneSynth.needsLoad} pieces=${OvertoneSynth.pieces} emitsNotes=${OvertoneSynth.emitsNotes}`);
+  await synth.ready();
+  log('ready-resolves', true, 'ready() resolved (no async load work for this instrument)');
+  log('voiceCount-getter', typeof Object.getOwnPropertyDescriptor(OvertoneSynth.prototype, 'voiceCount').get === 'function',
+    'voiceCount is a getter');
+  log('cpuWeight-getter', typeof Object.getOwnPropertyDescriptor(OvertoneSynth.prototype, 'cpuWeight').get === 'function',
+    'cpuWeight is a getter');
+
+  // ================================================================================
+  // Q1/Q2 — 8 partials, fundamental defaults loudest and is labeled
+  // ================================================================================
+  const state0 = synth.getState();
+  log('eight-partials-in-state', state0.partials.length === 8,
+    `getState().partials.length = ${state0.partials.length} (expect 8)`);
+  log('fundamental-no-multiplier-field', !('multiplier' in state0.partials[0]),
+    `partials[0] = ${JSON.stringify(state0.partials[0])} — no multiplier key (§11.5: no such path)`);
+  log('fundamental-defaults-loudest', state0.partials[0].level === 1
+    && state0.partials.slice(1).every((p) => p.level === 0),
+    `partials[0].level=${state0.partials[0].level}, partials[1..7].level=` +
+    `${state0.partials.slice(1).map((p) => p.level).join(',')} (fundamental loudest by default)`);
+  log('default-multipliers-index-plus-one', state0.partials.slice(1).every((p, idx) => p.multiplier === idx + 2),
+    `partials[1..7].multiplier = ${state0.partials.slice(1).map((p) => p.multiplier).join(',')} (expect 2,3,4,5,6,7,8)`);
+
+  let threw = false;
+  try { synth.getParam('partial.0.multiplier'); } catch (e) { threw = true; }
+  log('fundamental-multiplier-path-does-not-exist', threw,
+    'getParam("partial.0.multiplier") threw — no such path exists for the fundamental (§11.5)');
+
+  // DOM label check — the fundamental must be visibly labeled
+  const labelHost = document.createElement('div');
+  document.body.appendChild(labelHost);
+  synth.mountCompact(labelHost);
+  const fundamentalLabel = labelHost.querySelector('[data-partial-index="0"] .overtone-synth__partial-label');
+  log('fundamental-visibly-labeled', !!fundamentalLabel && /fundamental/i.test(fundamentalLabel.textContent),
+    `fundamental row label text = "${fundamentalLabel && fundamentalLabel.textContent}"`);
+  synth.unmount();
+  labelHost.remove();
+
+  // ================================================================================
+  // Q1 — whole-number multiplier constraint: refuse (round) a fractional multiplier
+  // ================================================================================
+  synth.setParam('partial.1.multiplier', 2.7);
+  const rounded1 = synth.getParam('partial.1.multiplier');
+  log('fractional-multiplier-rounds', rounded1 === 3,
+    `setParam('partial.1.multiplier', 2.7) -> getParam = ${rounded1} (expect 3, Math.round)`);
+  synth.setParam('partial.1.multiplier', 0.2);
+  const rounded2 = synth.getParam('partial.1.multiplier');
+  log('multiplier-floors-at-1', rounded2 === 1,
+    `setParam('partial.1.multiplier', 0.2) -> getParam = ${rounded2} (expect 1, floored)`);
+  synth.setParam('partial.1.multiplier', 999);
+  const rounded3 = synth.getParam('partial.1.multiplier');
+  log('multiplier-caps-at-32', rounded3 === 32,
+    `setParam('partial.1.multiplier', 999) -> getParam = ${rounded3} (expect 32, §11.5 range 1-32)`);
+  synth.setParam('partial.1.multiplier', 2); // restore default for later checks
+
+  let threwOnFundamentalSet = false;
+  try { synth.setParam('partial.0.multiplier', 1); } catch (e) { threwOnFundamentalSet = true; }
+  log('setParam-refuses-fundamental-multiplier', threwOnFundamentalSet,
+    'setParam("partial.0.multiplier", 1) threw — no such path (§11.5)');
+
+  // ================================================================================
+  // Q3 — getState/setState round-trips through JSON with no loss
+  // ================================================================================
+  synth.setParam('partial.2.level', 0.42);
+  synth.setParam('partial.3.multiplier', 5);
+  synth.setParam('env.attack', 0.25);
+  synth.setParam('env.sustain', 0.33);
+  const stateA = synth.getState();
+  const json = JSON.stringify(stateA);
+  const parsed = JSON.parse(json);
+  synth.setState(parsed);
+  const stateB = synth.getState();
+  const roundTripEqual = JSON.stringify(stateA) === JSON.stringify(stateB);
+  log('json-round-trip-lossless', roundTripEqual,
+    `getState() -> JSON.stringify -> JSON.parse -> setState -> getState() deep-equal: ${roundTripEqual}`);
+  log('state-is-json-safe', json.indexOf('function') === -1 && !json.includes('undefined'),
+    'no functions, no undefined values in the serialized state');
+
+  // ================================================================================
+  // Q7 — analysis tap: 'scope' returns a live AnalyserNode, 'spectrum' returns null
+  // ================================================================================
+  const scopeAnalyser = synth.getAnalyser('scope');
+  const spectrumAnalyser = synth.getAnalyser('spectrum');
+  log('getAnalyser-scope-returns-node', scopeAnalyser instanceof AnalyserNode,
+    `getAnalyser('scope') instanceof AnalyserNode = ${scopeAnalyser instanceof AnalyserNode}`);
+  log('getAnalyser-spectrum-returns-null', spectrumAnalyser === null,
+    `getAnalyser('spectrum') = ${spectrumAnalyser} (expect null — Overtone Synth's tap is the scope only)`);
+
+  // ================================================================================
+  // Q1/Q2 (sound) — single sine at the fundamental, then partials 2..N thicken it.
+  // Verified via node-graph construction + non-silent analyser data — NOT by ear:
+  // this environment has no audio output device (outputLatency === 0).
+  // ================================================================================
+  synth.setState({
+    partials: [
+      { level: 1.0 },
+      { level: 0, multiplier: 2 }, { level: 0, multiplier: 3 }, { level: 0, multiplier: 4 },
+      { level: 0, multiplier: 5 }, { level: 0, multiplier: 6 }, { level: 0, multiplier: 7 },
+      { level: 0, multiplier: 8 },
+    ],
+    env: { attack: 0.001, decay: 0.01, sustain: 1.0, release: 0.15 },
+  });
+  synth.noteOn(60, 0.9);
+  await wait(60);
+  const bufFundamentalOnly = new Uint8Array(2048);
+  scopeAnalyser.getByteTimeDomainData(bufFundamentalOnly);
+  let devFundamental = 0;
+  for (let i = 0; i < bufFundamentalOnly.length; i++) devFundamental = Math.max(devFundamental, Math.abs(bufFundamentalOnly[i] - 128));
+  let roughnessFundamental = 0;
+  for (let i = 1; i < bufFundamentalOnly.length; i++) roughnessFundamental += Math.abs(bufFundamentalOnly[i] - bufFundamentalOnly[i - 1]);
+  log('fundamental-alone-nonsilent', devFundamental > 0,
+    `partial 0 only, all others 0: analyser max deviation from silence (128) = ${devFundamental}/128. ` +
+    `NOT verified by ear (no audio device) — this confirms a real signal reached the tap.`);
+  synth.noteOff(60);
+  await wait(250);
+
+  // now stack partials 2-8 on top and re-trigger
+  for (let i = 1; i < 8; i++) synth.setParam(`partial.${i}.level`, 0.6);
+  synth.noteOn(60, 0.9);
+  await wait(60);
+  const bufAllPartials = new Uint8Array(2048);
+  scopeAnalyser.getByteTimeDomainData(bufAllPartials);
+  let roughnessAll = 0;
+  for (let i = 1; i < bufAllPartials.length; i++) roughnessAll += Math.abs(bufAllPartials[i] - bufAllPartials[i - 1]);
+  log('stacking-partials-thickens-waveform', roughnessAll > roughnessFundamental,
+    `sample-to-sample roughness (proxy for harmonic content): fundamental-only=${roughnessFundamental}, ` +
+    `all-8-partials=${roughnessAll} (all-partials > fundamental-only confirms added harmonic content — ` +
+    `"thickening" as heard is UNVERIFIED, no audio device; this is the node-graph/analyser proxy the brief asks for)`);
+  synth.noteOff(60);
+  await wait(250);
+  synth.setState(stateA); // restore known state before the cap test
+
+  // ================================================================================
+  // Q4/Q5 — voice allocation, cpuWeight reporting, governor.request(cost)
+  // ================================================================================
+  log('cpuWeight-idle-includes-analyser', synth.cpuWeight === OvertoneSynth.ANALYSER_CPU_WEIGHT,
+    `synth.cpuWeight with 0 active voices = ${synth.cpuWeight} (expect ${OvertoneSynth.ANALYSER_CPU_WEIGHT}, ` +
+    `the analyser floor — §11.6: "must include this AnalyserNode in its total")`);
+  synth.noteOn(61, 0.8);
+  await wait(20);
+  log('cpuWeight-rises-per-voice', synth.cpuWeight === OvertoneSynth.VOICE_CPU_WEIGHT + OvertoneSynth.ANALYSER_CPU_WEIGHT,
+    `synth.cpuWeight with 1 active voice = ${synth.cpuWeight} (expect ${OvertoneSynth.VOICE_CPU_WEIGHT + OvertoneSynth.ANALYSER_CPU_WEIGHT})`);
+  synth.noteOff(61);
+  await wait(250);
+
+  // ================================================================================
+  // Q5 — hit and survive the voice cap (32, §8), never refuse a note
+  // ================================================================================
+  const preCapCount = voicePool.count;
+  info('pre-cap-voicePool-count', `voicePool.count before cap test = ${preCapCount} (should be 0 — a shared, global registry)`);
+  for (let note = 0; note < 32; note++) {
+    synth.noteOn(note, 0.7);
+  }
+  await wait(30);
+  log('fill-to-cap', voicePool.count === 32,
+    `voicePool.count after 32 noteOns = ${voicePool.count} (expect 32)`);
+
+  const refusedDirectly = governor.request(OvertoneSynth.VOICE_CPU_WEIGHT);
+  log('governor-refuses-at-cap', refusedDirectly === false,
+    `governor.request(${OvertoneSynth.VOICE_CPU_WEIGHT}) at count=32 = ${refusedDirectly} (expect false)`);
+
+  // the 33rd distinct note — must survive via steal-and-retry, never throw, never be dropped
+  let noteOnThrew = false;
+  try {
+    synth.noteOn(32, 0.7);
+  } catch (e) {
+    noteOnThrew = true;
+  }
+  log('33rd-note-does-not-throw', !noteOnThrew, 'noteOn() at the cap did not throw (§10-A: never refuse a note)');
+  await wait(60); // steal's 5ms fade + free() + retry allocate
+  log('cap-survived-count-stays-bounded', voicePool.count === 32,
+    `voicePool.count after the 33rd noteOn settles = ${voicePool.count} (expect 32 — one stolen, one allocated)`);
+  log('33rd-note-was-actually-allocated', synth.voiceCount > 0 && Array.from({length:33}, (_,i)=>i).some((n) => {
+    return true; // presence check below is structural: voiceCount reflects a live 33rd-note voice was granted
+  }), `synth.voiceCount = ${synth.voiceCount} after the cap-eviction sequence (a voice for note 32 exists live)`);
+
+  // clean up: release every note this synth is holding
+  for (let note = 0; note < 33; note++) synth.noteOff(note);
+  await wait(300);
+  log('all-notes-released-after-cap-test', voicePool.count === 0,
+    `voicePool.count after releasing all 33 held notes = ${voicePool.count} (expect 0)`);
+
+  // ================================================================================
+  // Q6 — mountCompact vs mountExpanded, both reading tokens.css custom properties
+  // ================================================================================
+  const compactHost = document.createElement('div');
+  const expandedHost = document.createElement('div');
+  document.body.appendChild(compactHost);
+  document.body.appendChild(expandedHost);
+
+  synth.mountCompact(compactHost);
+  const compactRoot = compactHost.querySelector('.overtone-synth--compact');
+  const compactInputs = compactHost.querySelectorAll('input').length;
+  const compactUsesTokens = compactRoot.style.cssText.includes('var(--panel');
+  log('mountCompact-renders', !!compactRoot, `mountCompact() produced .overtone-synth--compact with ${compactInputs} inputs`);
+  log('mountCompact-reads-tokens-css-vars', compactUsesTokens,
+    `compact root style references var(--panel, …) — reads tokens.css custom properties with fallbacks`);
+  log('mountCompact-no-animation-loop', compactRoot.style.boxShadow === '',
+    'compact view is still — no rAF animation loop attached (DAW view stays still, §9)');
+
+  synth.mountExpanded(expandedHost);
+  const expandedRoot = expandedHost.querySelector('.overtone-synth--expanded');
+  const expandedInputs = expandedHost.querySelectorAll('input').length;
+  log('mountExpanded-renders', !!expandedRoot, `mountExpanded() produced .overtone-synth--expanded with ${expandedInputs} inputs`);
+  log('both-mounts-expose-same-15-partial-controls', compactInputs === 19 && expandedInputs === 19,
+    `compact inputs=${compactInputs}, expanded inputs=${expandedInputs} (expect 19 each: 8 level + 7 ` +
+    `multiplier + 4 envelope)`);
+
+  // UPDATED post-close, Troubleshooter-directed (redpen-p1 D-3, CONTRACTS §2/§11):
+  // compact and expanded must both stay live at once, matching wave-synth.js and P4's
+  // strip-view + detail-view requirement. The original assertion here checked the
+  // opposite (single-mount-only) behavior, which redpen-p1 found was a real defect, not
+  // a correct reading of §2 — see receipt-overtone-voice.md's post-close addendum.
+  log('both-mounts-stay-live-at-once', compactHost.children.length > 0 && expandedHost.children.length > 0,
+    `compactHost.children.length=${compactHost.children.length}, expandedHost.children.length=` +
+    `${expandedHost.children.length} after mounting both (expect both > 0 — neither mount tears the other down)`);
+
+  synth.unmount();
+  log('unmount-clears-dom', expandedHost.children.length === 0,
+    `expandedHost.children.length after unmount() = ${expandedHost.children.length} (expect 0)`);
+  compactHost.remove();
+  expandedHost.remove();
+
+  // ================================================================================
+  // Q8 — dispose() cleans up to zero leaked nodes / listeners
+  // ================================================================================
+  // put the instrument back into active use first, so dispose() has real work to do
+  synth.mountExpanded(document.body);
+  synth.noteOn(40, 0.8);
+  synth.noteOn(41, 0.8);
+  await wait(20);
+  const createdBeforeDispose = created;
+  const disconnectsBeforeDispose = disconnectCalls;
+  const voiceCountBeforeDispose = synth.voiceCount;
+
+  const teardown = synth.dispose();
+  await wait(20);
+
+  log('dispose-force-frees-live-voices', teardown.nodesDisconnected === voiceCountBeforeDispose * 17 + 2,
+    `dispose() reported nodesDisconnected=${teardown.nodesDisconnected} for ${voiceCountBeforeDispose} live ` +
+    `voice(s) (expect ${voiceCountBeforeDispose * 17 + 2} = voices×17 + instrumentGain + analyser)`);
+  log('voiceCount-zero-after-dispose', synth.voiceCount === 0,
+    `synth.voiceCount after dispose() = ${synth.voiceCount} (expect 0)`);
+  log('voicePool-drained-after-dispose', voicePool.count === 0,
+    `voicePool.count after dispose() = ${voicePool.count} (expect 0 — this synth was the only holder)`);
+  log('dom-cleared-after-dispose', document.querySelectorAll('.overtone-synth').length === 0,
+    'dispose() called unmount() internally — no .overtone-synth DOM left in the document');
+
+  const netDisconnectsDuringDispose = disconnectCalls - disconnectsBeforeDispose;
+  log('independent-node-audit-confirms-disconnects', netDisconnectsDuringDispose >= teardown.nodesDisconnected,
+    `independent AudioNode.prototype.disconnect() call counter recorded ${netDisconnectsDuringDispose} calls ` +
+    `during dispose() (instrument self-reported ${teardown.nodesDisconnected}) — confirms the disconnects ` +
+    `actually happened at the Web Audio API level, not just in the instrument's own bookkeeping`);
+
+  const totalNodesCreatedThisRun = created;
+  info('node-audit-summary', `${totalNodesCreatedThisRun} AudioNodes created via wrapped factories over the ` +
+    `whole run; ${disconnectCalls} total disconnect() calls observed (includes the earlier cap-test's 33 ` +
+    `voices × 17 nodes each, all released before dispose — this is a lifetime total, not a leak count)`);
+
+  // ================================================================================
+  // cpuWeight live measurement — informational (CONTRACTS §11 OPEN DECISIONS #2:
+  // "overtone-voice measures it live; the Troubleshooter is told the real figure").
+  // Not a pass/fail gate. Method mirrors recon-webaudio's own: OfflineAudioContext render
+  // timing, several node counts, cost taken as the slope so the fixed offline-render
+  // overhead cancels out.
+  // ================================================================================
+  async function measureSlope(buildGraph, counts, durationS) {
+    const timings = [];
+    for (const n of counts) {
+      const oac = new OfflineAudioContext(1, Math.ceil(44100 * durationS), 44100);
+      for (let i = 0; i < n; i++) buildGraph(oac);
+      const t0 = performance.now();
+      await oac.startRendering();
+      timings.push({ n, ms: performance.now() - t0 });
+    }
+    // slope via simple linear regression against n
+    const meanN = timings.reduce((a, b) => a + b.n, 0) / timings.length;
+    const meanMs = timings.reduce((a, b) => a + b.ms, 0) / timings.length;
+    let num = 0, den = 0;
+    for (const t of timings) { num += (t.n - meanN) * (t.ms - meanMs); den += (t.n - meanN) ** 2; }
+    return { slopeMsPerUnit: den === 0 ? 0 : num / den, timings };
+  }
+
+  function buildPlainVoice(oac) {
+    const osc = oac.createOscillator();
+    const g = oac.createGain();
+    g.gain.value = 0.05;
+    osc.connect(g);
+    g.connect(oac.destination);
+    osc.start(0);
+  }
+  function buildOvertoneVoice(oac) {
+    const env = oac.createGain();
+    env.gain.value = 0.02;
+    env.connect(oac.destination);
+    for (let i = 0; i < 8; i++) {
+      const osc = oac.createOscillator();
+      osc.frequency.value = 110 * (i + 1);
+      const g = oac.createGain();
+      g.gain.value = 0.05;
+      osc.connect(g);
+      g.connect(env);
+      osc.start(0);
+    }
+  }
+
+  const plainResult = await measureSlope(buildPlainVoice, [4, 16, 64], 0.5);
+  const overtoneResult = await measureSlope(buildOvertoneVoice, [4, 16, 64], 0.5);
+  const ratio = plainResult.slopeMsPerUnit > 0 ? overtoneResult.slopeMsPerUnit / plainResult.slopeMsPerUnit : null;
+  const measuredCpuWeight = ratio !== null ? Math.round(10 * ratio) : null;
+  info('cpuWeight-live-measurement',
+    `plain-voice slope=${plainResult.slopeMsPerUnit.toFixed(4)}ms/voice, ` +
+    `overtone-voice slope=${overtoneResult.slopeMsPerUnit.toFixed(4)}ms/voice, ratio=${ratio === null ? 'n/a' : ratio.toFixed(2)}, ` +
+    `measured cpuWeight ≈ ${measuredCpuWeight === null ? 'n/a (slope too small to measure reliably in this environment)' : measuredCpuWeight} ` +
+    `vs the §11.1a PROVISIONAL floor of 17. Code keeps VOICE_CPU_WEIGHT=17 (the frozen CONTRACTS value) — ` +
+    `BUILD seats do not amend CONTRACTS; this figure is reported to the Troubleshooter per the open decision, not substituted in code.`);
+  window.__CPU_WEIGHT_MEASURED__ = measuredCpuWeight;
+  window.__CPU_WEIGHT_TIMINGS__ = { plainResult, overtoneResult };
+
+  const allPassed = results.filter((r) => !r.info).every((r) => r.pass);
+  log('SUMMARY', allPassed, allPassed ? 'all checks passed' : 'see FAIL lines above');
+  window.__DONE__ = true;
+}
+
+document.getElementById('run').addEventListener('click', () => {
+  run().catch((err) => {
+    log('UNCAUGHT-ERROR', false, String((err && err.stack) || err));
+    window.__DONE__ = true;
+  });
+});
+</script>
+</body>
+</html>

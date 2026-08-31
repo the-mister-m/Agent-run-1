@@ -1,0 +1,98 @@
+{
+  "trials": 15,
+  "min_ms": 115.7,
+  "max_ms": 153.0,
+  "mean_ms": 127.8,
+  "raw": [
+    {
+      "bpmChangeAudioTime": 0.29333333333333333,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.13166666666666665,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.272,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.15299999999999997,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.304,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.121,
+      "totalEventsScheduled": 9
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.29333333333333333,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.13166666666666665,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.30933333333333335,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.11566666666666664,
+      "totalEventsScheduled": 9
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    },
+    {
+      "bpmChangeAudioTime": 0.2986666666666667,
+      "firstNewTempoEventTime": 0.425,
+      "commitLatencySec": 0.1263333333333333,
+      "totalEventsScheduled": 8
+    }
+  ]
+}

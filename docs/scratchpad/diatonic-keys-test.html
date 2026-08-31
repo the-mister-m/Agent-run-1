@@ -1,0 +1,74 @@
+<!doctype html>
+<!--
+  docs/scratchpad/diatonic-keys-test.html — throwaway visual done-check, diatonic-keys seat.
+  Serve from the project root over a static file server (§10: never file://) and open this
+  path. Not committed as project code — a manual/visual check only, per this seat's brief.
+
+  Mounts TWO DiatonicKeys instances sharing ONE scale (core/state.js's shared `state`, §4)
+  to prove seat question 6 ("does it follow scale changes from elsewhere, through
+  state.on('scale')") the way the done-check asks for ("the circle and roll on the same page
+  follow") — this seat owns no circle or roll to mount, so a second diatonic-keys instance
+  stands in as the same mechanism scale-circle/piano-roll would plug into.
+
+  Also mounts a third, COMPACT instance sharing the same state.
+
+  All-12-tonics pitch correctness and label-switching correctness are proven computationally,
+  without a DOM, in docs/scratchpad/diatonic-keys-check.mjs — this page is for what that
+  script cannot exercise: real rendering, pointer/click interaction, and the +/- buttons
+  driving shared state visibly across instances.
+-->
+<title>diatonic-keys — done-check</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css" />
+<style>
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif;
+         padding: 24px; display: flex; flex-direction: column; gap: 20px; max-width: 900px; }
+  h1 { font-size: 16px; margin: 0; }
+  p { color: var(--text-dim); font-size: 13px; margin: 0; }
+  .row { display: flex; flex-direction: column; gap: 6px; }
+  .row > label { font-size: 12px; color: var(--text-dim); }
+  .picker { display: flex; gap: 6px; flex-wrap: wrap; }
+  .picker button { font: inherit; padding: 4px 10px; background: var(--panel);
+                   color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+                   cursor: pointer; }
+  .picker button:hover { border-color: var(--accent); }
+  #log { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-dim);
+         white-space: pre-wrap; border-top: 1px solid var(--line); padding-top: 10px; }
+</style>
+
+<h1>diatonic-keys — expanded (instance A)</h1>
+<p>Two-finger/click a key to sound it. +/- on a key alters that degree for BOTH instances below —
+   they share one scale through core/state.js, the way scale-circle / piano-roll do.</p>
+<div id="mountA"></div>
+
+<h1>diatonic-keys — expanded (instance B, same scale)</h1>
+<div id="mountB"></div>
+
+<h1>diatonic-keys — compact (instance C, same scale)</h1>
+<div id="mountC"></div>
+
+<div id="log"></div>
+
+<script type="module">
+  import DiatonicKeys from '../../src/surfaces/diatonic-keys.js';
+  import { input } from '../../src/core/input.js';
+  import { state } from '../../src/core/state.js';
+
+  const log = document.getElementById('log');
+  function line(s) { log.textContent += s + '\n'; }
+
+  // ONE shared scale store (core/state.js, §4 — every instance imports the same one, so
+  // nothing is passed in), ONE shared input bus (the default export already is the shared
+  // bus — passed explicitly here only to be visible in this test's wiring).
+  const a = new DiatonicKeys(document.getElementById('mountA'), input).mountExpanded();
+  const b = new DiatonicKeys(document.getElementById('mountB'), input).mountExpanded();
+  const c = new DiatonicKeys(document.getElementById('mountC'), input).mountCompact();
+
+  input.on('noteon', (e) => line(`noteon  note=${e.note} source=${e.source} velocity=${e.velocity}`));
+  input.on('noteoff', (e) => line(`noteoff note=${e.note} source=${e.source}`));
+  state.on('scale', (s) => line(`scale changed: tonic=${s.tonic} degrees=[${s.degrees}] altered=[${s.altered}]`));
+
+  line('Mounted 3 instances (A expanded, B expanded, C compact) sharing core/state.js.');
+  line('Click a key on A or B to sound it — watch it light on both. Press +/- on a key on A');
+  line('(expanded only) and watch B and C redraw that degree too, from one setScaleDegree call.');
+  line('Try the "labels" button (letter/number/solfege/none) and the octave/bottom-degree shifts.');
+</script>

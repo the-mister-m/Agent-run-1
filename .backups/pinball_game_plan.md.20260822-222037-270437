@@ -1,0 +1,21 @@
+# HTML Arcade Pinball — Build Plan
+
+**Stack**: Single HTML file, Canvas 2D, vanilla JS. No build step, no dependencies.
+
+## Core pieces
+1. Table layout — canvas-drawn playfield: walls, slingshots, bumpers, flipper pivots, drain zone, launch lane.
+2. Physics loop — ball as circle with position/velocity, gravity, wall collision (reflect + energy loss), circle-vs-line collision for flippers/walls.
+3. Flippers — two rotating paddles, keyboard-controlled (left/right arrow or Z/X), impulse applied to ball on contact.
+4. Bumpers/targets — circle bumpers that kick the ball on hit + add score; drop targets or lit rollovers for bonus.
+5. Launch mechanism — spring-pull (hold spacebar, release = launch force) sending ball up the right lane.
+6. Scoring/UI — score counter, ball count (3 balls per game), game over / tilt state.
+7. Sound (optional) — simple WebAudio beeps on bumper hits.
+8. Game loop — requestAnimationFrame, fixed-timestep physics update, render pass.
+
+## Build order
+1. Static table render (walls, flippers at rest).
+2. Ball + gravity + wall bouncing, no flippers yet.
+3. Flipper input + collision response.
+4. Bumpers + scoring.
+5. Launch lane + multi-ball lifecycle (drain → next ball → game over).
+6. Polish: sounds, tilt, visual juice.

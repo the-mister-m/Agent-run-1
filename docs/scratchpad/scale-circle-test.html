@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scale-circle — done-check page</title>
+
+<!--
+  docs/scratchpad/scale-circle-test.html — THROWAWAY HARNESS. Not project code, not a tool.
+  Seat: `scale-circle`, P3/S5. Written 2026-08-24 17:51 EDT.
+
+  §1 names the real pages (/tools/harmony.html) and this is not one of them — the harmony
+  tool is `chord-module`'s (P3/S6). This page exists to run THIS SEAT'S DONE-CHECK in a real
+  browser, which is the only place the parts that are about pixels and sound can be checked.
+
+  RUN IT — it must be HTTP, not file:// (Chrome refuses ES module imports from file://):
+
+      python3 -m http.server 8000            # from the PROJECT ROOT
+      http://127.0.0.1:8000/docs/scratchpad/scale-circle-test.html
+
+  WHAT TO CHECK, IN ORDER — the seat's own DONE-CHECK, line by line:
+    1. Click an INNER wedge  → you hear that degree.            (seat question 2)
+    2. Click an OUTER wedge  → you hear the chord on it, and the colour told you which
+       kind of chord it was before you clicked.                 (seat question 3)
+    3. Press a + or a − → the ring redraws, the colours update, the name in the middle
+       updates, and the moved degree grows a dashed badge. Click the badge to get back.
+                                                                (seat question 4)
+    4. The DOWNSTREAM panel and any sibling surface below move with it, through
+       `state.on('scale')` and nothing else.                    (seat question 5)
+    5. Cycle the overlay button: digits → letters → syllables → none. Every string comes
+       out of theory/scale.js.                                  (seat question 6)
+    6. The COMPACT circle at the bottom is the same class, DAW-sized, no +/-, no animation.
+                                                                (seat question 8)
+
+  THE SIBLING SURFACES: `diatonic-keys.js` and `piano-roll.js` are being built by the other
+  two S5 seats IN PARALLEL. This page imports them if they exist and says so if they do not
+  — it never fails because a sibling has not landed. When they land, reload this page and
+  they mount themselves on the SAME store.
+
+  THE STORE: §1's `core/state.js` is not built and no P3 seat owns it. §4's interface is
+  built here, in the harness, over `theory/scale.js`'s own pure transforms. THIS IS NOT
+  PROJECT CODE and no /src file was written for it.
+-->
+
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body {
+    margin: 0;
+    padding: 20px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, sans-serif;
+    display: grid;
+    gap: 18px;
+    grid-template-columns: minmax(320px, 1fr) minmax(280px, 420px);
+    align-items: start;
+  }
+  h1 { font-size: 15px; margin: 0 0 8px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h2 { font-size: 12px; margin: 0 0 6px; color: var(--text-dim); letter-spacing: 0.06em;
+       text-transform: uppercase; }
+  .col { display: grid; gap: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 12px; }
+  .note { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .warn { color: var(--warn); }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--text-dim); font-weight: 600; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px;
+            vertical-align: -2px; border: 1px solid var(--line); }
+  .moved { color: var(--accent); font-weight: 700; }
+  button { font: inherit; padding: 4px 10px; color: var(--text); background: var(--panel);
+           border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #log { font-size: 11px; line-height: 1.6; max-height: 150px; overflow: auto;
+         color: var(--text-dim); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<div class="col">
+  <div class="card">
+    <h1>scale-circle — expanded</h1>
+    <div id="circle"></div>
+    <p class="note">
+      Inner ring plays the degree. Outer ring plays the chord on it. The
+      <span class="moved">+ / −</span> alter the degree; a dashed badge means the student
+      moved it, and clicking the badge puts it back.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>compact — the DAW's switchable input</h2>
+    <div id="compact"></div>
+  </div>
+
+  <div class="card">
+    <h2>sibling surfaces — P3/S5, in parallel</h2>
+    <div id="siblings"></div>
+    <p class="note" id="siblings-note"></p>
+  </div>
+</div>
+
+<div class="col">
+  <div class="card">
+    <h2>sound</h2>
+    <p class="note" id="audio-note">Click anywhere to start audio (§3 — the context begins suspended).</p>
+  </div>
+
+  <div class="card">
+    <h2>downstream — everything here arrives via state.on('scale')</h2>
+    <table id="downstream"></table>
+    <p class="note">
+      One subscriber, no surface calling another. Every colour swatch is
+      <code>degreeColor()</code>'s §9 token; every string is
+      <code>theory/scale.js</code>'s.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>input bus — §5 events, as emitted</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script type="module">
+import ScaleCircle from '../../src/surfaces/scale-circle.js';
+import { input } from '../../src/core/input.js';
+import { state } from '../../src/core/state.js';
+import { circlePositions, scaleName } from '../../src/theory/scale.js';
+import { numeralParts } from '../../src/theory/chord.js';
+import { ctx, masterGain, unlock } from '../../src/core/audio.js';
+import WaveSynth from '../../src/instruments/wave-synth.js';
+
+// ——— §4's store. core/state.js is BUILT now, so this page uses the real one: the circle,
+// the diatonic keys and the piano roll below are all on the SAME scale, which is the whole
+// thing this page exists to show. The harness stand-in that stood here is deleted. ———
+const store = state;
+
+// ——— an instrument, so the surface is actually audible. The SURFACE never touches this:
+// it emits §5 events and this page listens, which is §12.1's whole decoupling. ———
+const synth = new WaveSynth(ctx, masterGain);
+input.on('noteon', (e) => synth.noteOn(e.note, e.velocity));
+input.on('noteoff', (e) => synth.noteOff(e.note));
+addEventListener('pointerdown', () => {
+  unlock();
+  document.getElementById('audio-note').textContent =
+    'audio ' + ctx.state + ' — click a wedge.';
+}, { once: true });
+
+// ——— the surface under test ———
+const circle = new ScaleCircle(null, input, store);
+circle.mountExpanded(document.getElementById('circle'));
+
+const compact = new ScaleCircle(null, input, store);
+compact.mountCompact(document.getElementById('compact'));
+
+// ——— the siblings, if they have landed ———
+const siblingHost = document.getElementById('siblings');
+const siblingNote = document.getElementById('siblings-note');
+const landed = [];
+for (const [file, mode] of [['diatonic-keys.js', 'expanded'], ['piano-roll.js', 'expanded']]) {
+  try {
+    const mod = await import('../../src/surfaces/' + file);
+    const Surface = mod.default;
+    const box = document.createElement('div');
+    siblingHost.appendChild(box);
+    const s = new Surface(null, input, store);
+    (s.mountExpanded ? s.mountExpanded(box) : s.mount(box, mode));
+    landed.push(file);
+  } catch (err) {
+    // Not landed yet, or it takes a different constructor. Say which, and carry on.
+    const line = document.createElement('p');
+    line.className = 'note warn';
+    line.textContent = file + ' — not mounted: ' + err.message;
+    siblingHost.appendChild(line);
+  }
+}
+siblingNote.textContent = landed.length
+  ? 'Mounted on the SAME store: ' + landed.join(', ') + '. Alter a degree above and watch them.'
+  : 'Neither sibling has landed yet. The wire is live — reload once they do.';
+
+// ——— the downstream witness: one subscriber, nothing else ———
+const table = document.getElementById('downstream');
+function renderDownstream(scale) {
+  const rows = circlePositions(scale, 4).slice(0, 7).map((e) => {
+    const parts = numeralParts(scale, e.degreeIndex, 3);
+    return `<tr>
+      <td><span class="swatch" style="background:var(${e.colorToken})"></span></td>
+      <td>${e.number}</td>
+      <td>${e.letter ?? ''}</td>
+      <td>${e.solfege}</td>
+      <td>${parts.base}<sup>${parts.sup}</sup></td>
+      <td>${e.quality}</td>
+      <td class="moved">${e.altered ? '●' : ''}</td>
+    </tr>`;
+  }).join('');
+  table.innerHTML =
+    `<tr><th></th><th>#</th><th>letter</th><th>solfège</th><th>numeral</th><th>quality</th><th>moved</th></tr>`
+    + rows
+    + `<tr><td colspan="7" class="note">name: ${scaleName(scale)} · preset: ${scale.preset} · origin: ${scale.originName}</td></tr>`;
+}
+store.on('scale', renderDownstream);
+renderDownstream(store.scale);
+
+// ——— harness shortcut: ?demo=alter lands the page with one degree already moved, so the
+// dashed "you moved this" badge and the recoloured slot can be screenshotted. ———
+if (new URLSearchParams(location.search).get('demo') === 'alter') {
+  store.setScaleDegree(2, -1);
+  store.setScaleDegree(5, +1);
+}
+
+// ——— the bus, as it fires ———
+const log = document.getElementById('log');
+function line(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  log.prepend(div);
+  while (log.children.length > 60) log.lastChild.remove();
+}
+input.on('noteon', (e) => line(`on   note ${e.note}  vel ${e.velocity}  source ${e.source}`));
+input.on('noteoff', (e) => line(`off  note ${e.note}             source ${e.source}`));
+</script>
+
+</body>
+</html>

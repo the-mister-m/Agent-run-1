@@ -1,0 +1,88 @@
+127.0.0.1 - - [23/Aug/2026 20:05:13] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=0 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:05:13] "GET /src/core/audio.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:05:13] "GET /src/core/clock.js HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:05:14] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:05:14] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+
+=== __b2Loop() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:05:18] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=1 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:05:18] "GET /src/core/clock.js HTTP/1.1" 304 -
+B2 · play() from past loop.endBar enters the loop                PASS
+    loop bars 1–1  ->  ticks [0, 1920)
+    parked at tick 3840 (bar 3) — past the region
+    tick at play() ................ 0   (expected 0: 3840 folds back mod 1920)
+    highest tick over 4 s of play . 1864   (was 4871 and climbing before the fix)
+    PASS — the playhead entered the loop and stayed inside it.
+    loop bars 2–3 (ticks 1920–5760): from 9600 -> 1920 (expect 1920 — exact multiple of the span)
+    loop bars 2–3 (ticks 1920–5760): from 11760 -> 4080 (expect 4080)
+    playhead BEFORE the region: from 0 -> 0 (expect 0, unchanged — it plays in)
+    PASS — modulo fold, and a playhead before the loop is left alone.
+
+=== __b2Record() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:05:20] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=2 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:05:20] "GET /src/core/clock.js HTTP/1.1" 304 -
+B2b · record() takes the same loop entry                         PASS
+    record() from tick 7680, loop [0, 3840): entered at 0, max 2417
+    PASS
+
+=== __b1Seam() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:05:20] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:05:20] "GET /favicon.ico HTTP/1.1" 404 -
+127.0.0.1 - - [23/Aug/2026 20:05:23] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=3 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:05:23] "GET /src/core/clock.js HTTP/1.1" 304 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+B1 · countingIn and position agree across the record point       PASS
+    frames sampled 156
+    frames reporting bar < 1 ............ 0  (was ~6 frames / ~100 ms)
+    frames with positionTicks < 0 ....... 0
+    flag/position contradictions ........ 0
+    last frame counting in  : ticks 0  bar 1  remain 0.001 bars
+    first frame after flip  : ticks 16  bar 1  remain 0.000 bars
+    gap across the flip     : 16 ms of AudioContext time
+    PASS — the flip and the reported position describe the same instant. No bar 0.
+
+=== __b1Gate() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:05:23] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:05:23] "GET /favicon.ico HTTP/1.1" 404 -
+127.0.0.1 - - [23/Aug/2026 20:05:26] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=4 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:05:26] "GET /src/core/clock.js HTTP/1.1" 304 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+B1b · capture.js’s count-in gate never yields a negative tick    PASS
+    _stampTick() results: 156 total, 104 dropped as count-in, 52 would be written
+    of those written, NEGATIVE ticks: 0   min written tick 10
+    PASS — capture.js can no longer stamp a note before the record point.
+
+=== __regLoopSeam(40) ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:06:06] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=5 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:06:06] "GET /src/core/clock.js HTTP/1.1" 304 -
+REG · loop seam: no drop, no double, no escape                   PASS
+    loop wraps observed ......... 40 of 40 wanted
+    doubled ticks at the seam ... 0
+    dropped ticks at the seam ... 0
+    ticks covered ............... 76954
+    PASS — half-open windows still tile the loop exactly, no escape.
+
+=== __regDrift() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:06:57] "GET /Builddocs/P2-beat-tool/S6-shell/fix-clock-testpage.html?probe=6 HTTP/1.1" 200 -
+127.0.0.1 - - [23/Aug/2026 20:06:57] "GET /src/core/clock.js HTTP/1.1" 304 -
+REG · zero tick drift over 64 bars (16ths and triplets)          FAIL
+    division 4: 1024 steps over 64 bars — tick drift 120, max |time − ideal| 0.000000 ms
+    division 3: 768 steps over 64 bars — tick drift 160, max |time − ideal| 0.000000 ms
+    FAIL
+
+=== __aLoad() ===  (ctx running)
+127.0.0.1 - - [23/Aug/2026 20:06:58] code 404, message File not found
+127.0.0.1 - - [23/Aug/2026 20:06:58] "GET /favicon.ico HTTP/1.1" 404 -
+  [console:error] Failed to load resource: the server responded with a status of 404 (File not found)
+A · scheduler-pass cost probe moves under real load              FAIL
+    idle          clock.schedulerLoad 0.0001   lastPassMs 0.000   governor.load 0.0001
+    under load    clock.schedulerLoad 0.0294   lastPassMs 3.100   governor.load 0.0000
+    after load    clock.schedulerLoad 0.0002  (smoothing decays over 20 passes)
+    hook present on governor? false  <- false until audio.js gets the one line
+    FAIL — the probe did not move with real scheduler work.
+
+--- 5/7 PASS ---
+FAILED: REG · zero tick drift over 64 bars (16ths and triplets)
+FAILED: A · scheduler-pass cost probe moves under real load
+results -> /Users/moth3rship/Desktop/AI Design/School stuff/Chromebook DAW/Agent run 1/Builddocs/P2-beat-tool/S6-shell/fix-clock-results-fix.json

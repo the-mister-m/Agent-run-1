@@ -1,0 +1,110 @@
+/* =====================================================================================
+   _template.skin.css — copy this, rename it <name>.skin.css, fill it in.
+   Owning spec: Builddocs/skinspecs/S3-skin-contract.md
+
+   THE ONE HARD RULE: this file contains :root custom property declarations and NOTHING
+   ELSE. No selectors, no new rules, no !important, no layout, no JS. The moment a skin
+   needs a selector it is not a skin — it is a change to the app.
+
+   Every value below is the current default. A knob left at its default is fine; a knob
+   whose LINE you delete is one nobody can read. Keep every line.
+
+   BEFORE YOU SHIP:   node Builddocs/skinspecs/validate-skin.js src/ui/skins/<name>.skin.css
+   It must exit 0. "It looks great on my screen" is not an appeal — see S3 §3.
+
+   TO LOAD:  <link rel="stylesheet" href="../src/ui/tokens.css">
+             <link rel="stylesheet" href="../src/ui/skins/<name>.skin.css">
+   ===================================================================================== */
+
+:root {
+
+  /* ======= THE FOUR DIALS =============================================================
+     These four move EVERY radius, size, padding, gap and border in the app at once.
+     Nothing else in this file has anywhere near their reach. Set these first.
+     MUST be absolute units (px/rem). An `em` here re-introduces compounding — S1 §0.   */
+
+  --fs-root: 12px;   /* TYPE SIZE.   10px dense · 12px default · 17px classroom projector
+                        Read it off the reference: whatever size body labels are.        */
+  --sp-unit: 2px;    /* DENSITY.     1.5px tight · 2px default · 5px airy
+                        Reference gap between two adjacent controls, divided by 3.       */
+  --r-unit:  2px;    /* ROUNDNESS.   0 hard-edged · 2px default · 5px very soft
+                        Reference button corner radius, divided by 2.                    */
+  --bw:      1px;    /* LINE WEIGHT. 0 borderless · 1px default · 3px heavy chrome       */
+
+  /* ======= FACES ======================================================================
+     No font loading, no network. Every stack needs a real fallback — if the machine
+     lacks the first face, the fallback is what your skin actually ships.               */
+
+  --font-ui:   system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ======= MOTION =====================================================================
+     Set BOTH durations to 0ms for a still skin. CONTRACTS §9: "Standalone views may
+     animate. DAW views stay still."  Also the free win for prefers-reduced-motion.     */
+
+  --dur-fast: 80ms;
+  --dur-med:  120ms;
+  --ease:     ease-out;
+
+  /* ======= DEPTH ======================================================================
+     A flat skin sets both shadows to `none` and is done.                               */
+
+  --shadow-raised: 0 12px 30px rgba(0, 0, 0, 0.55);        /* menus, popovers           */
+  --shadow-lifted: 0 -14px 26px -12px rgba(0, 0, 0, 0.75); /* the drawer edge           */
+  --glow:          0 0 4px;                                 /* + a colour token          */
+  --ring-w:        2px;                                     /* inset focus ring          */
+
+  --op-faint: 0.40;
+  --op-dim:   0.55;
+  --op-mid:   0.65;
+  --op-soft:  0.85;
+
+  /* ======= GROUND AND TEXT ============================================================
+     Pick these FIRST when reading a screenshot — everything else is judged against
+     --panel. Floors the gate enforces: --text 7:1 on --panel, --text-dim 4.5:1,
+     --panel vs --line at least 1.5:1.
+
+     On --panel vs --line: a washed-out projector eats the fill difference between
+     --bg and --panel. THE BORDER IS WHAT SURVIVES. Do not rely on fill alone.          */
+
+  --bg:       #0a0d13;   /* the page behind everything                                  */
+  --panel:    #1b2332;   /* any raised surface: a strip, a device, a plot area           */
+  --line:     #3a485f;   /* borders, grid lines, dividers, axis rules                    */
+  --text:     #f2f6fc;   /* anything a student has to read                               */
+  --text-dim: #93a1b8;   /* axis labels, units, secondary readouts                       */
+
+  /* ======= TEACHING COLOURS ===========================================================
+     ⚠ READ S3 §3 BEFORE CHANGING THESE. This is the part that is not taste.
+
+     CONTRACTS §4, Brandon's device: "Students never memorize which numeral is minor;
+     the colour tells them."
+
+     THE CONSTRAINT, and it is not negotiable:
+       --deg-major and --deg-minor MUST sit on the YELLOW <-> BLUE axis.
+       Warm/amber for major, cool/cyan-blue for minor.
+
+     WHY: yellow<->blue is the one axis that survives red-green colour blindness (~6% of
+     boys, i.e. most classes). Put major/minor on red<->green and both become the same
+     muddy yellow for those students. The app still looks beautiful to you and STOPS
+     TEACHING, and nobody in the room can tell you why. No reference is worth that.
+
+     The other three carry a redundant superscript glyph by contract (A9: + augmented,
+     ° diminished, ? altered), so they have a second channel — but keep them separable
+     anyway. Keep all five bright: OKLab L >= 0.55, or projector gamma eats them.        */
+
+  --deg-major:   #ffb020;   /* warm amber   — major triad on this degree                 */
+  --deg-minor:   #3fd0ff;   /* cool cyan    — minor triad                                */
+  --deg-dim:     #ff57c8;   /* magenta      — diminished: "this one is odd"              */
+  --deg-aug:     #ff3b3b;   /* red          — augmented                                  */
+  --deg-altered: #c9a6ff;   /* violet       — altered: not a recognisable triad          */
+
+  /* ======= SYSTEM =====================================================================
+     --accent is UI and instrumentation: selection, focus, the spectrum trace, the scope
+     trace. It must NOT be one of the degree hues — a visual that borrows a degree colour
+     teaches a student an association that is not true.                                 */
+
+  --accent:    #34e5b4;
+  --warn:      #ff7a1a;   /* refusal, over-cap, "this is not going to work"              */
+  --meter-ok:  #6ee05a;
+  --meter-hot: #ff3b30;   /* above -6 dBFS                                               */
+}

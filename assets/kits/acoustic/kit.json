@@ -1,0 +1,55 @@
+{
+  "format": "chromebook-daw-kit",
+  "version": 1,
+  "name": "acoustic",
+  "pieces": [
+    {
+      "index": 0,
+      "label": "Kick",
+      "note": 36,
+      "file": "kick.wav"
+    },
+    {
+      "index": 1,
+      "label": "Snare",
+      "note": 38,
+      "file": "snare.wav"
+    },
+    {
+      "index": 2,
+      "label": "Closed Hat",
+      "note": 42,
+      "file": "hihat-closed.wav"
+    },
+    {
+      "index": 3,
+      "label": "Open Hat",
+      "note": 46,
+      "file": "hihat-open.wav"
+    },
+    {
+      "index": 4,
+      "label": "Clap",
+      "note": 39,
+      "file": "clap.wav"
+    },
+    {
+      "index": 5,
+      "label": "Low Tom",
+      "note": 45,
+      "file": "floor-tom.wav"
+    },
+    {
+      "index": 6,
+      "label": "High Tom",
+      "note": 50,
+      "file": "rack-tom.wav"
+    },
+    {
+      "index": 7,
+      "label": "Crash",
+      "note": 49,
+      "file": "crash.wav"
+    }
+  ]
+}

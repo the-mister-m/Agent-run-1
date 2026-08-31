@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pinball</title>
+<style>
+  body { background:#111; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
+  canvas { background:#000; border:4px solid #444; }
+</style>
+</head>
+<body>
+<canvas id="table" width="400" height="700"></canvas>
+<script>
+const canvas = document.getElementById('table');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// Flipper pivots (rest state, angled slightly)
+const leftFlipper  = { x: 120, y: 620, len: 70, angle: -0.35, pivot: 'left' };
+const rightFlipper = { x: 280, y: 620, len: 70, angle: Math.PI + 0.35, pivot: 'right' };
+
+function drawWalls() {
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  // outer boundary minus drain gap at bottom center
+  ctx.moveTo(10, 10);
+  ctx.lineTo(W - 10, 10);
+  ctx.lineTo(W - 10, H - 40);
+  ctx.lineTo(230, H - 40);
+  ctx.moveTo(170, H - 40);
+  ctx.lineTo(10, H - 40);
+  ctx.lineTo(10, 10);
+  ctx.stroke();
+}
+
+function drawFlipper(f) {
+  ctx.save();
+  ctx.translate(f.x, f.y);
+  ctx.rotate(f.angle);
+  ctx.fillStyle = '#ddd';
+  ctx.beginPath();
+  ctx.roundRect(0, -8, f.len, 16, 8);
+  ctx.fill();
+  ctx.restore();
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  drawWalls();
+  drawFlipper(leftFlipper);
+  drawFlipper(rightFlipper);
+}
+
+render();
+</script>
+</body>
+</html>

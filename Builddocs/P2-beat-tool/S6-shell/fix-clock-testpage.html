@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>clock.js repair verification — bugs A and B (P2/S6)</title>
+<style>
+  body { margin:0; padding:20px; background:#101317; color:#e6ecf2;
+         font:14px/1.5 ui-monospace, Menlo, monospace; }
+  pre { background:#181d23; border:1px solid #2a323c; border-radius:6px; padding:12px;
+        white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<h1>clock.js repair verification</h1>
+<p>Throwaway. Repair seat, P2/S6. Imports <code>/src/core/audio.js</code> and
+   <code>/src/core/clock.js</code> only. Serve over http.</p>
+<pre id="out">idle</pre>
+
+<script type="module">
+import { ctx, unlock, voicePool, governor, createChannel } from '/src/core/audio.js';
+import { clock, ticksPerBar, fromTicks } from '/src/core/clock.js';
+
+const out = document.getElementById('out');
+const log = (s) => { out.textContent += '\n' + s; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function res(name, pass, lines) { return { name, pass, lines }; }
+
+// ---------------------------------------------------------------------------------------
+// A · the scheduler-pass cost probe moves under real load
+// ---------------------------------------------------------------------------------------
+// Real load, not injected: a 'tick' subscriber that builds and schedules actual Web Audio
+// voices inside the scheduler pass — which is exactly what step-grid.js does on beat.html.
+
+let loadChannel = null;
+function makeVoices(n, atTime) {
+  if (!loadChannel) loadChannel = createChannel();
+  for (let i = 0; i < n; i++) {
+    const osc = ctx.createOscillator();
+    const filt = ctx.createBiquadFilter();   // filtered voice — §8 prices it at 43
+    const g = ctx.createGain();
+    osc.frequency.setValueAtTime(120 + i, atTime);
+    g.gain.setValueAtTime(0.0001, atTime);
+    g.gain.exponentialRampToValueAtTime(0.02, atTime + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, atTime + 0.05);
+    osc.connect(filt); filt.connect(g); g.connect(loadChannel);
+    osc.start(atTime); osc.stop(atTime + 0.07);
+    osc.onended = () => { osc.disconnect(); filt.disconnect(); g.disconnect(); };
+  }
+}
+
+async function aLoad() {
+  const lines = [];
+  clock.stop(); clock.seek(1, 1, 0); clock.loop.on = false; clock.metronome = false;
+
+  await sleep(600);
+  const idleLoad = clock.schedulerLoad;
+  const idleGov = governor.load;
+  lines.push(`idle          clock.schedulerLoad ${idleLoad.toFixed(4)}   lastPassMs ${clock.lastPassMs.toFixed(3)}   governor.load ${idleGov.toFixed(4)}`);
+
+  // heavy: 150 filtered voices per scheduler pass, scheduled from inside the pass
+  const heavy = (e) => { makeVoices(150, Math.max(e.timeOf(e.fromTick), ctx.currentTime)); };
+  clock.on('tick', heavy);
+  clock.play();
+  await sleep(1200);
+  const loadedPeak = clock.schedulerLoad;
+  const loadedMs = clock.lastPassMs;
+  const govUnderLoad = governor.load;
+  clock.off('tick', heavy);
+  clock.stop();
+  lines.push(`under load    clock.schedulerLoad ${loadedPeak.toFixed(4)}   lastPassMs ${loadedMs.toFixed(3)}   governor.load ${govUnderLoad.toFixed(4)}`);
+
+  await sleep(700);
+  const recovered = clock.schedulerLoad;
+  lines.push(`after load    clock.schedulerLoad ${recovered.toFixed(4)}  (smoothing decays over 20 passes)`);
+
+  // CALIBRATION. 150 voices cost ~3 % of a 100 ms window on this machine, which is the
+  // honest answer and also a weak one to hang a verdict on. §8's own findings-webaudio Q3
+  // calibrated the technique against KNOWN injected main-thread cost (5 ms → 0.05,
+  // 50 ms → 0.50). Repeating that here proves the probe is correctly SCALED, not just
+  // non-zero: burn a known number of milliseconds inside the pass and read the meter.
+  for (const burnMs of [5, 10, 25]) {
+    const burn = () => { const t = performance.now(); while (performance.now() - t < burnMs) {} };
+    clock.on('tick', burn);
+    clock.play();
+    await sleep(900);                 // > 20 passes, so the smoothing window is all burn
+    const seen = clock.schedulerLoad;
+    clock.off('tick', burn);
+    clock.stop();
+    const want = burnMs / 100;
+    lines.push(`inject ${String(burnMs).padStart(2)} ms/pass -> schedulerLoad ${seen.toFixed(4)}   (§8 expects ${want.toFixed(2)})`);
+    if (Math.abs(seen - want) > 0.03) lines.push(`   ^ off by more than 0.03`);
+    await sleep(700);
+  }
+
+  lines.push(`governor.load under the same 150-voice load: ${govUnderLoad.toFixed(4)} — audio.js's probe cannot see it`);
+  lines.push(`hook present on governor? ${typeof governor.reportSchedulerPass === 'function'}  <- false until audio.js gets the addition`);
+
+  const pass = idleLoad < 0.02 && loadedPeak > 20 * Math.max(idleLoad, 0.0001) && recovered < loadedPeak;
+  lines.push(pass
+    ? 'PASS — near zero idle, rises with real scheduler work, decays after, correctly scaled.'
+    : 'FAIL — the probe did not move with real scheduler work.');
+  return res('A · scheduler-pass cost probe moves under real load', pass, lines);
+}
+
+// ---------------------------------------------------------------------------------------
+// B1 · countingIn and position agree — no "bar 0" window
+// ---------------------------------------------------------------------------------------
+// The old bug: `countingIn` flipped false at the scheduler's leading edge while `position`
+// still reported the audible now, on the negative side of the record point. Sampled every
+// animation frame across the whole seam, the readout showed bar 0.
+
+async function b1Seam() {
+  const lines = [];
+  clock.stop(); clock.seek(1, 1, 0);
+  clock.loop.on = false;
+  clock.metronome = true;
+  clock.countIn = 1;
+  clock.bpm = 140; // 1 bar = ~1.714 s
+
+  const samples = [];
+  let stop = false;
+  const sample = () => {
+    if (stop) return;
+    samples.push({
+      t: ctx.currentTime,
+      inCount: clock.countingIn,
+      ticks: clock.positionTicks,
+      bar: clock.position.bar,
+      remain: clock.countInRemainingBars,
+    });
+    requestAnimationFrame(sample);
+  };
+
+  clock.record();
+  requestAnimationFrame(sample);
+  await sleep(2600);
+  stop = true;
+  clock.stop();
+
+  const barZero = samples.filter((s) => s.bar < 1);
+  const negTicks = samples.filter((s) => s.ticks < 0);
+  // the seam itself: a frame that says "not counting in" but reports a tick before the
+  // record point, or says "counting in" while already past it.
+  const contradictions = samples.filter(
+    (s) => (!s.inCount && s.ticks < 0) || (s.inCount && s.ticks > 0)
+  );
+  const flipIdx = samples.findIndex((s) => !s.inCount);
+  const before = flipIdx > 0 ? samples[flipIdx - 1] : null;
+  const after = flipIdx >= 0 ? samples[flipIdx] : null;
+
+  lines.push(`frames sampled ${samples.length}`);
+  lines.push(`frames reporting bar < 1 ............ ${barZero.length}  (was ~6 frames / ~100 ms)`);
+  lines.push(`frames with positionTicks < 0 ....... ${negTicks.length}`);
+  lines.push(`flag/position contradictions ........ ${contradictions.length}`);
+  if (before && after) {
+    lines.push(`last frame counting in  : ticks ${before.ticks}  bar ${before.bar}  remain ${before.remain.toFixed(3)} bars`);
+    lines.push(`first frame after flip  : ticks ${after.ticks}  bar ${after.bar}  remain ${after.remain.toFixed(3)} bars`);
+    lines.push(`gap across the flip     : ${(after.t - before.t) * 1000 | 0} ms of AudioContext time`);
+  }
+  // The first frame AFTER the flip cannot be expected to land on tick 0 exactly — rAF
+  // samples every ~16 ms and the record point falls between two frames. What must be true
+  // is that it lands at or after the record point and within one frame of it. (Run 1 of
+  // this driver asserted `=== 0` and reported FAIL at tick 4, ~3.6 ms past the record
+  // point, with every real symptom already at zero. The assertion was wrong, not the fix.)
+  const sptNow = 60 / (140 * 480);
+  const oneFrameTicks = 0.020 / sptNow; // ~22 ticks at 140 BPM
+  const pass = barZero.length === 0 && negTicks.length === 0 && contradictions.length === 0
+    && before !== null && after !== null
+    && after.ticks >= 0 && after.ticks <= oneFrameTicks;
+  lines.push(pass
+    ? 'PASS — the flip and the reported position describe the same instant. No bar 0.'
+    : 'FAIL — the seam is still open.');
+  return res('B1 · countingIn and position agree across the record point', pass, lines);
+}
+
+// ---------------------------------------------------------------------------------------
+// B1b · capture.js\'s gate is no longer handed a negative tick
+// ---------------------------------------------------------------------------------------
+// capture.js gates on `clock.countingIn` and stamps `clock.positionTicks`. Reproducing that
+// exact pair of reads across the seam is the thing that used to write a negative tick.
+
+async function b1Gate() {
+  const lines = [];
+  clock.stop(); clock.seek(1, 1, 0);
+  clock.loop.on = false; clock.metronome = true; clock.countIn = 1; clock.bpm = 140;
+
+  const stamps = [];
+  let stop = false;
+  const stampTick = () => (clock.countingIn ? null : clock.positionTicks); // capture.js:404
+  const poll = () => {
+    if (stop) return;
+    stamps.push(stampTick());
+    requestAnimationFrame(poll);
+  };
+  clock.record();
+  requestAnimationFrame(poll);
+  await sleep(2600);
+  stop = true;
+  clock.stop();
+
+  const written = stamps.filter((s) => s !== null);
+  const negative = written.filter((s) => s < 0);
+  lines.push(`_stampTick() results: ${stamps.length} total, ${stamps.length - written.length} dropped as count-in, ${written.length} would be written`);
+  lines.push(`of those written, NEGATIVE ticks: ${negative.length}   min written tick ${Math.min(...written)}`);
+  const pass = negative.length === 0 && Math.min(...written) >= 0;
+  lines.push(pass
+    ? 'PASS — capture.js can no longer stamp a note before the record point.'
+    : 'FAIL — a negative tick still escapes the gate.');
+  return res('B1b · capture.js’s count-in gate never yields a negative tick', pass, lines);
+}
+
+// ---------------------------------------------------------------------------------------
+// B2 · play() from past loop.endBar enters the loop
+// ---------------------------------------------------------------------------------------
+
+async function b2Loop() {
+  const lines = [];
+  clock.stop();
+  clock.metronome = false; clock.countIn = 0; clock.bpm = 120;
+  clock.timeSignature.top = 4; clock.timeSignature.bottom = 4;
+  const tpBar = ticksPerBar();
+
+  // beat-shell's exact setup: loop bars 1–1 (one bar), playhead parked well past it.
+  clock.loop.on = true; clock.loop.startBar = 1; clock.loop.endBar = 2;
+  clock.seek(3, 1, 0); // tick 3840 — past endBar
+  const parked = clock.positionTicks;
+
+  clock.play();
+  const entered = clock.positionTicks;
+  const maxSeen = [entered];
+  for (let i = 0; i < 40; i++) { await sleep(100); maxSeen.push(clock.positionTicks); }
+  clock.stop();
+  const hi = Math.max(...maxSeen);
+
+  lines.push(`loop bars 1–1  ->  ticks [0, ${tpBar})`);
+  lines.push(`parked at tick ${parked} (bar ${fromTicks(parked).bar}) — past the region`);
+  lines.push(`tick at play() ................ ${entered}   (expected 0: 3840 folds back mod 1920)`);
+  lines.push(`highest tick over 4 s of play . ${hi}   (was 4871 and climbing before the fix)`);
+  const pass = entered === 0 && hi < tpBar;
+  lines.push(pass ? 'PASS — the playhead entered the loop and stayed inside it.'
+                  : 'FAIL — still running past the loop.');
+
+  // second shape: an off-phase park, to prove it is a modulo and not a snap-to-start.
+  clock.loop.startBar = 2; clock.loop.endBar = 4;  // ticks [1920, 5760), span 3840
+  clock.seek(6, 1, 0); // tick 9600 -> 1920 + ((9600-1920) mod 3840) = 1920 + 0 = 1920
+  clock.play();
+  const e2 = clock.positionTicks;
+  clock.stop();
+  clock.seek(7, 1, 240); // tick 11760 -> 1920 + ((11760-1920) mod 3840) = 1920+2160 = 4080
+  clock.play();
+  const e3 = clock.positionTicks;
+  clock.stop();
+  lines.push(`loop bars 2–3 (ticks 1920–5760): from 9600 -> ${e2} (expect 1920 — exact multiple of the span)`);
+  lines.push(`loop bars 2–3 (ticks 1920–5760): from 11760 -> ${e3} (expect 4080)`);
+
+  // third shape: BEFORE the region must be UNCHANGED — it plays in and wraps at the end.
+  clock.loop.startBar = 3; clock.loop.endBar = 5; // ticks [3840, 7680)
+  clock.seek(1, 1, 0);
+  clock.play();
+  const e4 = clock.positionTicks;
+  clock.stop();
+  lines.push(`playhead BEFORE the region: from 0 -> ${e4} (expect 0, unchanged — it plays in)`);
+
+  clock.loop.on = false;
+  const pass2 = e2 === 1920 && e3 === 4080 && e4 === 0;
+  lines.push(pass2 ? 'PASS — modulo fold, and a playhead before the loop is left alone.'
+                   : 'FAIL — wrong entry arithmetic.');
+  return res('B2 · play() from past loop.endBar enters the loop', pass && pass2, lines);
+}
+
+// ---------------------------------------------------------------------------------------
+// B2b · record() takes the same entry
+// ---------------------------------------------------------------------------------------
+
+async function b2Record() {
+  const lines = [];
+  clock.stop();
+  clock.metronome = false; clock.countIn = 0; clock.bpm = 120;
+  clock.loop.on = true; clock.loop.startBar = 1; clock.loop.endBar = 3; // ticks [0, 3840)
+  clock.seek(5, 1, 0); // 7680 -> 0
+  clock.record();
+  const entered = clock.positionTicks;
+  const seen = [entered];
+  for (let i = 0; i < 25; i++) { await sleep(100); seen.push(clock.positionTicks); }
+  clock.stop();
+  clock.loop.on = false;
+  const hi = Math.max(...seen);
+  lines.push(`record() from tick 7680, loop [0, 3840): entered at ${entered}, max ${hi}`);
+  const pass = entered === 0 && hi < 3840;
+  lines.push(pass ? 'PASS' : 'FAIL');
+  return res('B2b · record() takes the same loop entry', pass, lines);
+}
+
+// ---------------------------------------------------------------------------------------
+// REGRESSION · seamless loop, no dropped or doubled tick at the seam
+// ---------------------------------------------------------------------------------------
+
+async function regLoopSeam(passesWanted = 40) {
+  const lines = [];
+  clock.stop();
+  clock.metronome = false; clock.countIn = 0; clock.bpm = 240; // 1 bar = 1 s
+  clock.timeSignature.top = 4; clock.timeSignature.bottom = 4;
+  clock.loop.on = true; clock.loop.startBar = 1; clock.loop.endBar = 2; // 1 bar
+  clock.seek(1, 1, 0);
+
+  const tpBar = ticksPerBar();
+  let covered = 0, doubles = 0, gaps = 0, wraps = 0, prevTo = null;
+  const onTick = (e) => {
+    covered += e.toTick - e.fromTick;
+    if (prevTo !== null) {
+      if (e.fromTick === prevTo) { /* contiguous */ }
+      else if (e.fromTick === 0 && prevTo === tpBar) wraps++;
+      else if (e.fromTick < prevTo) doubles++;
+      else gaps++;
+    }
+    prevTo = e.toTick;
+  };
+  // TIME-BOUNDED, never wrap-count-bounded. Run 2 of this driver waited on a wrap count
+  // and hung: the transport had ESCAPED the loop and no wrap was ever coming. A probe for
+  // a runaway playhead must not itself depend on the playhead not running away.
+  let escapedAtTick = null;
+  let escapeWindow = null;
+  clock.on('tick', onTick);
+  clock.play();
+  const deadline = Date.now() + (passesWanted + 8) * 1000; // 1 bar = 1 s at 240 BPM
+  while (wraps < passesWanted && Date.now() < deadline) {
+    await sleep(120);
+    if (escapedAtTick === null && clock.leadingEdgeTicks >= tpBar) {
+      escapedAtTick = clock.leadingEdgeTicks;
+      escapeWindow = { fromTick: prevTo, wrapsSoFar: wraps };
+    }
+  }
+  clock.off('tick', onTick);
+  clock.stop();
+  clock.loop.on = false;
+
+  lines.push(`loop wraps observed ......... ${wraps} of ${passesWanted} wanted`);
+  lines.push(`doubled ticks at the seam ... ${doubles}`);
+  lines.push(`dropped ticks at the seam ... ${gaps}`);
+  lines.push(`ticks covered ............... ${covered}`);
+  if (escapedAtTick !== null) {
+    lines.push(`⚠ ESCAPED the loop at leading-edge tick ${escapedAtTick} (region is [0, ${tpBar}))`);
+    lines.push(`  after ${escapeWindow.wrapsSoFar} good wraps; last window ended at tick ${escapeWindow.fromTick}`);
+    lines.push(`  a window that ends EXACTLY on lb.end never trips \`toTick > lb.end\`.`);
+  }
+  const pass = doubles === 0 && gaps === 0 && wraps >= passesWanted && escapedAtTick === null;
+  lines.push(pass ? 'PASS — half-open windows still tile the loop exactly, no escape.' : 'FAIL');
+  return res('REG · loop seam: no drop, no double, no escape', pass, lines);
+}
+
+// ---------------------------------------------------------------------------------------
+// REGRESSION · zero tick drift over 64 bars, 16ths and triplets (A-clock.md, Q8)
+// ---------------------------------------------------------------------------------------
+
+async function regDrift() {
+  const lines = [];
+  let worst = 0;
+  for (const division of [4, 3]) {
+    clock.stop();
+    clock.metronome = false; clock.countIn = 0; clock.loop.on = false; clock.bpm = 600;
+    clock.seek(1, 1, 0);
+    const tpBar = ticksPerBar();
+    const tpStep = clock.ticksPerStep(division);
+    const target = 64 * tpBar;
+    let expected = 0, err = 0, count = 0, anchor = null;
+    const onTick = (e) => {
+      if (anchor === null) anchor = { tick: e.fromTick, time: e.timeOf(e.fromTick), spt: e.secPerTick };
+      let s = Math.ceil(e.fromTick / tpStep) * tpStep;
+      for (; s < e.toTick && s <= target; s += tpStep) {
+        const ideal = anchor.time + (s - anchor.tick) * anchor.spt;
+        err = Math.max(err, Math.abs(e.timeOf(s) - ideal));
+        if (s !== expected) count++;
+        expected = s + tpStep;
+        count++;
+      }
+    };
+    clock.on('tick', onTick);
+    clock.play();
+    while (clock.leadingEdgeTicks < target) await sleep(100);
+    clock.off('tick', onTick);
+    clock.stop();
+    const steps = target / tpStep;
+    // `target` (64 bars) is an EXACT multiple of every supported step, so the last step the
+    // loop should have visited is `target` itself. Run 2 of this driver used
+    // `floor((target-1)/tpStep)` here and reported a "drift" of exactly one step — 120 ticks
+    // for 16ths, 160 for 8th-triplets — while the timing error it actually measured was
+    // 0.000000 ms. That was this line, not the clock.
+    const lastStepExpected = Math.floor(target / tpStep) * tpStep;
+    const lastStepSeen = expected - tpStep;
+    const tickDrift = lastStepSeen - lastStepExpected;
+    worst = Math.max(worst, Math.abs(tickDrift));
+    lines.push(`division ${division}: ${steps} steps over 64 bars — last step landed on ${lastStepSeen}, expected ${lastStepExpected}, tick drift ${tickDrift}, max |time − ideal| ${(err * 1000).toFixed(6)} ms`);
+  }
+  const pass = worst === 0;
+  lines.push(pass ? 'PASS — zero accumulated tick drift, both divisions.' : 'FAIL');
+  return res('REG · zero tick drift over 64 bars (16ths and triplets)', pass, lines);
+}
+
+// ---------------------------------------------------------------------------------------
+// REGRESSION · the five-minute DONE-CHECK from A-clock.md
+// ---------------------------------------------------------------------------------------
+
+async function regHold(minutes = 5) {
+  const lines = [];
+  clock.stop();
+  clock.metronome = true; clock.countIn = 0; clock.loop.on = false; clock.bpm = 120;
+  clock.timeSignature.top = 4; clock.timeSignature.bottom = 4;
+  clock.seek(1, 1, 0);
+
+  const tpBeat = clock.ticksPerBeat();
+  const spt = 60 / (120 * tpBeat);
+  const t0Ctx = ctx.currentTime + 0.020; // ARM_LEAD_S — tick 0's anchor
+  let beats = 0, worstErr = 0, lastTo = null, gaps = 0, doubles = 0;
+  const onTick = (e) => {
+    if (lastTo !== null) {
+      if (e.fromTick > lastTo) gaps++;
+      else if (e.fromTick < lastTo) doubles++;
+    }
+    lastTo = e.toTick;
+    let b = Math.ceil(e.fromTick / tpBeat) * tpBeat;
+    for (; b < e.toTick; b += tpBeat) {
+      const ideal = t0Ctx + b * spt;
+      worstErr = Math.max(worstErr, Math.abs(e.timeOf(b) - ideal));
+      beats++;
+    }
+  };
+  clock.on('tick', onTick);
+  clock.play();
+  const startCtx = ctx.currentTime;
+  const endAt = Date.now() + minutes * 60_000;
+  const loads = [];
+  while (Date.now() < endAt) { await sleep(2000); loads.push(clock.schedulerLoad); }
+  const endCtx = ctx.currentTime;
+  const endTicks = clock.positionTicks;
+  clock.off('tick', onTick);
+  clock.stop();
+
+  const elapsed = endCtx - startCtx;
+  // The reference is the TIMELINE ANCHOR, not the instant `play()` returned. `arm()` puts
+  // tick 0 at `ctx.currentTime + ARM_LEAD_S` (0.020 s), deliberately and for a measured
+  // reason — see clock.js's ARM_LEAD_S block. Run 1 of this probe measured from `startCtx`
+  // and reported a "drift" of -19.76 ticks, which is 0.020 s at 120 BPM = 19.2 ticks, i.e.
+  // exactly the arm lead, plus half a tick of `Math.floor` on `positionTicks`. That was
+  // this line, not the clock: the same run measured 0.000000 ms of beat error over 601 beats.
+  const expectedTicks = (endCtx - t0Ctx) / spt;
+  const tickErr = endTicks - expectedTicks;
+  lines.push(`ran ${minutes} min: ${elapsed.toFixed(3)} s of AudioContext time, ${beats} beats scheduled`);
+  lines.push(`position at the end ......... ${endTicks} ticks   expected ≈ ${expectedTicks.toFixed(1)} (measured from tick 0's anchor, ARM_LEAD_S included)   delta ${tickErr.toFixed(2)} ticks (${(tickErr * spt * 1000).toFixed(2)} ms)`);
+  lines.push(`worst |beat time − ideal| ... ${(worstErr * 1000).toFixed(6)} ms   over ${beats} beats`);
+  lines.push(`dropped windows ${gaps}   doubled windows ${doubles}`);
+  lines.push(`schedulerLoad while metronome-only: min ${Math.min(...loads).toFixed(4)} max ${Math.max(...loads).toFixed(4)}`);
+  const pass = gaps === 0 && doubles === 0 && worstErr * 1000 < 1 && Math.abs(tickErr) < 2;
+  lines.push(pass ? 'PASS — five minutes, sub-millisecond, no accumulation.' : 'FAIL');
+  return res(`REG · ${minutes}-minute metronome hold (A-clock.md DONE-CHECK)`, pass, lines);
+}
+
+window.__unlock = async () => { await unlock(); return ctx.state; };
+window.__aLoad = aLoad;
+window.__b1Seam = b1Seam;
+window.__b1Gate = b1Gate;
+window.__b2Loop = b2Loop;
+window.__b2Record = b2Record;
+window.__regLoopSeam = regLoopSeam;
+window.__regDrift = regDrift;
+window.__regHold = regHold;
+window.__ready = true;
+log('ready');
+</script>
+</body>
+</html>
