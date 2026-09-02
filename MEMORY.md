@@ -1,4 +1,4 @@
-Updated 2026-09-01 — Closer, devsplash close
+Updated 2026-09-01 — Closer, arrange rebuild close
 
 # MEMORY — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
@@ -139,6 +139,16 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
   done, §12 done-check all true, zero `src/` edits beyond the three pre-existing `daw-shell.js`
   exports (closer-verified against source). Two open items are Brandon's, not resolved:
   the note bus dispatches ch1 only, and a refused mount pair still logs `console.error`.
+  See the current warm start.
+- 09-01 ("arrange rebuild", 20:24–21:09 EDT): Brandon said the arrange window was no good.
+  Grep found the actual defect — each lane mounted a live `PianoRoll`/`StepGrid`, so the
+  arrange ruler and the surface's own ruler were two unrelated timescales stacked (the
+  "2 beats worth of notes" report). Phases A-C of a five-phase rebuild shipped: zoom
+  25-800%, ruler click/drag seek wired for the first time (self-correction — `_wireHandle`
+  never seeked, only moved LOOP markers), lanes now draw region blocks off a new store
+  (`src/core/regions.js`), plus a Logic-style cycle strip Brandon asked for mid-session.
+  Phases D and E handed to a sonnet; E grew into
+  [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md), D stayed unspecced.
   See the current warm start.
 
 ## WARM START — 2026-08-25 — Harmony/contracts drift: 3 fixed, 3 owed to P4
@@ -304,4 +314,28 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
   [receipt-span-1.md](Builddocs/specs/devsplash/receipt-span-1.md) ·
   [receipt-span-2.md](Builddocs/specs/devsplash/receipt-span-2.md) ·
   [tools/dev-splash.html](tools/dev-splash.html) ·
+  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
+
+## WARM START — 2026-09-01 — arrange rebuild: phases A-C done, D unspecced, E spec'd
+- Situation: arrange window's lanes drew regions now, not editors — the double-ruler
+  defect (arrange ruler vs. the surface's own `MAX_BARS = 8`) is gone. `regions.js` is the
+  store: `notes` is deliberately OPAQUE (never read inside), so it holds piano-roll notes
+  and step-grid steps under the same code; regions own their `notes[]` directly rather than
+  aliasing a pattern object, and the store takes no clock import — song length is the
+  caller's rule to enforce, not the store's.
+- Last state: `_commitToRegion()` in [arrangement.js](src/ui/arrangement.js) is
+  PROVISIONAL, phase D's replacement target. `Arrangement.on('open', region)` fires on
+  double-click and nothing listens yet — D's entry point. `bindChannels()` exists, works
+  with any-length lists, and is unused by `daw-shell` — that's why six lanes still show
+  (phase E). [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) was sized by
+  grep, not guess: MEDIUM, not a rewrite. Clicking the cycle strip does not arm LOOP
+  (the button still owns that) — session agent's call, flagged for Brandon.
+- Next move: Phase D needs `piano-roll.js`, `step-grid.js` and `capture.js` read in full
+  (~110k tokens) before it can be spec'd. Three questions in the spec's §7 are Brandon's:
+  track limit, two instances of one instrument sharing a view, whether a new project opens
+  empty.
+- Links: [receipt-arrange-rebuild.md](docs/reports/receipt-arrange-rebuild.md) ·
+  [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) ·
+  [src/core/regions.js](src/core/regions.js) ·
+  [src/ui/arrangement.js](src/ui/arrangement.js) ·
   [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)

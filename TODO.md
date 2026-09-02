@@ -6,7 +6,7 @@ Open threads only. Durable answers live in MEMORY.md; the source questions live 
 **P3 IS REOPENED.** Brandon's 2026-08-31 voicing ruling supersedes 2026-08-24's below — it is
 stricter, not a variant. P4/`spec-transport` does not start until a `voicing()` redesign lands.
 
-Live count: **27.** Four ruled or deferred to Brandon, three handed to an agent, three new
+Live count: **28.** Four ruled or deferred to Brandon, three handed to an agent, three new
 from the 2026-08-24 Goto run, one scope question awaiting a yes/no, four new from the
 2026-08-25 skin specs session, one from 2026-08-31 (synth voice normalization — built, its
 reported problem unsolved, three open items), four new from
@@ -22,7 +22,26 @@ from 2026-08-31 (P4/S3 arrangement — arm half of the global/per-lane split RUL
 2026-08-31; punch half still open, `arrangement.js`'s per-lane punch not yet reconciled), one
 new from 2026-08-31 (P4/S4 node-graph — **BUILT AND HEARD 2026-08-31**; its main open item,
 the port-0/sends tap split, **CLOSED 2026-08-31** by `strip-tap-fix` — two small cosmetic
-items left, both Brandon's).
+items left, both Brandon's), one new from 2026-09-01 (`arrange rebuild` — phase D
+unspecced).
+
+## NEW — 2026-09-01 — `arrange rebuild`, phase D unspecced
+
+Phases A-C built (zoom/scroll/playhead, the region store, lanes drawing regions) plus a
+cycle strip Brandon asked for mid-session. Phases D and E were handed to a sonnet; E grew
+into [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md). Full detail:
+[receipt-arrange-rebuild.md](docs/reports/receipt-arrange-rebuild.md).
+
+- **Phase D — the region editor — is unspecced.** `Arrangement.on('open', region)` fires
+  on double-click and nothing listens yet; that is D's entry point. `_commitToRegion()` in
+  [arrangement.js](src/ui/arrangement.js) is PROVISIONAL and D replaces it. Needs
+  `piano-roll.js`, `step-grid.js` and `capture.js` read in full before it can be spec'd
+  (~110k tokens).
+- **Three open questions in [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md)
+  §7 are Brandon's:** track limit, two instances of one instrument sharing a view, whether
+  a new project opens empty.
+- **Whether clicking the cycle strip should also arm LOOP** — currently it does not, the
+  button still owns that. Session agent's call, flagged.
 
 ## NEW — 2026-08-31 — P4/S3 `arrangement`, global vs. per-lane arm/punch split
 

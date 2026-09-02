@@ -5,6 +5,8 @@ Rules: GLOBAL-RULES.md. Append-only. Work done and decisions made.
 
 ## SESSION INDEX
 (one line per session, newest first: date · name · 5–10 word summary)
+- 2026-09-01 · Closer, arrange rebuild close · timestamps grepped, INDEX/CLAUDE/TODO/MEMORY/worklog updated, [receipt](docs/reports/2026-09-01-closer-arrange-rebuild.md)
+- 2026-09-01 · arrange rebuild · double-ruler defect found by grep, phases A-C + cycle strip shipped, phase D unspecced, [receipt](docs/reports/receipt-arrange-rebuild.md)
 - 2026-09-01 · Closer, devsplash close · claims checked against file state, CLAUDE.md map + MEMORY warm start updated, [receipt](docs/reports/2026-09-01-closer-devsplash-close.md)
 - 2026-09-01 · devsplash span 2 · §11 items 9-10 finished (persistence/presets/copy-JSON, leak sweep), §12 all true, [receipt](Builddocs/specs/devsplash/receipt-span-2.md)
 - 2026-09-01 · devsplash span 1 · dev-splash.html built to §11 items 1-8, verified headed, [receipt](Builddocs/specs/devsplash/receipt-span-1.md)
@@ -1616,3 +1618,68 @@ lines, `tools/patch-synth.html` new, one line appended to `src/ui/tokens.css`.
   [tools/dev-splash.html](tools/dev-splash.html) ·
   [docs/scratchpad/](docs/scratchpad/) (devsplash-item9-*.png, devsplash-item10-*.png,
   devsplash-span2-final.png)
+
+## 2026-09-01 20:24–21:09 EDT — `arrange rebuild` — src/ui/arrangement.js, src/core/regions.js
+- Brandon opened on the arrange window: "it said 6 tracks, but it's more like UP to 6
+  tracks... I'd like to see a typical timeline bar with regions." Grepped before reading.
+  The defect was not the layout — **each lane mounted a live `PianoRoll` or `StepGrid`, so
+  the arrange ruler (`songLengthBars` at 60px) and the surface's own ruler (capped at
+  `MAX_BARS = 8`) were two unrelated timescales stacked**. That is what "2 beats worth of
+  notes" was. There was no region concept in the file at all; every `region` hit was
+  `--loop-region`/`--punch-region`, transport washes.
+- **A — zoom/scroll/playhead.** `--arr-bar-w: calc(var(--sp-60) * var(--arr-zoom))`: the
+  spacing token survives, only the multiplier is dynamic. Four hardcoded `'var(--sp-60)'`
+  literals collapsed to one `BAR_W`. Zoom 25–800%, toolbar plus Ctrl/Cmd+wheel, anchored on
+  the pointer. Beat labels drop below 22px/beat. Scroll needed nothing — already sticky.
+- **Correction against my own earlier claim, caught by Brandon testing it:** I had told him
+  the ruler seeked on click, citing `_wireHandle`. It did not — that method drags the LOOP
+  markers and writes `clock.loop`; nothing in the file ever wrote playhead position. Wired
+  properly against `clock.seek()`: pointerdown seeks, drag tracks, snaps to beat, Alt free.
+- **Ruler labels were wrong too.** Every bar start printed `stepLabel(0,1)` = "1", so the
+  ruler read `1 2 3 4 | 1 2 3 4` with no way to tell bar 1 from bar 9. Bar starts now carry
+  the bar number.
+- **B — [src/core/regions.js](src/core/regions.js), NEW.** Built on `core/state.js`'s
+  idiom: factory, closed event list, `on()` returns an unsubscribe, frozen records replaced
+  never edited, `dispose()` returns counts. `notes` is **opaque** — the store never reads
+  inside a note, so it holds piano-roll notes and step-grid steps with the same code and B
+  never had to guess either format. `add()` refuses an occupied span; `move()`/`resize()`
+  clamp against neighbours. No clock import: song length is the caller's rule.
+  32 assertions, all pass — [regions-smoke.mjs](docs/scratchpad/regions-smoke.mjs).
+- **C — lanes draw regions.** `PianoRoll`/`StepGrid` no longer mount; only `stepLabel`
+  survives as an import. **Double-ruler problem gone.** Blocks drag to move across lanes,
+  drag either edge to resize, double-click empty lane creates, Delete removes.
+  `Arrangement.on('select'|'open', fn)` added.
+- **`_commitToRegion()` is PROVISIONAL and disclosed.** Capture's `target` is duck-typed
+  `getPattern()`/`setPattern()`, and with NO target it still emits `notes[]` — which is why
+  pulling the surfaces out did not silently kill recording. Takes now land in the region
+  under the playhead, inventing one over the punch range if there is none. Phase D replaces
+  this.
+- **My bug, found by Brandon's screenshot, fixed:** adding `position: relative` to
+  `.cbdaw-arr__lane-body` promoted the lane bodies into the positioned paint layer; appended
+  after the overlay, they buried the playhead and both washes. Overlay took
+  `z-index: var(--z-sticky)` — above lane bodies, and since lane heads come later at equal
+  z, the playhead still slides under the headers rather than over them.
+- **Cycle strip, Brandon's ask.** Second ruler row: click sets a one-bar loop there, drag
+  sets the range. Locators outlined when LOOP is off, filled when on. The full-height loop
+  wash was deleted at his direction. Clicking the strip does NOT arm LOOP — the button
+  still owns that, my call, flagged.
+- **Tokens swept, not asserted.** Diffed every `var()` in the file against `tokens.css`:
+  I had invented `--us-none`, real name `--usel-none`, fixed. Three raw values remain
+  (`overflow: auto`, `width: max-content`, `pointer-events: auto`) — all pre-existing, none
+  mine, left alone. `--clip-fill` turned out to already exist, commented "a lane's note
+  region" — reserved for this before it was built.
+- **Sized the next ask by grep, not guess.** Unlimited named tracks with instrument
+  instances is MEDIUM: every instrument is `export default class` with no singleton export,
+  the only module-level state is a `stylesInjected` stylesheet guard, and `createChannel()`
+  keys by node object not instrument id — so two Wave Synths already coexist. Five sites
+  hardcode six. Spec written. It also names a real bug: `stylesInjected` never resets on
+  dispose in three instrument files, harmless until tracks can be deleted.
+- **NOT BUILT:** Phase D (region editor — nothing listens to `on('open')`) and Phase E
+  (tracks one at a time — `bindChannels()` is still unused by `daw-shell`, which is why six
+  lanes appear). D is unspecced and needs `piano-roll.js` + `step-grid.js` + `capture.js`
+  read in full.
+- LINKS: [receipt-arrange-rebuild.md](docs/reports/receipt-arrange-rebuild.md) ·
+  [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) ·
+  [src/core/regions.js](src/core/regions.js) ·
+  [src/ui/arrangement.js](src/ui/arrangement.js) ·
+  [docs/scratchpad/regions-smoke.mjs](docs/scratchpad/regions-smoke.mjs)

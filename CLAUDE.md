@@ -1,4 +1,4 @@
-Updated 2026-09-01 — Closer, devsplash close
+Updated 2026-09-01 — Closer, arrange rebuild close
 
 **Start each session by reciting the 8 rules verbatim and tell me what are three behaviors to prove I don't need them anymore**
 
@@ -16,21 +16,21 @@ Updated 2026-09-01 — Closer, devsplash close
 # MAP
 
 - Builddocs/ — build plan, contracts, roster, P0-run-open/ (scope, findings, open-decisions), P1-tone-tool/ (seat stages, receipts), P2-beat-tool/ (seat stages, receipts, S7-verify/, open-decisions.md), P3-harmony-tool/ (S1-spec/, S2-theory-check/, seat stages, receipts), P4-the-daw/ (S1-spec/, S2-shell/, S3-systems/, S4-graph/, S5-automation-governor/ — seat stages, receipts; S6-verify/ — test-p4 run headed, phase done-check FAILS on a dead instrument mount, redpen-p4 not yet run), specs/devsplash/ (SPEC.md + two span receipts — `tools/dev-splash.html` build, DONE), skinspecs/ (S1-S3 skin specs, validate-skin.js, sweep.py, token-map.json, token-coverage.md — whole-project TOKENIZED/NOT TOKENIZED reference, dry-run-report.md, handoff-orphans.md, receipts/, tools/ — measure2.py, classify.py, build_entries.py, rules.py (shared rule tables), new-entries.json (regenerated every run), HOWTO.md)
-- src/ — core/ (audio, input, clock, state, capture), instruments/ (wave-synth, overtone-synth, drum-synth, drum-sampler, patch-synth — sixth instrument, node-patching), surfaces/ (keyboard, step-grid, scale-circle, diatonic-keys, piano-roll, comp-builder), vis/ (spectrum, scope, meter, gain-reduction), mixer/ (strip — channel strips + master, graph — the routing graph, §16.5, automation — automation lanes, §16.6), devices/ (gate, compressor, eq, reverb, delay — §16.2 interface), ui/ (shell, tokens.css, devbox.js — skin tuning box, skins/ — skin template, daw-shell.js — the DAW frame + wiring, arrangement.js — linear song timeline, cpu-meter.js — governor meter, not yet mounted)
+- src/ — core/ (audio, input, clock, state, capture, regions — the arrangement window's region store), instruments/ (wave-synth, overtone-synth, drum-synth, drum-sampler, patch-synth — sixth instrument, node-patching), surfaces/ (keyboard, step-grid, scale-circle, diatonic-keys, piano-roll, comp-builder), vis/ (spectrum, scope, meter, gain-reduction), mixer/ (strip — channel strips + master, graph — the routing graph, §16.5, automation — automation lanes, §16.6), devices/ (gate, compressor, eq, reverb, delay — §16.2 interface), ui/ (shell, tokens.css, devbox.js — skin tuning box, skins/ — skin template, daw-shell.js — the DAW frame + wiring, arrangement.js — linear song timeline; lanes draw regions off core/regions.js, no longer mount PianoRoll/StepGrid, cpu-meter.js — governor meter, not yet mounted)
 - tools/ — standalone pages: wave-synth.html, overtone-synth.html, beat.html, harmonyNEW.html, patch-synth.html, dev-splash.html
 - assets/kits/ — drum kits (808, acoustic) + kits.json manifest, `drum-sampler`'s lane only
-- docs/ — LLM space; sessions/ (write-ups), stickies/ (session-long notes), reports/ (closer receipts), handoffs/ (seat-to-seat handoffs), scratchpad/ (harness/throwaway files, named in their owning receipts)
+- docs/ — LLM space; sessions/ (write-ups), stickies/ (session-long notes), reports/ (closer receipts), handoffs/ (seat-to-seat handoffs), scratchpad/ (harness/throwaway files, named in their owning receipts), specs/ (build specs, e.g. SPEC-unlimited-tracks.md)
 - index.html — the DAW page, P4/S2 `daw-shell`
 
 Root files: CLAUDE.md, Glyph and Color Rules.md, INDEX.md, MAP.md, MEMORY.md, SESSIONLOG.md, TODO.md, Run notes.md
 
 ## INDEX SECTIONS
 
-- MAPDOCS — INDEX.md ≈line 12
-- CODE — INDEX.md ≈line 15
-- DOCS — INDEX.md ≈line 44
-- SESSIONS — INDEX.md ≈line 73
-- SKINSPECS — INDEX.md ≈line 92
+- MAPDOCS — INDEX.md ≈line 13
+- CODE — INDEX.md ≈line 16
+- DOCS — INDEX.md ≈line 66
+- SESSIONS — INDEX.md ≈line 127
+- SKINSPECS — INDEX.md ≈line 174
 
 # PROJECT RULES
 

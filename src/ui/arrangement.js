@@ -1,7 +1,7 @@
-import { clock as sharedClock, ticksPerBar } from '../core/clock.js';
+import { clock as sharedClock, ticksPerBar, ticksPerBeat } from '../core/clock.js';
 import { CHANNEL_IDS } from './daw-shell.js';
-import PianoRoll from '../surfaces/piano-roll.js';
-import StepGrid, { stepLabel } from '../surfaces/step-grid.js';
+import { stepLabel } from '../surfaces/step-grid.js';
+import { regions as sharedRegions } from '../core/regions.js';
 import Capture from '../core/capture.js';
 
 const STYLE_ID = 'cbdaw-arrangement-style';
@@ -27,8 +27,24 @@ function clampBar(n, max) {
   return Math.max(1, Math.min(max, v));
 }
 
+// Horizontal timeline zoom. Multiplies the tokenized bar width; never replaces it.
+const BAR_W = 'var(--arr-bar-w)';
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 8;
+const ZOOM_STEP = 1.25;
+// Below this much room per beat the ruler shows bar numbers only.
+const BEAT_LABEL_MIN_PX = 22;
+
+function clampZoom(z) {
+  const v = Number(z);
+  if (!Number.isFinite(v)) return 1;
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, v));
+}
+
 const STYLE_TEXT = `
 .cbdaw-arr {
+  --arr-zoom: 1;
+  --arr-bar-w: calc(var(--sp-60) * var(--arr-zoom));
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
   width: var(--pct-100);
@@ -39,6 +55,24 @@ const STYLE_TEXT = `
   font-size: var(--fs-base);
   box-sizing: var(--box-border-box);
   overflow: var(--ov-hidden);
+}
+
+.cbdaw-arr__toolbar {
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--lane-head);
+  border-bottom: var(--bw) solid var(--line);
+  box-sizing: var(--box-border-box);
+  flex: var(--flex-0-0-auto);
+}
+
+.cbdaw-arr__zoom-readout {
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  min-width: var(--sp-14);
+  text-align: var(--ta-center);
 }
 
 .cbdaw-arr__scroll {
@@ -83,14 +117,48 @@ const STYLE_TEXT = `
   border-color: var(--strip-sel);
 }
 
-.cbdaw-arr__ruler {
+.cbdaw-arr__header {
   position: var(--pos-sticky);
   top: var(--sp-0);
   z-index: var(--z-sticky);
-  height: var(--sp-14);
   background: var(--ruler-ground);
   border-bottom: var(--bw) solid var(--line);
   box-sizing: var(--box-border-box);
+}
+
+.cbdaw-arr__ruler {
+  position: var(--pos-relative);
+  height: var(--sp-14);
+  background: var(--ruler-ground);
+  box-sizing: var(--box-border-box);
+  cursor: var(--cur-pointer);
+  touch-action: var(--touch-none);
+}
+
+/* The cycle strip: click or drag here to set the loop range. */
+.cbdaw-arr__loop-row {
+  position: var(--pos-relative);
+  height: var(--sp-10);
+  background: var(--lane-row-alt);
+  border-top: var(--bw) solid var(--line);
+  box-sizing: var(--box-border-box);
+  cursor: var(--cur-pointer);
+  touch-action: var(--touch-none);
+}
+
+/* Empty locators while the loop is off; filled in when it is on. */
+.cbdaw-arr__loop-span {
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  background: var(--none);
+  border: var(--bw) solid var(--strip-sel);
+  border-radius: var(--r-cell);
+  box-sizing: var(--box-border-box);
+}
+
+.cbdaw-arr__loop-span[data-on="true"] {
+  background: var(--loop-region);
 }
 
 .cbdaw-arr__tick {
@@ -116,6 +184,15 @@ const STYLE_TEXT = `
 .cbdaw-arr__label[data-bar="true"] {
   color: var(--ruler-tick-bar);
   font-size: var(--fs-xs);
+}
+
+/* Zoomed out far enough that beat labels collide: bar numbers only. */
+.cbdaw-arr[data-dense="true"] .cbdaw-arr__label:not([data-bar="true"]) {
+  display: var(--disp-none);
+}
+
+.cbdaw-arr[data-dense="true"] .cbdaw-arr__tick:not([data-bar="true"]) {
+  opacity: var(--op-faint);
 }
 
 .cbdaw-arr__lane-head {
@@ -173,14 +250,64 @@ const STYLE_TEXT = `
 }
 
 .cbdaw-arr__lane-body {
+  position: var(--pos-relative);
+  min-height: var(--sp-28);
   border-bottom: var(--bw) solid var(--line);
   background: var(--lane-row);
   box-sizing: var(--box-border-box);
+  overflow: var(--ov-hidden);
+  touch-action: var(--touch-none);
 }
 
 .cbdaw-arr__lane-body[data-alt="true"] {
   background: var(--lane-row-alt);
 }
+
+.cbdaw-arr__region {
+  position: var(--pos-absolute);
+  top: var(--sp-1);
+  bottom: var(--sp-1);
+  background: var(--clip-fill);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  box-sizing: var(--box-border-box);
+  overflow: var(--ov-hidden);
+  cursor: var(--cur-grab);
+  user-select: var(--usel-none);
+}
+
+.cbdaw-arr__region[data-selected="true"] {
+  border-color: var(--strip-sel);
+  z-index: var(--z-raise-1);
+}
+
+.cbdaw-arr__region[data-muted="true"] {
+  opacity: var(--op-faint);
+}
+
+.cbdaw-arr__region[data-dragging="true"] {
+  cursor: var(--cur-grabbing);
+  z-index: var(--z-raise-2);
+}
+
+.cbdaw-arr__region-label {
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-micro);
+  color: var(--text);
+  white-space: var(--ws-nowrap);
+  pointer-events: var(--pe-none);
+}
+
+.cbdaw-arr__region-edge {
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  width: var(--sp-2);
+  cursor: var(--cur-ew-resize);
+}
+
+.cbdaw-arr__region-edge[data-edge="start"] { left: var(--sp-0); }
+.cbdaw-arr__region-edge[data-edge="end"] { right: var(--sp-0); }
 
 .cbdaw-arr__overlay {
   position: var(--pos-absolute);
@@ -188,14 +315,9 @@ const STYLE_TEXT = `
   left: var(--sp-84);
   height: var(--pct-100);
   pointer-events: var(--none);
-}
-
-.cbdaw-arr__loop-wash {
-  position: var(--pos-absolute);
-  top: var(--sp-0);
-  bottom: var(--sp-0);
-  background: var(--loop-region);
-  opacity: var(--op-soft);
+  /* Above the lane bodies and their regions, below the sticky lane heads — those come
+     later in the grid, so at equal z they still win and the playhead slides under them. */
+  z-index: var(--z-sticky);
 }
 
 .cbdaw-arr__punch-wash {
@@ -204,11 +326,12 @@ const STYLE_TEXT = `
   opacity: var(--op-soft);
 }
 
+/* Sits on the cycle strip, below the ruler — the two heights must agree. */
 .cbdaw-arr__handle {
   position: var(--pos-absolute);
-  top: var(--sp-0);
+  top: var(--sp-14);
   width: var(--sp-2);
-  height: var(--sp-14);
+  height: var(--sp-10);
   background: var(--strip-sel);
   cursor: var(--cur-ew-resize);
   pointer-events: auto;
@@ -242,22 +365,34 @@ export default class Arrangement {
   static id = 'arrangement';
   static label = 'Arrangement';
 
-  constructor(el = null, clock = sharedClock) {
+  constructor(el = null, clock = sharedClock, regions = sharedRegions) {
     this._clock = clock;
+    this._regions = regions;
     this.defaultTarget = el;
     this.mounted = false;
 
     this._channels = defaultChannels();
     this._lanes = new Map();
+    this._selectedId = null;
+    this._unsubRegions = null;
+    this._blockDrag = null;
+    this._loopDrag = null;
+    this._listeners = { select: new Set(), open: new Set() };
 
     this.el = null;
-    this.nodes = { scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null };
+    this.nodes = {
+      scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null,
+      toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null,
+    };
 
+    this._zoom = 1;
     this._lastTs = { top: clock.timeSignature.top, bottom: clock.timeSignature.bottom };
     this._lastSongLengthBars = clock.songLengthBars;
     this._rafHandle = null;
     this._domListeners = [];
     this._drag = null;
+    this._scrub = false;
+    this._scrubRelease = null;
 
     this._rafLoop = this._rafLoop.bind(this);
   }
@@ -279,14 +414,14 @@ export default class Arrangement {
   bindLaneInstrument(id, instrument) {
     const lane = this._lanes.get(id);
     if (!lane) return this;
+    lane.instrument = instrument || null;
     lane.capture.setInstrument(instrument || null);
-    if (lane.kind === 'drum' && lane.surface.bindInstrument) lane.surface.bindInstrument(instrument || null);
     return this;
   }
 
   get lanes() {
     return [...this._lanes.values()].map((l) => ({
-      id: l.id, kind: l.kind, label: l.label, surface: l.surface, capture: l.capture,
+      id: l.id, kind: l.kind, label: l.label, capture: l.capture, instrument: l.instrument,
     }));
   }
 
@@ -311,20 +446,58 @@ export default class Arrangement {
     this._rebuildLanes();
     this._layoutOverlay();
 
+    // A store change from anywhere — this timeline, a recording, a project load — redraws.
+    this._unsubRegions = this._regions.on('change', () => {
+      if (this._blockDrag) { this._renderDuringDrag(); return; }
+      this._renderAllRegions();
+    });
+
     this._rafHandle = requestAnimationFrame(this._rafLoop);
     this.mounted = true;
     return this;
+  }
+
+  /** Mid-drag the blocks are rebuilt every pointermove, which would drop the node the
+   *  gesture is attached to. Only the geometry moves. */
+  _renderDuringDrag() {
+    for (const lane of this._lanes.values()) {
+      for (const el of lane.body.querySelectorAll('.cbdaw-arr__region')) {
+        const r = this._regions.get(el.dataset.id);
+        if (!r) { el.remove(); continue; }
+        if (r.laneId !== lane.id) { el.remove(); continue; }
+        el.style.left = `calc(${BAR_W} * ${r.startBar - 1})`;
+        el.style.width = `calc(${BAR_W} * ${r.lengthBars})`;
+      }
+    }
+    // A region dragged onto another lane has no node there yet.
+    for (const lane of this._lanes.values()) {
+      for (const r of this._regions.forLane(lane.id)) {
+        if (!lane.body.querySelector(`.cbdaw-arr__region[data-id="${r.id}"]`)) {
+          this._renderLaneRegions(lane);
+          break;
+        }
+      }
+    }
   }
 
   unmount() {
     if (!this.mounted) return this;
     if (this._rafHandle !== null) cancelAnimationFrame(this._rafHandle);
     this._rafHandle = null;
+    this._scrubRelease?.(); // drop window listeners if unmounted mid-scrub
+    this._blockDrag?.();
+    this._loopDrag?.();
+    this._unsubRegions?.();
+    this._unsubRegions = null;
+    this._selectedId = null;
     this._detachDom();
     this._teardownLanes();
     this.el?.remove();
     this.el = null;
-    this.nodes = { scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null };
+    this.nodes = {
+      scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null,
+      toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null,
+    };
     this.mounted = false;
     releaseStyle();
     return this;
@@ -341,6 +514,24 @@ export default class Arrangement {
   _build(target) {
     const root = document.createElement('div');
     root.className = 'cbdaw-arr';
+    root.tabIndex = 0; // so Delete reaches the timeline
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'cbdaw-arr__toolbar';
+    const zoomOut = document.createElement('button');
+    zoomOut.type = 'button';
+    zoomOut.className = 'cbdaw-arr__btn';
+    zoomOut.textContent = '−';
+    zoomOut.title = 'Zoom out';
+    const zoomReadout = document.createElement('span');
+    zoomReadout.className = 'cbdaw-arr__zoom-readout';
+    const zoomIn = document.createElement('button');
+    zoomIn.type = 'button';
+    zoomIn.className = 'cbdaw-arr__btn';
+    zoomIn.textContent = '+';
+    zoomIn.title = 'Zoom in';
+    toolbar.append(zoomOut, zoomReadout, zoomIn);
+    root.appendChild(toolbar);
 
     const scroll = document.createElement('div');
     scroll.className = 'cbdaw-arr__scroll';
@@ -362,30 +553,129 @@ export default class Arrangement {
       this._clock.loop = { ...this._clock.loop, on: !this._clock.loop.on };
     });
 
+    const header = document.createElement('div');
+    header.className = 'cbdaw-arr__header';
+    grid.appendChild(header);
+
     const ruler = document.createElement('div');
     ruler.className = 'cbdaw-arr__ruler';
-    grid.appendChild(ruler);
+    header.appendChild(ruler);
+
+    const loopRow = document.createElement('div');
+    loopRow.className = 'cbdaw-arr__loop-row';
+    header.appendChild(loopRow);
+
+    const loopSpan = document.createElement('div');
+    loopSpan.className = 'cbdaw-arr__loop-span';
+    loopRow.appendChild(loopSpan);
 
     const overlay = document.createElement('div');
     overlay.className = 'cbdaw-arr__overlay';
     grid.appendChild(overlay);
 
     this.el = root;
-    this.nodes = { scroll, grid, corner, ruler, overlay, loopToggle };
+    this.nodes = {
+      scroll, grid, corner, ruler, overlay, loopToggle, toolbar, zoomOut, zoomIn, zoomReadout,
+      header, loopRow, loopSpan,
+    };
     target.appendChild(root);
+
+    this._addDom(zoomOut, 'click', () => this._applyZoom(this._zoom / ZOOM_STEP));
+    this._addDom(zoomIn, 'click', () => this._applyZoom(this._zoom * ZOOM_STEP));
+
+    // Ctrl/Cmd + wheel zooms about the pointer; plain wheel stays ordinary scrolling.
+    this._addDom(scroll, 'wheel', (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      this._applyZoom(this._zoom * factor, e.clientX);
+    });
+
+    this._wireRulerSeek();
+    this._wireLoopRow();
+
+    this._addDom(root, 'keydown', (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!this._selectedId) return;
+      e.preventDefault();
+      const gone = this._selectedId;
+      this._selectedId = null;
+      this._regions.remove(gone);
+      this._emit('select', null);
+    });
+
+    this._applyZoom(this._zoom);
+  }
+
+  get zoom() {
+    return this._zoom;
+  }
+
+  set zoom(z) {
+    this._applyZoom(z);
+  }
+
+  /** Sets the bar-width multiplier and holds `anchorClientX` still across the change.
+   *  With no anchor the viewport centre is held. */
+  _applyZoom(next, anchorClientX = null) {
+    const clamped = clampZoom(next);
+    const { scroll, ruler, corner } = this.nodes;
+    if (!this.el) { this._zoom = clamped; return this; }
+
+    if (!scroll || !ruler) {
+      this._zoom = clamped;
+      this.el.style.setProperty('--arr-zoom', String(clamped));
+      this._syncZoomReadout();
+      return this;
+    }
+
+    const headW = corner ? corner.offsetWidth : 0;
+    const beforeW = ruler.offsetWidth;
+    const viewX = anchorClientX === null
+      ? (scroll.clientWidth + headW) / 2
+      : anchorClientX - scroll.getBoundingClientRect().left;
+    // Where the anchor sits along the timeline, 0..1, ignoring the sticky lane heads.
+    const ratio = beforeW > 0
+      ? Math.max(0, (scroll.scrollLeft + viewX - headW) / beforeW)
+      : 0;
+
+    this._zoom = clamped;
+    this.el.style.setProperty('--arr-zoom', String(clamped));
+
+    const afterW = ruler.offsetWidth; // reads back after the property lands
+    scroll.scrollLeft = Math.max(0, (ratio * afterW) + headW - viewX);
+
+    this._syncDensity();
+    this._syncZoomReadout();
+    return this;
+  }
+
+  /** Beat labels are dropped once they no longer fit between their ticks. */
+  _syncDensity() {
+    const ruler = this.nodes.ruler;
+    if (!ruler || !this.el) return;
+    const bars = Math.max(1, this._clock.songLengthBars);
+    const beatPx = ruler.offsetWidth / bars / Math.max(1, this._clock.timeSignature.top);
+    this.el.dataset.dense = String(beatPx < BEAT_LABEL_MIN_PX);
+  }
+
+  _syncZoomReadout() {
+    if (this.nodes.zoomReadout) this.nodes.zoomReadout.textContent = `${Math.round(this._zoom * 100)}%`;
+    if (this.nodes.zoomOut) this.nodes.zoomOut.disabled = this._zoom <= ZOOM_MIN;
+    if (this.nodes.zoomIn) this.nodes.zoomIn.disabled = this._zoom >= ZOOM_MAX;
   }
 
   _rebuildLanes() {
     this._teardownLanes();
     for (const ch of this._channels) this._buildLane(ch);
     this._renderRuler();
+    this._renderAllRegions();
     this._layoutOverlay();
   }
 
   _teardownLanes() {
     for (const lane of this._lanes.values()) {
       lane.capture.dispose();
-      lane.surface.dispose();
       lane.head.remove();
       lane.body.remove();
     }
@@ -449,32 +739,37 @@ export default class Arrangement {
     this.nodes.grid.appendChild(body);
 
     const kind = ch.kind === 'drum' ? 'drum' : 'pitched';
-    const surface = kind === 'drum' ? new StepGrid() : new PianoRoll();
-    surface.mount(body, 'compact');
 
     const punchState = { on: false, startBar: 1, endBar: 2 };
     const songLength = () => Math.max(1, this._clock.songLengthBars);
 
-    const capture = new Capture({
-      clock: this._clock,
-      target: kind === 'drum' ? surface : null,
-    });
+    // No `target`: with none, Capture still emits `notes[]` on commit, and those go into
+    // the region under the playhead rather than into a mounted editor.
+    const capture = new Capture({ clock: this._clock });
     capture.disarm('all');
 
-    if (kind === 'pitched') {
-      capture.on('commit', (report) => {
-        const kindTag = report?.kind;
-        if (kindTag === 'discard') return;
-        if (kindTag === 'requantize') { surface.setNotes(report.notes || []); return; }
-        surface.addNotes(report?.notes || []);
-      });
-    }
-
     const lane = {
-      id: ch.id, kind, label: ch.label, surface, capture, head, body,
+      id: ch.id, kind, label: ch.label, capture, head, body, instrument: null,
       armBtn, punchBtn, startReadout, endReadout, punch: punchState,
     };
     this._lanes.set(ch.id, lane);
+
+    capture.on('commit', (report) => {
+      if (report?.kind === 'discard') return;
+      this._commitToRegion(lane, report);
+    });
+
+    // Double-click empty lane space makes a one-bar region there.
+    this._addDom(body, 'dblclick', (e) => {
+      if (e.target !== body) return;
+      const bar = this._barFromClientX(e.clientX);
+      const made = this._regions.add({ laneId: lane.id, startBar: bar, lengthBars: 1, name: lane.label });
+      if (made) this._select(made.id);
+    });
+
+    this._addDom(body, 'pointerdown', (e) => {
+      if (e.target === body) this._select(null);
+    });
 
     const syncReadouts = () => {
       startReadout.textContent = String(punchState.startBar);
@@ -536,7 +831,7 @@ export default class Arrangement {
     ruler.innerHTML = '';
     const ts = this._clock.timeSignature;
     const bars = Math.max(1, this._clock.songLengthBars);
-    const barWidth = 'var(--sp-60)';
+    const barWidth = BAR_W;
     ruler.style.width = `calc(${barWidth} * ${bars})`;
 
     for (let bar = 1; bar <= bars; bar++) {
@@ -554,12 +849,15 @@ export default class Arrangement {
         beatLabel.className = 'cbdaw-arr__label';
         if (isBarStart) beatLabel.dataset.bar = 'true';
         beatLabel.style.left = left;
-        beatLabel.textContent = stepLabel(beat, 1);
+        // Bar starts carry the bar number; the beats between carry the subdivision.
+        beatLabel.textContent = isBarStart ? String(bar) : stepLabel(beat, 1);
         ruler.appendChild(beatLabel);
       }
     }
 
     this.nodes.overlay.style.width = `calc(${barWidth} * ${bars})`;
+    if (this.nodes.loopRow) this.nodes.loopRow.style.width = `calc(${barWidth} * ${bars})`;
+    this._syncDensity();
     this._lastTs = { top: ts.top, bottom: ts.bottom };
     this._lastSongLengthBars = bars;
   }
@@ -567,11 +865,6 @@ export default class Arrangement {
   _layoutOverlay() {
     const overlay = this.nodes.overlay;
     if (!overlay) return;
-    if (!this._loopWash) {
-      this._loopWash = document.createElement('div');
-      this._loopWash.className = 'cbdaw-arr__loop-wash';
-      overlay.appendChild(this._loopWash);
-    }
     if (!this._playhead) {
       this._playhead = document.createElement('div');
       this._playhead.className = 'cbdaw-arr__playhead';
@@ -596,6 +889,250 @@ export default class Arrangement {
       lane.wash.style.height = `${height}px`;
       this._renderLanePunchWash(lane);
     }
+  }
+
+  // ——— regions —————————————————————————————————————————————————————————————————————————
+
+  /** Width of one bar on screen, in px. Measured, so it is right at any zoom. */
+  _barPx() {
+    const ruler = this.nodes.ruler;
+    if (!ruler) return 0;
+    return ruler.offsetWidth / Math.max(1, this._clock.songLengthBars);
+  }
+
+  /** 1-based bar under a client X, measured against the ruler. */
+  _barFromClientX(clientX) {
+    const ruler = this.nodes.ruler;
+    if (!ruler) return 1;
+    const barPx = this._barPx();
+    if (barPx <= 0) return 1;
+    const rect = ruler.getBoundingClientRect();
+    return Math.max(1, Math.floor((clientX - rect.left) / barPx) + 1);
+  }
+
+  /** The lane whose body contains a client Y, or null. */
+  _laneFromClientY(clientY) {
+    for (const lane of this._lanes.values()) {
+      const rect = lane.body.getBoundingClientRect();
+      if (clientY >= rect.top && clientY < rect.bottom) return lane;
+    }
+    return null;
+  }
+
+  get selectedRegion() {
+    return this._selectedId ? this._regions.get(this._selectedId) : null;
+  }
+
+  _select(id) {
+    if (this._selectedId === id) return;
+    this._selectedId = id;
+    this._paintSelection();
+    this._emit('select', id ? this._regions.get(id) : null);
+  }
+
+  _paintSelection() {
+    for (const lane of this._lanes.values()) {
+      for (const el of lane.body.querySelectorAll('.cbdaw-arr__region')) {
+        el.dataset.selected = String(el.dataset.id === this._selectedId);
+      }
+    }
+  }
+
+  /** Rebuilds one lane's blocks from the store. */
+  _renderLaneRegions(lane) {
+    for (const el of [...lane.body.querySelectorAll('.cbdaw-arr__region')]) el.remove();
+
+    for (const r of this._regions.forLane(lane.id)) {
+      const el = document.createElement('div');
+      el.className = 'cbdaw-arr__region';
+      el.dataset.id = r.id;
+      el.dataset.selected = String(r.id === this._selectedId);
+      el.dataset.muted = String(r.muted);
+      el.style.left = `calc(${BAR_W} * ${r.startBar - 1})`;
+      el.style.width = `calc(${BAR_W} * ${r.lengthBars})`;
+      if (r.color) el.style.background = r.color;
+
+      const label = document.createElement('div');
+      label.className = 'cbdaw-arr__region-label';
+      label.textContent = r.name || `${r.lengthBars} bar${r.lengthBars === 1 ? '' : 's'}`;
+      el.appendChild(label);
+
+      for (const edge of ['start', 'end']) {
+        const grip = document.createElement('div');
+        grip.className = 'cbdaw-arr__region-edge';
+        grip.dataset.edge = edge;
+        el.appendChild(grip);
+        this._addDom(grip, 'pointerdown', (e) => {
+          e.stopPropagation();
+          this._beginBlockDrag(e, r.id, edge);
+        });
+      }
+
+      this._addDom(el, 'pointerdown', (e) => this._beginBlockDrag(e, r.id, 'move'));
+      this._addDom(el, 'dblclick', (e) => {
+        e.stopPropagation();
+        this._emit('open', this._regions.get(r.id));
+      });
+
+      lane.body.appendChild(el);
+    }
+  }
+
+  _renderAllRegions() {
+    for (const lane of this._lanes.values()) this._renderLaneRegions(lane);
+  }
+
+  /** One gesture for all three: move, drag the left edge, drag the right edge. */
+  _beginBlockDrag(e, id, mode) {
+    const origin = this._regions.get(id);
+    if (!origin) return;
+    e.preventDefault();
+    this._select(id);
+
+    const startX = e.clientX;
+    const barPx = this._barPx();
+    const el = e.currentTarget.closest?.('.cbdaw-arr__region') || null;
+    if (el) el.dataset.dragging = 'true';
+
+    const onMove = (ev) => {
+      if (barPx <= 0) return;
+      const deltaBars = Math.round((ev.clientX - startX) / barPx);
+      if (mode === 'move') {
+        const lane = this._laneFromClientY(ev.clientY);
+        this._regions.move(id, {
+          laneId: lane ? lane.id : origin.laneId,
+          startBar: origin.startBar + deltaBars,
+        });
+      } else if (mode === 'start') {
+        this._regions.resize(id, { startBar: origin.startBar + deltaBars });
+      } else {
+        this._regions.resize(id, { lengthBars: origin.lengthBars + deltaBars });
+      }
+    };
+
+    const onUp = () => {
+      this._blockDrag = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      this._renderAllRegions();
+    };
+
+    this._blockDrag = onUp;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  /** Where a take's notes land. Provisional: the region under the playhead on that lane,
+   *  or a new one covering the punch range if the lane has none there. */
+  _commitToRegion(lane, report) {
+    const notes = report?.notes || [];
+    if (!notes.length) return;
+
+    const tpBar = ticksPerBar(this._clock.timeSignature);
+    const bar = Math.max(1, Math.floor(this._clock.positionTicks / tpBar) + 1);
+    const existing = this._regions.at(lane.id, bar);
+
+    if (existing) {
+      if (report.kind === 'requantize') this._regions.setNotes(existing.id, notes);
+      else this._regions.addNotes(existing.id, notes);
+      return;
+    }
+
+    const p = lane.punch;
+    const start = p.on ? p.startBar : bar;
+    const length = p.on ? Math.max(1, p.endBar - p.startBar) : 1;
+    this._regions.add({ laneId: lane.id, startBar: start, lengthBars: length, name: lane.label, notes });
+  }
+
+  on(event, fn) {
+    if (!this._listeners[event]) throw new Error(`Arrangement.on: no such event "${event}"`);
+    this._listeners[event].add(fn);
+    return () => this._listeners[event].delete(fn);
+  }
+
+  _emit(event, payload) {
+    for (const fn of [...this._listeners[event]]) fn(payload);
+  }
+
+  /** Ruler pointer -> transport position. Snaps to the beat; Alt scrubs free. */
+  _seekToClientX(clientX, freeScrub = false) {
+    const ruler = this.nodes.ruler;
+    if (!ruler) return;
+    const rect = ruler.getBoundingClientRect();
+    if (rect.width <= 0) return;
+
+    const ts = this._clock.timeSignature;
+    const tpBar = ticksPerBar(ts);
+    const tpBeat = ticksPerBeat(ts);
+    const total = Math.max(1, this._clock.songLengthBars) * tpBar;
+
+    const ratio = (clientX - rect.left) / rect.width;
+    let ticks = Math.round(ratio * total);
+    if (!freeScrub) ticks = Math.round(ticks / tpBeat) * tpBeat;
+    ticks = Math.max(0, Math.min(total - tpBeat, ticks));
+
+    const bar = Math.floor(ticks / tpBar) + 1;
+    const rem = ticks - (bar - 1) * tpBar;
+    const beat = Math.floor(rem / tpBeat) + 1;
+    this._clock.seek(bar, beat, rem - (beat - 1) * tpBeat);
+  }
+
+  /** The cycle strip. A click sets a one-bar loop starting there; a drag sets the range.
+   *  Never touches `loop.on` — the LOOP button still decides whether the transport cycles,
+   *  and the strip shows the range either way. */
+  _wireLoopRow() {
+    const loopRow = this.nodes.loopRow;
+    if (!loopRow) return;
+
+    let anchor = 1;
+    const setFrom = (clientX) => {
+      const bar = this._barFromClientX(clientX);
+      const lo = Math.min(anchor, bar);
+      const hi = Math.max(anchor, bar);
+      this._clock.loop = { ...this._clock.loop, startBar: lo, endBar: hi + 1 };
+    };
+
+    const onMove = (e) => { if (this._loopDrag) setFrom(e.clientX); };
+    const onUp = () => {
+      this._loopDrag = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    this._addDom(loopRow, 'pointerdown', (e) => {
+      e.preventDefault();
+      anchor = this._barFromClientX(e.clientX);
+      this._loopDrag = onUp;
+      setFrom(e.clientX);
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
+  }
+
+  _wireRulerSeek() {
+    const ruler = this.nodes.ruler;
+    if (!ruler) return;
+
+    const onMove = (e) => {
+      if (!this._scrub) return;
+      this._seekToClientX(e.clientX, e.altKey);
+    };
+    const onUp = () => {
+      this._scrub = false;
+      this._scrubRelease = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    this._addDom(ruler, 'pointerdown', (e) => {
+      if (this._drag) return; // a loop handle already owns this gesture
+      e.preventDefault();
+      this._scrub = true;
+      this._scrubRelease = onUp;
+      this._seekToClientX(e.clientX, e.altKey);
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    });
   }
 
   _wireHandle(el, field) {
@@ -623,8 +1160,7 @@ export default class Arrangement {
   }
 
   _renderLanePunchWash(lane) {
-    const bars = Math.max(1, this._clock.songLengthBars);
-    const barWidth = 'var(--sp-60)';
+    const barWidth = BAR_W;
     if (!lane.punch.on) { lane.wash.hidden = true; return; }
     lane.wash.hidden = false;
     lane.wash.style.left = `calc(${barWidth} * ${lane.punch.startBar - 1})`;
@@ -634,15 +1170,17 @@ export default class Arrangement {
   _renderLoopAndPlayhead() {
     const loop = this._clock.loop;
     const bars = Math.max(1, this._clock.songLengthBars);
-    const barWidth = 'var(--sp-60)';
-    if (this._loopWash) {
-      this._loopWash.hidden = !loop.on;
-      this._loopWash.style.left = `calc(${barWidth} * ${loop.startBar - 1})`;
-      this._loopWash.style.width = `calc(${barWidth} * ${loop.endBar - loop.startBar})`;
-    }
+    const barWidth = BAR_W;
     if (this._handleStart) this._handleStart.style.left = `calc(${barWidth} * ${loop.startBar - 1})`;
     if (this._handleEnd) this._handleEnd.style.left = `calc(${barWidth} * ${loop.endBar - 1})`;
     this.nodes.loopToggle.dataset.on = String(loop.on);
+
+    const span = this.nodes.loopSpan;
+    if (span) {
+      span.dataset.on = String(loop.on);
+      span.style.left = `calc(${barWidth} * ${loop.startBar - 1})`;
+      span.style.width = `calc(${barWidth} * ${loop.endBar - loop.startBar})`;
+    }
 
     const ts = this._clock.timeSignature;
     const totalTicks = bars * ticksPerBar(ts);
