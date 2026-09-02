@@ -1,55 +1,34 @@
 /**
- * instruments/drum-synth.js — the Drum Synth. Eight drum pieces built entirely out of Web
- * Audio math: no samples, no files, no network. "The machine that works when the network
- * does not" (this seat's brief) — a DAW channel and the standalone beat tool. Built by
- * `drum-synth`, P2/S4.
+ * instruments/drum-synth.js — the Drum Synth. Eight drums built entirely out of Web Audio
+ * math: no samples, no files, no network.
  *
- * Implements CONTRACTS §2 (module contract, including its [AMENDED 2026-08-22] additions:
- * `ready()`, `getAnalyser()`, `static pieces`, `onNoteOut`/`offNoteOut`) and binds to §14.1's
- * fixed eight-role piece table (index/note fixed app-wide; label PROVISIONAL, carried as
- * written — see this file's own receipt, not re-escalated here since `spec-clock` already
- * escalated it and it does not block this seat). Also binds to §11.7's three
- * "instrument uniformity" rules, which that section states are "binding on every instrument
- * from here forward," not only the two P1 synths that forced it: (a) a missing `velocity`
- * defaults to `0.8`, never `NaN`/a throw; (b) an unrecognized `setParam`/`getParam` path or a
- * malformed `setState` argument is a silent no-op, never a throw; (c) does not apply here in
- * its literal `env.*` form — this instrument has no sustained `env.*` surface (§14.5: a drum
- * piece is a one-shot, no held/released note), so there is nothing for a live-envelope-edit
- * rule to bind to. See NOTE ON NOTE-OFF, below, for the one-shot design this implies.
+ * SURFACES: eight pads laid out on the home row (A S D F / J K L ;), a per-drum parameter
+ * stack behind one disclosure, a preset picker and a per-drum sample picker (both display
+ * only — see SAMPLE_CHOICES and PRESET_NAMES), and a switch-hands toggle.
  *
- * Owns: this file only. Does NOT own `/src/core/audio.js` (frozen, P1/S2 — imports
- * `voicePool`/`governor` from it, never constructs an AudioContext, never touches
- * `ctx.destination`) · `/src/ui/tokens.css` (frozen, P1/S3 — read only, via CSS custom
- * properties with fallbacks byte-identical to that file, never assumed present) ·
- * `/src/surfaces/step-grid.js` (`grid`, same stage — this file never reads a grid, never
- * reads `/assets/**`, never knows a kit exists) · `/src/instruments/drum-sampler.js`
- * (`drum-sampler`, same stage — no shared code, no shared file, per STAGE.md's collision map).
+ * INPUT: pads and keys EMIT on core/input.js and never call noteOn themselves. The host page
+ * wires the bus to noteOn. One path, so a hit cannot double.
  *
- * NOTE ON NOTE-OFF — a drum hit is a one-shot. §14.5's own model treats a piece as played by
- * `noteOn(note, velocity, atTime)` alone; nothing in §13.5 (`{ v: 0.8 }`, no length field) or
- * §14 gives a drum piece a held/released lifecycle the way a synth voice has one. Every piece
- * below schedules its own complete attack-through-tail envelope at trigger time and frees
- * itself when that tail ends — matching a real drum machine, where releasing the pad does not
- * cut the sound. `noteOn`'s allocate/steal-retry sequence and `dispose()`'s hard stop still
- * follow §11.2/§10-A exactly; `noteOff` itself is a documented no-op (seat's own design
- * choice, contract silent on this exact point — logged in the receipt, not invented in a way
- * that leaves `capture` or the grid guessing: `noteOff` never throws and never has to be
- * called for a piece to sound correctly).
+ * NOTE-OFF IS A NO-OP. A drum hit is a one-shot: every piece schedules its complete
+ * attack-through-tail envelope at trigger time and frees itself when the tail ends, matching
+ * a real drum machine, where releasing the pad does not cut the sound. noteOff exists, never
+ * throws, and never has to be called for a piece to sound. allNotesOff DOES cut, immediately.
  *
- * NODE RECIPES, why they're worth stating up front (seat question 2 — "every piece is a
- * teaching artifact… a student who opens the Patch Synth in P4 should recognize these
- * shapes"): the eight pieces are built from exactly four reusable synthesis families, each a
- * shape a Patch Synth student will meet again — (1) THUMP: one sine oscillator, pitch-swept
- * downward, one gain envelope (Kick, Low Tom, High Tom — the same recipe at three tunings).
- * (2) NOISE+TONE: a filtered noise burst blended with a short tone burst (Snare). (3) CLUSTER:
- * several detuned square oscillators summed and pushed through a highpass filter — the
- * inharmonic counterpart to Overtone Synth's harmonic stacking (Closed Hat, Open Hat, Crash —
- * again, one recipe, three tunings/envelopes). (4) BURST NOISE: one filtered noise voice
- * whose gain is shaped into several quick bursts before its tail (Clap). Full per-piece
- * numbers are in this seat's receipt, seat question 2.
+ * FOUR SYNTHESIS FAMILIES build the eight drums:
+ *   THUMP       one sine oscillator, pitch-swept down, one gain envelope
+ *   NOISE+TONE  a filtered noise burst blended with a short tone burst
+ *   CLUSTER     detuned square oscillators summed through a highpass filter
+ *   BURST NOISE one filtered noise voice, gain shaped into several quick bursts
+ *
+ * Owns this file only. Reads voicePool/governor from core/audio.js and tokens from
+ * ui/tokens.css; never constructs an AudioContext, never touches ctx.destination.
  */
 
 import { voicePool, governor } from '../core/audio.js';
+// The pads and the home-row keys EMIT on the bus rather than calling noteOn themselves, so
+// every gesture takes one path and the host page's monitor is the only caller. A host that
+// mounts this instrument must wire input -> noteOn or the pads make no sound.
+import { input } from '../core/input.js';
 
 // ---------------------------------------------------------------------------------------
 // CONSTANTS — §8's measured cost table, applied honestly per piece (seat question 5).
@@ -75,28 +54,24 @@ function clamp(v, lo, hi) {
 }
 
 // ---------------------------------------------------------------------------------------
-// PIECE TABLE — CONTRACTS §14.1, exactly. index and note are FROZEN by §14.1 (index 0 by
-// §10-E, the rest by General MIDI per §14.1's own reasoning). label is PROVISIONAL exactly as
-// §14.1 marks it — carried as written because `spec-clock` already escalated the seven open
-// labels to Brandon in chat on 2026-08-23 and §14.1 states plainly "not blocking." Per this
-// seat's brief ("escalate to Brandon only if §14 leaves any ambiguity") this file does not
-// re-escalate: §14.1 already resolves what a BUILD seat needs — a full, usable, ordered
-// eight-entry table — leaving only the *display word* open, which the table's own `label`
-// field is built to swap without touching `index`/`note`/anything downstream (§14.1: "the
-// role does not change; only the word drawn on the row does").
+// PIECE TABLE — the eight drums.
 //
-// `family` selects one of the four recipes above. `weight` is this piece's fixed cpuWeight —
-// honest per §8, not a flat guess (seat question 5): a noise-plus-filter piece (Snare 30,
-// Closed/Open Hat 21, Crash 21, Clap 19) costs meaningfully more than a sine thump (Kick, Low
-// Tom, High Tom: 10 each). `params` are this file's own addition — CONTRACTS names no fixed
-// setParam path list for a drum synth the way §11.4/§11.5 name one for Wave/Overtone Synth —
-// so each entry's synthesis-relevant knobs are exposed generically as `piece.<index>.<key>`,
-// documented here rather than invented silently, and covered by getState/setState below.
+// `index` and `note` are FROZEN app-wide. The step grid caches them at bind time, so a piece
+// cannot be renumbered or reordered without breaking every mounted grid. `label` is the
+// display word and is free to change.
+//
+// `family` selects one of the four recipes above. `weight` is this piece's fixed cpuWeight.
+// `params` are exposed as setParam paths, `piece.<index>.<key>`, and round-trip through
+// getState/setState.
+//
+// TO RE-VOICE A SLOT: change its `family` and rewrite its `params` block. The parameter rows
+// in the UI are generated from `params`, so the two must be changed together. There is no
+// runtime voice swap — see SAMPLE_CHOICES below for the picker that will drive one.
 const PIECE_DEFS = [
   {
     index: 0,
     note: 36,
-    label: 'Kick',
+    label: 'kick',
     family: 'thump',
     weight: 10,
     params: {
@@ -110,7 +85,7 @@ const PIECE_DEFS = [
   {
     index: 1,
     note: 38,
-    label: 'Snare',
+    label: 'snare',
     family: 'noiseTone',
     weight: 30,
     params: {
@@ -123,7 +98,7 @@ const PIECE_DEFS = [
   {
     index: 2,
     note: 42,
-    label: 'Closed Hat',
+    label: 'closed hat',
     family: 'cluster',
     weight: 21,
     params: {
@@ -136,7 +111,7 @@ const PIECE_DEFS = [
   {
     index: 3,
     note: 46,
-    label: 'Open Hat',
+    label: 'open hat',
     family: 'cluster',
     weight: 21,
     params: {
@@ -149,7 +124,7 @@ const PIECE_DEFS = [
   {
     index: 4,
     note: 39,
-    label: 'Clap',
+    label: 'efx1',
     family: 'burstNoise',
     weight: 19,
     params: {
@@ -162,7 +137,7 @@ const PIECE_DEFS = [
   {
     index: 5,
     note: 45,
-    label: 'Low Tom',
+    label: 'drum1',
     family: 'thump',
     weight: 10,
     params: {
@@ -176,7 +151,7 @@ const PIECE_DEFS = [
   {
     index: 6,
     note: 50,
-    label: 'High Tom',
+    label: 'drum2',
     family: 'thump',
     weight: 10,
     params: {
@@ -190,7 +165,7 @@ const PIECE_DEFS = [
   {
     index: 7,
     note: 49,
-    label: 'Crash',
+    label: 'ride',
     family: 'cluster',
     weight: 21,
     params: {
@@ -201,6 +176,45 @@ const PIECE_DEFS = [
     },
   },
 ];
+
+// ---------------------------------------------------------------------------------------
+// KEY LAYOUT — home row, eight keys, two hands.
+//
+// Each array is piece INDEX in key order: A S D F J K L ;
+// `normal` is the default. `switched` mirrors the two hands. In BOTH layouts kick sits on
+// D or K — the two middle fingers — and closed hat on F or J — the two index fingers — so
+// the anchor never moves.
+const KEY_ORDER = ['a', 's', 'd', 'f', 'j', 'k', 'l', ';'];
+const KEY_CAPS = ['A', 'S', 'D', 'F', 'J', 'K', 'L', ';'];
+const KEY_LAYOUTS = {
+  normal:   [6, 5, 0, 1, 2, 3, 7, 4], // drum2 drum1 kick snare | closed open ride efx1
+  switched: [4, 7, 3, 2, 1, 0, 5, 6], // efx1 ride open closed | snare kick drum1 drum2
+};
+
+// ---------------------------------------------------------------------------------------
+// SAMPLE CHOICES — per-piece picker, display only.
+//
+// STATE: the chosen id is held in `_sampleChoice[index]` and round-trips through
+// getState/setState. It drives NO audio. Every slot still plays its `family` recipe.
+//
+// WHEN THE BACKEND LANDS: a choice maps to a sample or a synthesis recipe for that slot, and
+// setting it re-voices the slot. These lists are starters and are expected to grow —
+// drum1/drum2/efx1 especially, which exist to be swapped. Nothing reads the list length or
+// assumes a fixed set.
+const SAMPLE_CHOICES = {
+  0: ['808', '909', 'acoustic', 'sub'],
+  1: ['acoustic', '808', 'rim', 'clap'],
+  2: ['808', '909', 'acoustic', 'tight'],
+  3: ['808', '909', 'acoustic', 'washy'],
+  4: ['crash', 'rimshot', 'clave', 'cowbell'],
+  5: ['low tom', 'second snare', 'rim', 'conga'],
+  6: ['high tom', 'clap', 'cowbell', 'block'],
+  7: ['ride', 'bell', 'crash', 'splash'],
+};
+
+// PRESETS — display only. A preset will carry a sample choice plus a full parameter set for
+// all eight slots, loaded from json or equivalent. Nothing is wired yet; the list is a stub.
+const PRESET_NAMES = ['default', 'boom bap', 'four on the floor', 'trap'];
 
 function defaultParamsFor(def) {
   const out = {};
@@ -541,30 +555,42 @@ function ensureStylesInjected() {
   const style = document.createElement('style');
   style.id = 'drum-synth-styles';
   style.textContent = `
-.dsyn-root { box-sizing: border-box; font-family: system-ui, sans-serif; color: var(--text, #f2f6fc); background: var(--panel, #1b2332); border: 1px solid var(--line, #3a485f); border-radius: 6px; }
-.dsyn-root *, .dsyn-root *::before, .dsyn-root *::after { box-sizing: border-box; }
-.dsyn-compact { padding: 6px 8px; font-size: 11px; display: flex; flex-direction: column; gap: 6px; width: 100%; }
-.dsyn-expanded { padding: 28px 36px; font-size: 16px; display: flex; flex-direction: column; gap: 18px; width: 100%; min-height: 100%; background: var(--bg, #0a0d13); }
-.dsyn-title { display: none; }
-.dsyn-expanded .dsyn-title { display: block; font-size: 28px; font-weight: 700; letter-spacing: 0.02em; color: var(--text, #f2f6fc); }
-.dsyn-pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-.dsyn-expanded .dsyn-pads { grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 6px; }
-.dsyn-pad { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: transparent; border: 1px solid var(--line, #3a485f); border-radius: 4px; color: var(--text, #f2f6fc); padding: 8px 4px; cursor: pointer; font: inherit; transition: background 80ms ease-out, border-color 80ms ease-out; }
-.dsyn-expanded .dsyn-pad { padding: 18px 8px; border-radius: 10px; font-size: 0.9em; }
+.dsyn-root { box-sizing: var(--box-border-box); font-family: var(--font-ui); color: var(--text, #f2f6fc); background: var(--panel, #1b2332); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-body); }
+.dsyn-root *, .dsyn-root *::before, .dsyn-root *::after { box-sizing: var(--box-border-box); }
+.dsyn-compact { padding: var(--sp-3) var(--sp-4); --fs-root: 11px; font-size: var(--fs-base); display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-3); width: var(--pct-100); }
+.dsyn-expanded { padding: var(--sp-14) var(--sp-18); --fs-root: 16px; font-size: var(--fs-base); display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-8); width: var(--pct-100); min-height: var(--pct-100); background: var(--bg, #0a0d13); }
+.dsyn-title { display: var(--disp-none); }
+.dsyn-expanded .dsyn-title { display: var(--disp-block); font-size: var(--fs-xl); font-weight: var(--w-bold); letter-spacing: var(--track-title); color: var(--text, #f2f6fc); }
+.dsyn-bar { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-5); flex-wrap: var(--flexwrap-wrap); }
+.dsyn-sel { font: var(--font-inherit); font-size: var(--fs-em-85); padding: var(--sp-1) var(--sp-2); color: var(--text, #f2f6fc); background: var(--bg, #0a0d13); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-ctl); cursor: var(--cur-pointer); }
+.dsyn-toggle { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-2); font-size: var(--fs-em-85); color: var(--text-dim, #93a1b8); cursor: var(--cur-pointer); user-select: var(--usel-none); }
+.dsyn-toggle input { accent-color: var(--accent, #34e5b4); }
+.dsyn-toggle[data-on="true"] { color: var(--accent, #34e5b4); font-weight: var(--w-bold); }
+.dsyn-pads { display: var(--disp-grid); grid-template-columns: var(--grid-repeat4-1fr); gap: var(--sp-2); }
+.dsyn-expanded .dsyn-pads { grid-template-columns: var(--grid-repeat4-1fr); gap: var(--sp-7); margin-bottom: var(--sp-3); }
+.dsyn-pad { display: var(--disp-flex); flex-direction: var(--flexdir-column); align-items: var(--align-center); justify-content: var(--justify-center); gap: var(--sp-1); background: var(--color-transparent); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-ctl); color: var(--text, #f2f6fc); padding: var(--sp-4) var(--sp-2); cursor: var(--cur-pointer); font: var(--font-inherit); transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.dsyn-expanded .dsyn-pad { padding: var(--sp-9) var(--sp-4); border-radius: var(--r-xl); --fs-root: 14.4px; font-size: var(--fs-base); }
+.dsyn-pad:hover { border-color: var(--accent, #34e5b4); }
 .dsyn-pad.dsyn-flash { background: var(--accent, #34e5b4); background: color-mix(in srgb, var(--accent, #34e5b4) 35%, transparent); border-color: var(--accent, #34e5b4); }
-.dsyn-pad-label { font-weight: 600; }
-.dsyn-pad-note { color: var(--text-dim, #93a1b8); font-size: 0.75em; }
-.dsyn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dsyn-label { color: var(--text-dim, #93a1b8); font-size: 0.85em; min-width: 3.6em; }
-.dsyn-expanded .dsyn-label { font-size: 0.65em; text-transform: uppercase; letter-spacing: 0.06em; }
-.dsyn-root input[type="range"] { accent-color: var(--accent, #34e5b4); flex: 1; min-width: 60px; }
-.dsyn-readout { color: var(--text-dim, #93a1b8); font-variant-numeric: tabular-nums; min-width: 3.8em; text-align: right; }
-.dsyn-piece { border-top: 1px solid var(--line, #3a485f); padding-top: 10px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
-.dsyn-piece:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
-.dsyn-piece-head { display: flex; align-items: center; gap: 10px; }
-.dsyn-piece-title { font-weight: 700; }
-.dsyn-weight { color: var(--text-dim, #93a1b8); font-size: 0.7em; }
-.dsyn-meter { color: var(--text-dim, #93a1b8); font-size: 0.75em; font-variant-numeric: tabular-nums; }
+.dsyn-pad-label { font-weight: var(--w-med); }
+.dsyn-pad-key { color: var(--text-dim, #93a1b8); font-size: var(--fs-em-75); font-weight: var(--w-bold); letter-spacing: var(--track-label); }
+.dsyn-pad.dsyn-flash .dsyn-pad-key { color: var(--text, #f2f6fc); }
+.dsyn-row { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-4); flex-wrap: var(--flexwrap-wrap); }
+.dsyn-label { color: var(--text-dim, #93a1b8); font-size: var(--fs-em-85); min-width: var(--sp-em-36); }
+.dsyn-expanded .dsyn-label { font-size: var(--fs-em-65); text-transform: var(--tt-label); letter-spacing: var(--track-label); }
+.dsyn-root input[type="range"] { accent-color: var(--accent, #34e5b4); flex: var(--flex-1); min-width: var(--sp-30); }
+.dsyn-readout { color: var(--text-dim, #93a1b8); font-variant-numeric: var(--num-tabular); min-width: var(--sp-em-38); text-align: var(--ta-right); }
+.dsyn-disclose { font: var(--font-inherit); font-size: var(--fs-em-85); font-weight: var(--w-med); display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-dim, #93a1b8); background: var(--color-transparent); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-ctl); cursor: var(--cur-pointer); align-self: var(--align-flex-start); }
+.dsyn-disclose:hover { border-color: var(--accent, #34e5b4); color: var(--text, #f2f6fc); }
+.dsyn-params { display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-3); }
+.dsyn-params[hidden] { display: var(--disp-none); }
+.dsyn-piece { border-top: var(--bw) solid var(--line, #3a485f); padding-top: var(--sp-5); margin-top: var(--sp-2); display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-3); }
+.dsyn-piece:first-of-type { border-top: var(--none); padding-top: var(--sp-0); margin-top: var(--sp-0); }
+.dsyn-piece-head { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-5); flex-wrap: var(--flexwrap-wrap); }
+.dsyn-piece-title { font-weight: var(--w-bold); }
+.dsyn-piece-key { color: var(--accent, #34e5b4); font-weight: var(--w-bold); font-size: var(--fs-em-85); letter-spacing: var(--track-label); }
+.dsyn-weight { color: var(--text-dim, #93a1b8); font-size: var(--fs-em-70); }
+.dsyn-meter { color: var(--text-dim, #93a1b8); font-size: var(--fs-em-75); font-variant-numeric: var(--num-tabular); }
 `;
   document.head.appendChild(style);
   stylesInjected = true;
@@ -616,6 +642,33 @@ export default class DrumSynth {
     this._domListenersByMount = { compact: [], expanded: [] };
     this._flashTimers = [];
     this._pieceRefs = { compact: [], expanded: [] }; // DOM refs for targeted UI updates
+
+    /** Which home-row layout is live. false = kick on D, closed hat on J. */
+    this._switchHands = false;
+    /** Chosen sample id per piece index. Display only — see SAMPLE_CHOICES. */
+    this._sampleChoice = PIECE_DEFS.map((d) => SAMPLE_CHOICES[d.index][0]);
+    /** Chosen preset name. Display only — see PRESET_NAMES. */
+    this._preset = PRESET_NAMES[0];
+    /** Whether the parameter stack is open. Expanded mount only. */
+    this._paramsOpen = true;
+    /** Window keydown/keyup handlers, held so unmount() can drop them. */
+    this._keyHandlers = null;
+    /** Keys currently held, so a repeat does not re-trigger and every down gets its up. */
+    this._heldKeys = new Set();
+  }
+
+  /** Piece index for a key, under the layout that is live. Undefined for any other key. */
+  _pieceForKey(key) {
+    const slot = KEY_ORDER.indexOf(key);
+    if (slot < 0) return undefined;
+    return KEY_LAYOUTS[this._switchHands ? 'switched' : 'normal'][slot];
+  }
+
+  /** The cap drawn on a piece's pad, under the layout that is live. */
+  _capForPiece(index) {
+    const layout = KEY_LAYOUTS[this._switchHands ? 'switched' : 'normal'];
+    const slot = layout.indexOf(index);
+    return slot < 0 ? '' : KEY_CAPS[slot];
   }
 
   // ---- async ready (§2 amendment 1) ----
@@ -734,11 +787,14 @@ export default class DrumSynth {
     return {
       gain: this._gain,
       pieces: this._params.map((p) => ({ ...p })), // index-ordered, plain, JSON-safe
+      switchHands: this._switchHands,
+      samples: this._sampleChoice.slice(), // display only; see SAMPLE_CHOICES
+      preset: this._preset,                // display only; see PRESET_NAMES
     };
   }
 
   setState(obj) {
-    // §11.7b's precedent: a malformed argument is a silent no-op, never a throw.
+    // A malformed argument is a silent no-op, never a throw.
     if (!obj || typeof obj !== 'object') return;
     if (Number.isFinite(obj.gain)) this.setParam('out.gain', obj.gain);
     if (Array.isArray(obj.pieces)) {
@@ -750,6 +806,15 @@ export default class DrumSynth {
         }
       }
     }
+    if (typeof obj.switchHands === 'boolean') this._switchHands = obj.switchHands;
+    if (Array.isArray(obj.samples)) {
+      for (let i = 0; i < PIECE_DEFS.length && i < obj.samples.length; i++) {
+        if (SAMPLE_CHOICES[i].includes(obj.samples[i])) this._sampleChoice[i] = obj.samples[i];
+      }
+    }
+    if (PRESET_NAMES.includes(obj.preset)) this._preset = obj.preset;
+    // Layout and labels are structural, so the mounted views are rebuilt rather than synced.
+    for (const which of ['compact', 'expanded']) if (this._mounts[which]) this._paint(which);
   }
 
   // ---- governor reporting — honest, live (seat question 5) ----
@@ -789,6 +854,7 @@ export default class DrumSynth {
     let listenersDropped = 0;
     for (const t of this._flashTimers) clearTimeout(t);
     this._flashTimers = [];
+    listenersDropped += this._dropKeyHandlers();
     for (const which of ['compact', 'expanded']) {
       listenersDropped += this._domListenersByMount[which].length;
       this._clearMountListeners(which);
@@ -844,9 +910,9 @@ export default class DrumSynth {
     this._domListenersByMount[which] = [];
   }
 
-  /** Full DOM build. Compact: eight small pads only — "conservative, tight" (seat q6).
-   *  Expanded: eight pads, each followed by its own live, playable parameter row — "each
-   *  piece's parameters are visible and playable" (seat q6, verbatim). */
+  /** Full DOM build. Compact: eight pads only. Expanded: a bar (preset picker, switch-hands
+   *  toggle), eight pads in KEY ORDER, and a collapsible stack of per-piece parameter rows.
+   *  Called again whenever the layout or a label changes, since both are structural. */
   _paint(which) {
     const el = this._mounts[which];
     if (!el) return;
@@ -864,27 +930,78 @@ export default class DrumSynth {
     title.textContent = 'Drum Synth';
     root.appendChild(title);
 
+    if (expanded) root.appendChild(this._buildBar(which));
+
     const pads = document.createElement('div');
     pads.className = 'dsyn-pads';
     root.appendChild(pads);
 
     this._pieceRefs[which] = [];
 
-    for (const def of PIECE_DEFS) {
+    // Pads are drawn in KEY ORDER — A S D F on the first row, J K L ; on the second — so the
+    // grid on screen is the shape of the hands. The parameter stack below stays in index
+    // order, which is the order the step grid draws its rows in.
+    const layout = KEY_LAYOUTS[this._switchHands ? 'switched' : 'normal'];
+    for (const index of layout) {
+      const def = PIECE_DEFS[index];
       const pad = document.createElement('button');
       pad.type = 'button';
       pad.className = 'dsyn-pad';
       pad.dataset.pieceIndex = String(def.index);
-      pad.innerHTML = `<span class="dsyn-pad-label">${def.label}</span><span class="dsyn-pad-note">#${def.index}</span>`;
-      this._listen(which, pad, 'pointerdown', () => {
+      pad.innerHTML =
+        `<span class="dsyn-pad-label">${def.label}</span>` +
+        `<span class="dsyn-pad-key">${this._capForPiece(def.index)}</span>`;
+      // The bus reference-counts per `${source}:${note}`, so the note-off must carry the same
+      // source the note-on did or the note stays held forever.
+      let downSource = null;
+      this._listen(which, pad, 'pointerdown', (e) => {
+        e.preventDefault();
+        downSource = e.pointerType === 'touch' ? 'touch' : 'mouse';
+        try { pad.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
         const velInput = this._pieceRefs[which][def.index]?.velocity;
-        const vel = velInput ? Number(velInput.value) : 0.8;
-        this.noteOn(def.note, vel);
+        const vel = velInput ? Number(velInput.value) : undefined;
+        input.emitNoteOn({ note: def.note, velocity: vel, source: downSource });
       });
+      const release = () => {
+        if (downSource === null) return;
+        input.emitNoteOff({ note: def.note, source: downSource });
+        downSource = null;
+      };
+      this._listen(which, pad, 'pointerup', release);
+      this._listen(which, pad, 'pointercancel', release);
       pads.appendChild(pad);
 
-      const refs = { pad, velocity: null, params: {}, weight: null };
-      this._pieceRefs[which][def.index] = refs;
+      this._pieceRefs[which][def.index] = { pad, velocity: null, params: {}, weight: null };
+    }
+
+    // The parameter stack, in index order, behind one disclosure.
+    let paramHost = root;
+    if (expanded) {
+      const disclose = document.createElement('button');
+      disclose.type = 'button';
+      disclose.className = 'dsyn-disclose';
+      root.appendChild(disclose);
+
+      const stack = document.createElement('div');
+      stack.className = 'dsyn-params';
+      stack.hidden = !this._paramsOpen;
+      root.appendChild(stack);
+
+      const paint = () => {
+        disclose.textContent = this._paramsOpen ? '▾ Parameters' : '▸ Parameters';
+        disclose.setAttribute('aria-expanded', String(this._paramsOpen));
+        stack.hidden = !this._paramsOpen;
+      };
+      paint();
+      this._listen(which, disclose, 'click', () => {
+        this._paramsOpen = !this._paramsOpen;
+        paint();
+      });
+      paramHost = stack;
+    }
+
+    for (const def of PIECE_DEFS) {
+      const refs = this._pieceRefs[which][def.index];
 
       if (expanded) {
         const section = document.createElement('div');
@@ -894,9 +1011,29 @@ export default class DrumSynth {
         head.className = 'dsyn-piece-head';
         head.innerHTML =
           `<span class="dsyn-piece-title">${def.label}</span>` +
+          `<span class="dsyn-piece-key">${this._capForPiece(def.index)}</span>` +
           `<span class="dsyn-weight">cpuWeight ${def.weight}</span>` +
           `<span class="dsyn-weight">note ${def.note}</span>`;
         section.appendChild(head);
+
+        // SAMPLE PICKER — display only. Holds the choice; drives no audio yet.
+        const sampleRow = document.createElement('div');
+        sampleRow.className = 'dsyn-row';
+        sampleRow.innerHTML = `<span class="dsyn-label">Sample</span>`;
+        const sampleSel = document.createElement('select');
+        sampleSel.className = 'dsyn-sel';
+        for (const name of SAMPLE_CHOICES[def.index]) {
+          const o = document.createElement('option');
+          o.value = name;
+          o.textContent = name;
+          if (name === this._sampleChoice[def.index]) o.selected = true;
+          sampleSel.appendChild(o);
+        }
+        this._listen(which, sampleSel, 'change', () => {
+          this._sampleChoice[def.index] = sampleSel.value;
+        });
+        sampleRow.appendChild(sampleSel);
+        section.appendChild(sampleRow);
 
         const velRow = document.createElement('div');
         velRow.className = 'dsyn-row';
@@ -944,7 +1081,7 @@ export default class DrumSynth {
           refs.params[key] = { input, readout };
         }
 
-        root.appendChild(section);
+        paramHost.appendChild(section);
       }
     }
 
@@ -963,10 +1100,11 @@ export default class DrumSynth {
       gainReadout.className = 'dsyn-readout';
       gainRow.appendChild(gainReadout);
       this._listen(which, gainInput, 'input', () => this.setParam('out.gain', Number(gainInput.value)));
-      root.appendChild(gainRow);
+      paramHost.appendChild(gainRow);
       this._gainRefs = this._gainRefs || {};
       this._gainRefs[which] = { input: gainInput, readout: gainReadout };
 
+      // The meter stays outside the collapse — it is a readout, not a control.
       const meter = document.createElement('div');
       meter.className = 'dsyn-meter';
       root.appendChild(meter);
@@ -975,7 +1113,96 @@ export default class DrumSynth {
     }
 
     el.appendChild(root);
+    this._wireKeys();
     this._syncUI();
+  }
+
+  /** The bar above the pads: preset picker and the switch-hands toggle. */
+  _buildBar(which) {
+    const bar = document.createElement('div');
+    bar.className = 'dsyn-bar';
+
+    // PRESETS — display only. Will load a sample choice plus a full parameter set for all
+    // eight slots from json or equivalent.
+    const presetLabel = document.createElement('span');
+    presetLabel.className = 'dsyn-label';
+    presetLabel.textContent = 'Presets';
+    bar.appendChild(presetLabel);
+
+    const presetSel = document.createElement('select');
+    presetSel.className = 'dsyn-sel';
+    for (const name of PRESET_NAMES) {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = name;
+      if (name === this._preset) o.selected = true;
+      presetSel.appendChild(o);
+    }
+    this._listen(which, presetSel, 'change', () => { this._preset = presetSel.value; });
+    bar.appendChild(presetSel);
+
+    // SWITCH HANDS — mirrors the two hands. Off by default. Repaints, because the pad order
+    // and every cap change.
+    const toggle = document.createElement('label');
+    toggle.className = 'dsyn-toggle';
+    toggle.dataset.on = String(this._switchHands);
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = this._switchHands;
+    toggle.appendChild(box);
+    toggle.appendChild(document.createTextNode('switch hands'));
+    this._listen(which, box, 'change', () => {
+      this._switchHands = box.checked;
+      for (const w of ['compact', 'expanded']) if (this._mounts[w]) this._paint(w);
+    });
+    bar.appendChild(toggle);
+
+    return bar;
+  }
+
+  /** One window keydown/keyup pair for the home row, regardless of how many mounts exist.
+   *  Emits on the bus; never calls noteOn. Re-read on every press, so switching hands takes
+   *  effect without rewiring. */
+  _wireKeys() {
+    if (this._keyHandlers) return;
+    const typing = () => {
+      const a = document.activeElement;
+      return a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
+    };
+    const down = (e) => {
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey || typing()) return;
+      const key = e.key.toLowerCase();
+      const index = this._pieceForKey(key);
+      if (index === undefined || this._heldKeys.has(key)) return;
+      e.preventDefault();
+      this._heldKeys.add(key);
+      input.emitNoteOn({ note: PIECE_DEFS[index].note, source: 'key' });
+    };
+    const up = (e) => {
+      const key = e.key.toLowerCase();
+      if (!this._heldKeys.has(key)) return;
+      this._heldKeys.delete(key);
+      const index = this._pieceForKey(key);
+      if (index === undefined) return;
+      input.emitNoteOff({ note: PIECE_DEFS[index].note, source: 'key' });
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    this._keyHandlers = { down, up };
+  }
+
+  /** Drops the window key handlers and releases anything still held. Returns the count. */
+  _dropKeyHandlers() {
+    if (!this._keyHandlers) return 0;
+    window.removeEventListener('keydown', this._keyHandlers.down);
+    window.removeEventListener('keyup', this._keyHandlers.up);
+    this._keyHandlers = null;
+    for (const key of this._heldKeys) {
+      const index = this._pieceForKey(key);
+      if (index !== undefined) input.emitNoteOff({ note: PIECE_DEFS[index].note, source: 'key' });
+    }
+    this._heldKeys.clear();
+    return 2;
   }
 
   /** Targeted updates only — param readouts and slider values. Never rebuilds DOM, so it is

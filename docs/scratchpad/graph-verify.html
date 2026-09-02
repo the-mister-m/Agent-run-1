@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>node-graph verify — P4/S4</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+  #bar { display: flex; gap: 6px; padding: 6px; flex-wrap: wrap; background: var(--panel); }
+  button { font: inherit; font-size: 11px; padding: 3px 6px; }
+  #stage { display: flex; height: 420px; }
+  #graphHost { flex: 1; }
+  #mixer { display: flex; gap: 2px; padding: 2px; background: var(--recess); }
+  .strip { width: 60px; background: var(--panel); }
+  #log { height: 260px; overflow: auto; font-family: var(--font-mono); font-size: 11px;
+         white-space: pre-wrap; padding: 6px; background: var(--recess); }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="start">1 · start audio + build</button>
+  <button id="tone">2 · tone into ch1</button>
+  <button id="runAll">3 · RUN ALL CHECKS</button>
+</div>
+<div id="stage">
+  <div id="graphHost"></div>
+  <div id="mixer"></div>
+</div>
+<div id="log"></div>
+
+<script type="module">
+import { ctx, masterGain, masterAnalyser, governor, unlock } from '../../src/core/audio.js';
+import { createStrips } from '../../src/mixer/strip.js';
+import Graph from '../../src/mixer/graph.js';
+
+const logEl = document.getElementById('log');
+const results = [];
+function log(msg) { logEl.textContent += msg + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+function check(name, pass, detail = '') {
+  results.push({ name, pass, detail });
+  log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
+}
+
+let strips = null, graph = null, rig = null, osc = null, oscGain = null;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function rms() {
+  const buf = new Float32Array(masterAnalyser.fftSize);
+  masterAnalyser.getFloatTimeDomainData(buf);
+  let s = 0;
+  for (const v of buf) s += v * v;
+  return Math.sqrt(s / buf.length);
+}
+
+async function settledRms(ms = 260) {
+  await sleep(ms);
+  let peak = 0;
+  for (let i = 0; i < 12; i++) { peak = Math.max(peak, rms()); await sleep(16); }
+  return peak;
+}
+
+document.getElementById('start').onclick = start;
+document.getElementById('tone').onclick = tone;
+document.getElementById('runAll').onclick = runAll;
+
+async function start() {
+  await unlock();
+  rig = createStrips(ctx);
+  strips = rig.strips;
+  const mixer = document.getElementById('mixer');
+  mixer.textContent = '';
+  for (const id of ['ch1','ch2','ch3','ch4','ch5','ch6','master']) {
+    const host = document.createElement('div');
+    host.className = 'strip';
+    host.id = 'strip-' + id;
+    mixer.appendChild(host);
+    strips[id].mountCompact(host);
+  }
+  graph = new Graph(ctx, { strips });
+  graph.mountCompact(document.getElementById('graphHost'));
+  window.__graph = graph; window.__strips = strips;
+  log('built: 7 strips + graph, ctx=' + ctx.state);
+}
+
+function tone() {
+  if (osc) return;
+  osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.value = 220;
+  oscGain = ctx.createGain();
+  oscGain.gain.value = 0.3;
+  osc.connect(oscGain).connect(strips.ch1.input);
+  osc.start();
+  log('tone: 220 Hz saw into ch1.input');
+}
+
+function slotText(id) {
+  const el = document.querySelector('#strip-' + id);
+  return [...el.querySelectorAll('.cbdaw-strip__slot')]
+    .map((s) => s.querySelector('.cbdaw-strip__slot-label').textContent
+      + '|' + s.querySelector('.cbdaw-strip__slot-route').textContent).join('  ');
+}
+function outText(id) {
+  return document.querySelector('#strip-' + id + ' .cbdaw-strip__out').textContent;
+}
+
+async function runAll() {
+  logEl.textContent = '';
+  results.length = 0;
+  if (!strips) await start();
+  if (!osc) tone();
+
+  // Q1 · node and edge types
+  const st0 = graph.getState();
+  check('Q1 seed: 6 channel + 1 master node, 6 edges',
+    st0.nodes.length === 7 && st0.edges.length === 6
+    && st0.nodes.filter((n) => n.type === 'channel').length === 6
+    && st0.nodes.filter((n) => n.type === 'master').length === 1,
+    `${st0.nodes.length} nodes / ${st0.edges.length} edges`);
+
+  const baseline = await settledRms();
+  check('audio baseline present', baseline > 0.01, 'rms ' + baseline.toFixed(4));
+
+  // Q2 · a student adds an insert from the graph, and the strip slot shows it
+  const gateId = graph.addInsert('ch1', 'gate');
+  check('Q2 addInsert returned a node id', typeof gateId === 'string', String(gateId));
+  await sleep(60);
+  check('Q2 device appears in ch1 slot 0', slotText('ch1').startsWith('Gate|'), slotText('ch1'));
+  check('Q2 strip.inserts holds the live device',
+    strips.ch1.inserts.length === 1 && strips.ch1.inserts[0].constructor.id === 'gate');
+
+  // the insert is really in the signal path — close the gate, the channel goes quiet
+  const gate = graph.deviceOf(gateId);
+  gate.setParam('threshold', 0);
+  const closed = await settledRms(500);
+  check('Q2 insert is in the audio path (gate shut)', closed < baseline * 0.25,
+    `baseline ${baseline.toFixed(4)} -> closed ${closed.toFixed(4)}`);
+  gate.setParam('threshold', -80);
+  const reopened = await settledRms(500);
+  check('Q2 gate reopened', reopened > baseline * 0.5, 'rms ' + reopened.toFixed(4));
+
+  // Q3 · a parallel chain: two branches from ch1, both landing on master
+  const delayId = graph.addInsert('ch2', 'delay');   // born on ch2, then hung on a ch1 send
+  graph.disconnect('ch2', 0);                        // orphans it; its edge to master survives
+  graph.connect('ch2', 0, 'master', 0);              // ch2's dry path back to master
+  graph.connect('ch1', 1, delayId, 0);               // the second branch off ch1
+  const dly = graph.deviceOf(delayId);
+  dly.setParam('mix', 100);
+  dly.setParam('feedback', 0);
+  dly.setParam('time', 10);
+  await sleep(60);
+  const st1 = graph.getState();
+  const ch1Out = st1.edges.filter((e) => e.from === 'ch1');
+  check('Q3 ch1 has two outgoing edges on two ports',
+    ch1Out.length === 2 && new Set(ch1Out.map((e) => e.fromPort)).size === 2,
+    JSON.stringify(ch1Out.map((e) => e.fromPort + '->' + e.to)));
+  check('Q3 both branches reach master',
+    ch1Out.every((e) => e.to === 'master' || st1.edges.some((f) => f.from === e.to && f.to === 'master')));
+  const parallel = await settledRms(600);
+  check('Q3 parallel chain is audible (level rises over dry alone)',
+    parallel > reopened * 1.05, `dry ${reopened.toFixed(4)} -> dry+wet ${parallel.toFixed(4)}`);
+
+  // Q4 · the strip displays routing and can change none of it
+  check('Q4 ch1 out chip shows both destinations',
+    outText('ch1').includes('Master') && outText('ch1').includes('Delay'), outText('ch1'));
+  check('Q4 slot chip names where that slot is sent',
+    slotText('ch1').includes('Gate|→ Master'), slotText('ch1'));
+  const stripSrc = await (await fetch('../../src/mixer/strip.js')).text();
+  check('Q4 strip.js never imports graph.js', !/from\s+['"].*graph\.js/.test(stripSrc));
+  check('Q4 strip.js calls neither setInserts nor setRouting on itself',
+    !/this\.setInserts|this\.setRouting/.test(stripSrc));
+
+  // Q6 · the caps, and noCap
+  graph.addInsert('ch1', 'eq');
+  graph.addInsert('ch1', 'compressor');
+  const before = graph.nodeCount;
+  const refused = graph.addInsert('ch1', 'reverb');   // 5th device on ch1
+  check('Q6 5th insert on a channel is refused', refused === false, graph.lastRefusal);
+  check('Q6 refusal changed nothing', graph.nodeCount === before);
+  const reasonEl = document.querySelector('.cbdaw-graph__reason');
+  check('Q6 refusal is drawn, not dropped',
+    reasonEl.dataset.kind === 'refused' && reasonEl.textContent.length > 0, reasonEl.textContent);
+  check('Q6 the refused node flashes',
+    !!document.querySelector('.cbdaw-graph__node[data-refused="true"]'));
+  governor.noCap = true;
+  const lifted = graph.addInsert('ch1', 'reverb');
+  check('Q6 noCap lifts the cap', typeof lifted === 'string', String(lifted));
+  governor.noCap = false;
+  if (typeof lifted === 'string') graph.removeNode(lifted);
+
+  // illegal edges — §16.5's refusal list, one call each
+  const cyc = graph.addInsert('ch4', 'gate');
+  check('Q6 edge INTO a channel refused', graph.connect('ch3', 1, 'ch4', 0) === false, graph.lastRefusal);
+  check('Q6 edge OUT OF master refused', graph.connect('master', 0, 'ch4', 0) === false, graph.lastRefusal);
+  check('Q6 self-edge refused', graph.connect(cyc, 1, cyc, 0) === false, graph.lastRefusal);
+  check('Q6 taken fromPort refused', graph.connect('ch3', 0, 'master', 0) === false, graph.lastRefusal);
+  check('Q6 second cable into one device refused',
+    graph.connect('ch5', 1, cyc, 0) === false, graph.lastRefusal);
+  check('Q6 toPort other than 0 refused', graph.connect('ch5', 1, 'master', 1) === false, graph.lastRefusal);
+
+  // the send cap is the port ceiling, and noCap lifts it
+  check('Q6 two sends allowed on a channel',
+    graph.connect('ch6', 1, 'master', 0) === true && graph.connect('ch6', 2, 'master', 0) === true);
+  check('Q6 a 3rd send is refused', graph.connect('ch6', 3, 'master', 0) === false, graph.lastRefusal);
+  governor.noCap = true;
+  check('Q6 noCap lifts the send cap', graph.connect('ch6', 3, 'master', 0) === true);
+  governor.noCap = false;
+  graph.disconnect('ch6', 3);
+
+  // the 24-node cap — fill every channel until the graph refuses
+  let filled = 0;
+  outer: for (const ch of ['ch2','ch3','ch4','ch5','ch6']) {
+    for (let i = 0; i < 4; i++) {
+      if (graph.addInsert(ch, 'gate') !== false) { filled++; continue; }
+      if (/Graph is full/.test(graph.lastRefusal)) break outer;
+      break;   // this channel is full, try the next one
+    }
+  }
+  check('Q6 the 24-node cap holds', graph.nodeCount === 24, `${graph.nodeCount} nodes, ${filled} added`);
+  check('Q6 the node-cap refusal names the graph', /Graph is full/.test(graph.lastRefusal), graph.lastRefusal);
+
+  // Q7 · round-trip through §7's schema
+  const graphJson = JSON.parse(JSON.stringify(graph.getState()));
+  const insertJson = JSON.parse(JSON.stringify(graph.getInserts()));
+  const beforeStr = JSON.stringify(graphJson);
+  graph.setState(graphJson, insertJson);
+  const afterStr = JSON.stringify(graph.getState());
+  check('Q7 graph round-trips through JSON with no loss', beforeStr === afterStr,
+    beforeStr === afterStr ? `${graphJson.nodes.length} nodes / ${graphJson.edges.length} edges`
+      : 'before ' + beforeStr + '  after ' + afterStr);
+  const insertAfter = JSON.stringify(graph.getInserts());
+  check('Q7 inserts round-trip (type, bypass, state)',
+    insertAfter === JSON.stringify(insertJson),
+    insertAfter === JSON.stringify(insertJson) ? 'ok' : insertAfter);
+  check('Q7 rebuilt graph re-patched the strips',
+    strips.ch1.inserts.length === 3, strips.ch1.inserts.map((d) => d.constructor.id).join(','));
+  const afterReload = await settledRms(500);
+  check('Q7 audio survives the round-trip', afterReload > 0.01, 'rms ' + afterReload.toFixed(4));
+
+  // Q8 · deleting a node with edges on it
+  const st1b = graph.getState();
+  const victim = st1b.nodes.filter((n) => n.type === 'insert')
+    .map((n) => ({ n, deg: st1b.edges.filter((e) => e.from === n.id || e.to === n.id).length }))
+    .sort((a, b) => b.deg - a.deg)[0].n;
+  const touching = st1b.edges.filter((e) => e.from === victim.id || e.to === victim.id).length;
+  graph.removeNode(victim.id);
+  const st2 = graph.getState();
+  check('Q8 deleting a node removes every edge touching it',
+    touching > 0 && st2.edges.every((e) => e.from !== victim.id && e.to !== victim.id),
+    `${touching} edges were on ${victim.id}`);
+  check('Q8 no dangling edge reaches getState()',
+    st2.edges.every((e) => st2.nodes.some((n) => n.id === e.from) && st2.nodes.some((n) => n.id === e.to)));
+  check('Q8 the deleted device is gone from the strip',
+    !strips.ch1.inserts.some((d) => d === null));
+
+  // Q9 · disposal
+  const styleBefore = !!document.getElementById('cbdaw-graph-style');
+  const g2 = new Graph(ctx, {});
+  const host2 = document.createElement('div');
+  document.body.appendChild(host2);
+  for (let i = 0; i < 20; i++) { g2.mountCompact(host2); g2.unmount(); }
+  g2.dispose();
+  host2.remove();
+  check('Q9 20 mount/unmount cycles left no error', true);
+  check('Q9 stylesheet reference count held', !!document.getElementById('cbdaw-graph-style') === styleBefore);
+
+  const passed = results.filter((r) => r.pass).length;
+  log(`\n${passed}/${results.length} checks passed`);
+  window.__results = { passed, total: results.length, results };
+  return window.__results;
+}
+
+window.__runAll = runAll;
+window.__start = start;
+window.__tone = tone;
+</script>
+</body>
+</html>

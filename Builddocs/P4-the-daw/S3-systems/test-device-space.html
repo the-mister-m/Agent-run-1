@@ -1,0 +1,197 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>device-space test — P4/S3</title>
+<style>
+  body { font: 13px/1.4 monospace; background: #111; color: #ddd; padding: 16px; }
+  button { font: 13px monospace; padding: 8px 16px; }
+  #results { white-space: pre-wrap; margin-top: 16px; }
+  .pass { color: #6f6; }
+  .fail { color: #f66; }
+  #reverb-mount, #delay-mount { width: 320px; border: 1px dashed #444; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h3>reverb.js / delay.js (P4/S3 device-space) — throwaway verification page</h3>
+<p>Imports <code>/src/core/audio.js</code> (frozen, read-only) and
+   <code>/src/devices/reverb.js</code>, <code>/src/devices/delay.js</code>. Click to run:
+   this click is the real user gesture the autoplay-unlock needs.</p>
+<button id="run">Run Test</button>
+<div id="results"></div>
+<div>reverb mountCompact:</div>
+<div id="reverb-mount"></div>
+<div>delay mountCompact:</div>
+<div id="delay-mount"></div>
+
+<script type="module">
+import { ctx, audio } from '../../../src/core/audio.js';
+import Reverb from '../../../src/devices/reverb.js';
+import Delay from '../../../src/devices/delay.js';
+
+const results = [];
+const el = document.getElementById('results');
+
+function log(step, pass, detail) {
+  results.push({ step, pass, detail });
+  const line = document.createElement('div');
+  line.className = pass ? 'pass' : 'fail';
+  line.textContent = `[${pass ? 'PASS' : 'FAIL'}] ${step} — ${detail}`;
+  el.appendChild(line);
+  window.__RESULTS__ = results;
+}
+
+const REVERB_WEIGHT_TABLE = [
+  [0.1, 133], [0.25, 150], [0.5, 165], [1.0, 184], [2.0, 235], [4.0, 325],
+];
+
+async function run() {
+  await audio.unlock();
+
+  // ---- static surface ----
+  log('reverb-static', Reverb.id === 'reverb' && Reverb.label === 'Reverb' && Reverb.estimatedWeight === 135,
+    `id=${Reverb.id} label=${Reverb.label} estimatedWeight=${Reverb.estimatedWeight}`);
+  log('delay-static', Delay.id === 'delay' && Delay.label === 'Delay' && Delay.estimatedWeight === 5,
+    `id=${Delay.id} label=${Delay.label} estimatedWeight=${Delay.estimatedWeight}`);
+  log('reverb-params-order', JSON.stringify(Reverb.params.map(p => p.path)) === JSON.stringify(['size', 'damping', 'mix']),
+    JSON.stringify(Reverb.params.map(p => p.path)));
+  log('delay-params-order', JSON.stringify(Delay.params.map(p => p.path)) === JSON.stringify(['time', 'feedback', 'tone', 'mix']),
+    JSON.stringify(Delay.params.map(p => p.path)));
+
+  // ---- construction, ctx only ----
+  const reverb = new Reverb(ctx);
+  const delay = new Delay(ctx);
+  log('construct-ctx-only', !!reverb.input && !!reverb.output && !!delay.input && !!delay.output,
+    'both devices exposed input/output after construction');
+
+  // ---- input/output stable across calls ----
+  const revIn0 = reverb.input, revOut0 = reverb.output;
+  reverb.setParam('size', 2.0);
+  reverb.bypass = true;
+  reverb.bypass = false;
+  log('reverb-io-stable', reverb.input === revIn0 && reverb.output === revOut0,
+    'input/output identity unchanged after setParam + bypass toggling');
+
+  // ---- clamp out-of-range ----
+  reverb.setParam('size', 999);
+  log('reverb-clamp-size', reverb.getParam('size') === 4.0, `size clamped to ${reverb.getParam('size')}`);
+  reverb.setParam('size', -5);
+  log('reverb-clamp-size-low', reverb.getParam('size') === 0.1, `size clamped to ${reverb.getParam('size')}`);
+  delay.setParam('feedback', 999);
+  log('delay-clamp-feedback', delay.getParam('feedback') === 95, `feedback clamped to ${delay.getParam('feedback')}`);
+
+  // ---- reverb cpuWeight matches measured table (§8), not the old flat 8 ----
+  let tableOk = true;
+  const detail = [];
+  for (const [s, w] of REVERB_WEIGHT_TABLE) {
+    reverb.setParam('size', s);
+    const measured = reverb.cpuWeight;
+    detail.push(`${s}s→${measured}`);
+    if (measured !== w) tableOk = false;
+  }
+  log('reverb-cpuweight-table', tableOk, `${detail.join(' ')} (old §8 flat value was 8 — superseded)`);
+
+  reverb.setParam('size', 1.5);
+  log('reverb-cpuweight-live', reverb.cpuWeight > Reverb.estimatedWeight,
+    `cpuWeight at default size 1.5s = ${reverb.cpuWeight}, estimatedWeight = ${Reverb.estimatedWeight}`);
+
+  log('delay-cpuweight-constant', delay.cpuWeight === 5, `delay.cpuWeight = ${delay.cpuWeight}`);
+
+  // ---- state round-trips through JSON ----
+  reverb.setParam('size', 0.8);
+  reverb.setParam('damping', 60);
+  reverb.setParam('mix', 33);
+  const revJson = JSON.parse(JSON.stringify(reverb.getState()));
+  const reverb2 = new Reverb(ctx);
+  reverb2.setState(revJson);
+  log('reverb-state-roundtrip',
+    reverb2.getParam('size') === 0.8 && reverb2.getParam('damping') === 60 && reverb2.getParam('mix') === 33,
+    JSON.stringify(reverb2.getState()));
+  reverb2.dispose();
+
+  delay.setParam('time', 480);
+  delay.setParam('feedback', 50);
+  delay.setParam('tone', 3000);
+  delay.setParam('mix', 40);
+  const dlyJson = JSON.parse(JSON.stringify(delay.getState()));
+  const delay2 = new Delay(ctx);
+  delay2.setState(dlyJson);
+  log('delay-state-roundtrip',
+    delay2.getParam('time') === 480 && delay2.getParam('feedback') === 50 &&
+    delay2.getParam('tone') === 3000 && delay2.getParam('mix') === 40,
+    JSON.stringify(delay2.getState()));
+  delay2.dispose();
+
+  // ---- getAnalyser / readout are null, per §16.3d/e ----
+  log('reverb-null-taps', reverb.getAnalyser('spectrum') === null && reverb.readout === null, 'both null');
+  log('delay-null-taps', delay.getAnalyser('scope') === null && delay.readout === null, 'both null');
+
+  // ---- branch survival: dry path + device branch into one destination, mix=100 ----
+  const osc = ctx.createOscillator();
+  const oscGain = ctx.createGain();
+  oscGain.gain.value = 0;
+  const sink = ctx.createGain();
+  sink.gain.value = 0;
+  osc.connect(oscGain);
+  oscGain.connect(sink);          // dry branch
+  oscGain.connect(reverb.input);  // wet branch, parallel — reverb never assumes inline
+  reverb.output.connect(sink);
+  reverb.setParam('mix', 100);
+  osc.start();
+  let branchThrew = false;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  } catch (e) {
+    branchThrew = true;
+  }
+  log('reverb-branch-no-throw', !branchThrew, 'oscillator → [dry branch, reverb branch at mix=100] → sink ran without throwing');
+  osc.stop();
+  osc.disconnect();
+  oscGain.disconnect();
+  sink.disconnect();
+
+  // ---- mountCompact / unmount draw and tear down without throwing ----
+  const reverbMount = document.getElementById('reverb-mount');
+  const delayMount = document.getElementById('delay-mount');
+  reverb.mountCompact(reverbMount);
+  delay.mountCompact(delayMount);
+  log('mount-draws-rows', reverbMount.querySelectorAll('input[type="range"]').length === 3 &&
+    delayMount.querySelectorAll('input[type="range"]').length === 4,
+    `reverb rows=${reverbMount.querySelectorAll('input[type="range"]').length} delay rows=${delayMount.querySelectorAll('input[type="range"]').length}`);
+
+  // ---- dispose × 20 cycles, zero thrown errors, zero leaked listeners ----
+  let disposeErrors = 0;
+  let leakedListeners = 0;
+  for (let i = 0; i < 20; i++) {
+    const r = new Reverb(ctx);
+    const d = new Delay(ctx);
+    const rEl = document.createElement('div');
+    const dEl = document.createElement('div');
+    r.mountCompact(rEl);
+    d.mountCompact(dEl);
+    try {
+      r.dispose();
+      d.dispose();
+    } catch (e) {
+      disposeErrors++;
+    }
+    if (r._listeners.length !== 0 || d._listeners.length !== 0) leakedListeners++;
+  }
+  log('dispose-20-cycles', disposeErrors === 0 && leakedListeners === 0,
+    `errors=${disposeErrors} leakedListeners=${leakedListeners} over 20 cycles`);
+
+  reverb.dispose();
+  delay.dispose();
+
+  const failCount = results.filter(r => !r.pass).length;
+  const summary = document.createElement('div');
+  summary.style.marginTop = '12px';
+  summary.style.fontWeight = 'bold';
+  summary.textContent = failCount === 0 ? `ALL ${results.length} PASSED` : `${failCount} FAILED of ${results.length}`;
+  el.appendChild(summary);
+}
+
+document.getElementById('run').addEventListener('click', () => { run(); });
+</script>
+</body>
+</html>

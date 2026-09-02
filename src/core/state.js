@@ -56,7 +56,7 @@ import {
  * project slice adds its name to this array and its mutators to section 3; no subscriber
  * anywhere changes shape when it does.
  */
-const EVENTS = ['scale'];
+const EVENTS = ['scale', 'project'];
 
 // -----------------------------------------------------------------------------------------
 // 2 · THE STORE
@@ -95,6 +95,17 @@ export function createState(initialScale = createScale()) {
     scale = next;
     emit('scale', scale);
     return scale;
+  }
+
+  /** punch: {on, startBar, endBar}. Timeline range, global. Arm is per-lane — see
+   *  `ui/arrangement.js`'s Capture instances; no global arm state lives here. */
+  let project = { punch: { on: false, startBar: 1, endBar: 5 } };
+
+  function commitProject(next) {
+    if (next === project) return project;
+    project = next;
+    emit('project', project);
+    return project;
   }
 
   return {
@@ -150,6 +161,13 @@ export function createState(initialScale = createScale()) {
      *  is what "and get back" means — the student returns where they actually started. */
     resetScaleDegree(i) {
       return commit(pureResetScaleDegree(scale, i));
+    },
+
+    get project() {
+      return project;
+    },
+    setPunch(patch) {
+      return commitProject({ ...project, punch: { ...project.punch, ...patch } });
     },
 
     // ——— introspection, for surfaces and for the done-checks ——————————————————————————

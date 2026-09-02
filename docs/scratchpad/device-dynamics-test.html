@@ -1,0 +1,142 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>device-dynamics test harness</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--font-ui); padding: var(--sp-16); display: flex; flex-direction: column; gap: var(--sp-12); }
+  section { display: flex; flex-direction: column; gap: var(--sp-6); border: var(--bw) solid var(--line); border-radius: var(--r-panel); padding: var(--sp-8); }
+  button { background: var(--panel); color: var(--text); border: var(--bw) solid var(--line); border-radius: var(--r-ctl); padding: var(--sp-3) var(--sp-6); cursor: pointer; }
+  pre { background: var(--panel); color: var(--text-dim); padding: var(--sp-4); border-radius: var(--r-sm); white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-sm); }
+  .mount { width: 260px; }
+</style>
+</head>
+<body>
+  <h1>device-dynamics — gate.js / compressor.js / gain-reduction.js</h1>
+
+  <section>
+    <h2>Setup</h2>
+    <button id="start">1. start audio context + build devices</button>
+    <pre id="setup-log"></pre>
+  </section>
+
+  <section>
+    <h2>Gate — audible test</h2>
+    <p>Plays quiet tone below threshold, then loud burst above threshold. Watch the open/closed dot.</p>
+    <button id="gate-quiet">play quiet (should stay closed)</button>
+    <button id="gate-loud">play loud burst (should open)</button>
+    <div id="gate-mount" class="mount"></div>
+  </section>
+
+  <section>
+    <h2>Compressor — audible test</h2>
+    <p>Plays a loud tone well above threshold. Gain-reduction meter should move off zero.</p>
+    <button id="comp-loud">play loud tone (reduction should show)</button>
+    <button id="comp-quiet">play quiet tone (reduction should sit at zero)</button>
+    <div id="comp-mount" class="mount"></div>
+  </section>
+
+  <section>
+    <h2>State round-trip</h2>
+    <button id="roundtrip">mutate params, round-trip through JSON, verify</button>
+    <pre id="roundtrip-log"></pre>
+  </section>
+
+  <section>
+    <h2>cpuWeight</h2>
+    <button id="weight">read cpuWeight from both devices</button>
+    <pre id="weight-log"></pre>
+  </section>
+
+  <section>
+    <h2>Dispose</h2>
+    <button id="dispose">dispose both devices, verify node/listener counts</button>
+    <pre id="dispose-log"></pre>
+  </section>
+
+<script type="module">
+import Gate from '../../src/devices/gate.js';
+import Compressor from '../../src/devices/compressor.js';
+
+let ctx, gate, comp, gateOsc, compOsc;
+
+function log(id, obj) {
+  document.getElementById(id).textContent =
+    typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+}
+
+document.getElementById('start').addEventListener('click', () => {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.resume();
+
+  gate = new Gate(ctx);
+  gate.output.connect(ctx.destination);
+
+  comp = new Compressor(ctx);
+  comp.output.connect(ctx.destination);
+
+  gate.mountCompact(document.getElementById('gate-mount'));
+  comp.mountCompact(document.getElementById('comp-mount'));
+
+  log('setup-log', 'audio context started, both devices built and mounted');
+});
+
+function tone(target, freq, gainValue, ms) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.frequency.value = freq;
+  g.gain.value = gainValue;
+  osc.connect(g);
+  g.connect(target.input);
+  osc.start();
+  osc.stop(ctx.currentTime + ms / 1000);
+}
+
+document.getElementById('gate-quiet').addEventListener('click', () => tone(gate, 220, 0.01, 1500));
+document.getElementById('gate-loud').addEventListener('click', () => tone(gate, 220, 0.9, 1500));
+document.getElementById('comp-loud').addEventListener('click', () => tone(comp, 440, 0.95, 1500));
+document.getElementById('comp-quiet').addEventListener('click', () => tone(comp, 440, 0.05, 1500));
+
+document.getElementById('roundtrip').addEventListener('click', () => {
+  gate.setParam('threshold', -12);
+  gate.setParam('attack', 5);
+  gate.setParam('release', 300);
+  comp.setParam('threshold', -18);
+  comp.setParam('ratio', 8);
+  comp.setParam('makeup', 4);
+
+  const gateJson = JSON.parse(JSON.stringify(gate.getState()));
+  const compJson = JSON.parse(JSON.stringify(comp.getState()));
+
+  const gate2 = new Gate(ctx);
+  gate2.setState(gateJson);
+  const comp2 = new Compressor(ctx);
+  comp2.setState(compJson);
+
+  const gateMatch = JSON.stringify(gate2.getState()) === JSON.stringify(gateJson);
+  const compMatch = JSON.stringify(comp2.getState()) === JSON.stringify(compJson);
+
+  gate2.dispose();
+  comp2.dispose();
+
+  log('roundtrip-log', { gateJson, compJson, gateMatch, compMatch });
+});
+
+document.getElementById('weight').addEventListener('click', () => {
+  log('weight-log', {
+    gate_estimatedWeight: Gate.estimatedWeight,
+    gate_cpuWeight: gate.cpuWeight,
+    comp_estimatedWeight: Compressor.estimatedWeight,
+    comp_cpuWeight: comp.cpuWeight,
+  });
+});
+
+document.getElementById('dispose').addEventListener('click', () => {
+  const gateResult = gate.dispose();
+  const compResult = comp.dispose();
+  log('dispose-log', { gateResult, compResult });
+});
+</script>
+</body>
+</html>

@@ -6,14 +6,14 @@
 <title>Harmony — Chromebook DAW</title>
 
 <!--
-  /tools/harmony.html — the Harmony standalone teaching page.
-  Built by `chord-module`, P3/S6. CONTRACTS §1 names this exact path.
+  /tools/harmonyNEW.html — the Harmony standalone teaching page.
+  The Harmony engine. CONTRACTS §1 names this path.
 
   NO BUILD STEP (CONTRACTS §10). Plain ES module imports, relative paths, no bundler, no
   dependency, nothing to compile. Serve the PROJECT ROOT over static HTTP and open this file:
 
       python3 -m http.server 8000
-      http://127.0.0.1:8000/tools/harmony.html
+      http://127.0.0.1:8000/tools/harmonyNEW.html
 
   It must be HTTP, not file:// — Chrome refuses ES module imports from a file:// origin, and
   Web MIDI needs a secure context (CONTRACTS §5, §10). 127.0.0.1 counts as secure.
@@ -27,24 +27,24 @@
   and the other two light, because all three are on `core/input.js`'s one bus (§5) and
   `core/state.js`'s one scale (§4).
 
-  WHAT THIS PAGE ASSEMBLES, AND WHOSE EACH PIECE IS
-    theory/scale.js ............ `scale-engine`, P3/S3 — frozen. Read only.
-    theory/chord.js ............ `chord-engine`,  P3/S4 — frozen. Read only.
-    core/state.js .............. the §4 store — the ONE scale all four of the modules below
-                                 are looking at. This page never writes `state.scale`; it
-                                 calls §4's four mutations and lets the store publish.
-    surfaces/scale-circle.js ... `scale-circle`,  P3/S5 — frozen. Read only.
-    surfaces/diatonic-keys.js .. `diatonic-keys`, P3/S5 — frozen. Read only.
-    surfaces/piano-roll.js ..... `piano-roll`,    P3/S5 — frozen. Read only.
-    instruments/chord-module.js  THIS SEAT.
-    instruments/wave-synth.js .. `wave-voice`,     P1/S3 — a ROUTING TARGET. Read only.
-    instruments/overtone-synth.js `overtone-voice`, P1/S3 — a ROUTING TARGET. Read only.
-    ui/shell.js ................ `tone-shell`, P1/S4 — REUSED, NEVER EDITED. This page
-                                 imports its file menu, its CPU meter and its stylesheet and
-                                 writes not one line of it.
-  This seat owns this file and `/src/instruments/chord-module.js`, and nothing else. Every
-  module above is read and called; not one line of any of them was changed to make this page
-  work.
+  WHAT THIS PAGE ASSEMBLES
+    theory/scale.js ............ the scale engine. Read only.
+    theory/chord.js ............ the chord engine — every pitch, name and numeral. Read only.
+    core/state.js .............. the §4 store. One scale, shared by both surfaces. This page
+                                 never writes `state.scale`; it calls §4's four mutations
+                                 and lets the store publish.
+    surfaces/scale-circle.js ... the wheel. Read only.
+    surfaces/comp-builder.js ... Chord Bank, Root Positions, Comp Positions. Builds the
+                                 chords and hands the notes to the selected engine.
+    instruments/wave-synth.js .. an ENGINE. Read only.
+    instruments/overtone-synth.js an ENGINE. Read only.
+    ui/shell.js ................ REUSED, NEVER EDITED. This page imports its file menu, its
+                                 CPU meter and its stylesheet and writes not one line of it.
+
+  THE ENGINE
+    One selector, one mounted UI, one instrument sounding. Both engines are constructed and
+    mounted at load; picking a row hides the other rather than unmounting it, so a switch
+    never drops what an instrument is holding.
 
   WHY THIS PAGE DOES NOT CALL `mountStandaloneTool()`
     `ui/shell.js`'s `ToolShell` is P1's shape and it is right for P1: ONE visual, and a
@@ -60,21 +60,21 @@
 
 <link rel="stylesheet" href="../src/ui/tokens.css">
 <style>
-  html, body { margin: 0; padding: 0; background: var(--bg, #0a0d13); }
+  html, body { margin: var(--sp-0); padding: var(--sp-0); background: var(--bg, #0a0d13); }
   .cbdaw-boot {
-    margin: 0; padding: 24px;
-    font-family: system-ui, -apple-system, sans-serif;
+    margin: var(--sp-0); padding: var(--sp-12);
+    font-family: var(--font-ui);
     color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
   }
 
-  /* SCROLL. `ui/shell.js` pins `.cbdaw-shell` to `height:100vh; overflow:hidden` above a
+  /* SCROLL. `ui/shell.js` pins `.cbdaw-shell` to `height:var(--vh-100); overflow:var(--ov-hidden)` above a
      620px-tall window and makes `.cbdaw-shell__columns` the one thing that scrolls beneath
      the top bar. This page uses that mechanism, so the header stays put and the panels move.
      What it does NOT want is that class's 2-column grid — these panels stack full width — so
      the grid is overridden here, scoped to this page. `ui/shell.js` is not edited. */
   .cbdaw-shell[data-tool="harmony"] .cbdaw-shell__columns {
-    display: flex;
-    flex-direction: column;
+    display: var(--disp-flex);
+    flex-direction: var(--flexdir-column);
     gap: var(--shell-gap, 12px);
   }
 
@@ -82,8 +82,8 @@
      `surfaces/scale-circle.js` is frozen and is NOT edited for any of this. It paints each
      wedge with `fill: var(--deg-*)` inline (scale-circle.js ~L568) and `tokens.css` maps
      those names to the teaching colours. Redefining the five names HERE, scoped to this
-     page's shell, turns every wedge one flat neutral and leaves `tools/harmony.html` and the
-     DAW's own compact circles exactly as they were.
+     page's shell, turns every wedge one flat neutral and leaves the DAW's own compact
+     circles exactly as they were.
 
      Read together with §9: the teaching colours are a real decision, not decoration. This
      page opts out of them on purpose. Quality still reads, because A9's `°`/`+` superscript
@@ -100,7 +100,7 @@
      separates them; with one neutral there is nothing to separate and the `--line` stroke
      already does the job — same as the mock-up, where the two rings are the same grey. */
   .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__zone[data-ring="numeral"],
-  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__zone[data-ring="degree"] { opacity: 1; }
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__zone[data-ring="degree"] { opacity: var(--op-full); }
 
   /* The ring labels are `fill: var(--bg)` in the frozen file — dark ink chosen because
      `--text` on a bright amber fails the room test. On a `--panel` wedge that ink is
@@ -110,43 +110,43 @@
   /* The +/- per degree, off. `scale-circle.js` already hides it in its compact variant, so
      this is that same switch thrown from outside. §4's mutations are untouched and still
      reachable — the Scale panel's keys and presets still drive them. */
-  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__pm { display: none; }
+  .cbdaw-shell[data-tool="harmony"] .cbdaw-circle__pm { display: var(--disp-none); }
 
   /* Page layout only. Every colour is a §9 token name; the fallbacks are byte-identical to
      `ui/tokens.css` and exist only so the page renders if that file has not loaded. */
   .hm-surfaces {
-    display: grid; gap: 12px; align-items: start;
-    grid-template-columns: minmax(300px, 0.9fr) minmax(240px, 0.7fr) minmax(340px, 1.4fr);
+    display: var(--disp-grid); gap: var(--sp-6); align-items: var(--align-start);
+    grid-template-columns: var(--grid-90-70-140);
   }
-  @media (max-width: 1100px) { .hm-surfaces { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .hm-surfaces { grid-template-columns: var(--grid-1fr); } }
 
-  .hm-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hm-keys { display: var(--disp-flex); flex-wrap: var(--flexwrap-wrap); gap: var(--sp-2); }
   .hm-key {
-    font: inherit; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
-    color: var(--text, #f2f6fc); background: transparent;
-    border: 1px solid var(--line, #3a485f); min-width: 3.4em;
+    font: var(--font-inherit); font-size: var(--fs-base); cursor: var(--cur-pointer); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-ctl);
+    color: var(--text, #f2f6fc); background: var(--color-transparent);
+    border: var(--bw) solid var(--line, #3a485f); min-width: var(--sp-em-34);
   }
   .hm-key:hover { border-color: var(--accent, #34e5b4); }
   .hm-key[aria-pressed="true"] {
     border-color: var(--accent, #34e5b4);
     background: color-mix(in srgb, var(--accent, #34e5b4) 18%, transparent);
   }
-  .hm-scalename { font-size: 13px; color: var(--text, #f2f6fc); }
+  .hm-scalename { font-size: var(--fs-md); color: var(--text, #f2f6fc); }
   .hm-scalename b { color: var(--accent, #34e5b4); }
-  .hm-targets { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-  .hm-target { display: flex; flex-direction: column; gap: 5px; }
+  .hm-targets { display: var(--disp-grid); gap: var(--sp-5); grid-template-columns: var(--grid-autofit-260); }
+  .hm-target { display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-2h); }
   .hm-target[data-active="true"] .hm-target__tag { color: var(--accent, #34e5b4); }
   .hm-target__tag {
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+    font-size: var(--fs-xs); text-transform: var(--tt-label); letter-spacing: var(--track-label);
     color: var(--text-dim, #93a1b8);
   }
   .hm-seam {
-    font-size: 11px; line-height: 1.55; color: var(--text-dim, #93a1b8);
-    border-left: 2px solid var(--line, #3a485f); padding-left: 8px; margin: 4px 0 0;
+    font-size: var(--fs-sm); line-height: var(--lh-loose); color: var(--text-dim, #93a1b8);
+    border-left: 2px solid var(--line, #3a485f); padding-left: var(--sp-4); margin: var(--sp-2) 0 0;
   }
   .hm-err {
-    white-space: pre-wrap; padding: 20px; color: var(--warn, #ff7a1a);
-    background: var(--bg, #0a0d13); font: 13px/1.5 ui-monospace, monospace;
+    white-space: var(--ws-prewrap); padding: 20px; color: var(--warn, #ff7a1a);
+    background: var(--bg, #0a0d13); font: var(--font-mono-compact);
   }
 </style>
 </head>
@@ -176,12 +176,17 @@ import { ctx, unlock, createChannel, releaseChannel } from '../src/core/audio.js
 import { input } from '../src/core/input.js';
 import { state } from '../src/core/state.js';
 
-import { PRESETS, createScale, spellingOf } from '../src/theory/scale.js';
+import {
+  PRESETS,
+  createScale,
+  setScaleTonic,
+  setScalePreset,
+  spellingOf,
+} from '../src/theory/scale.js';
 
 import ScaleCircle from '../src/surfaces/scale-circle.js';
 import CompBuilder from '../src/surfaces/comp-builder.js';
 
-import ChordModule from '../src/instruments/chord-module.js';
 import WaveSynth from '../src/instruments/wave-synth.js';
 import OvertoneSynth from '../src/instruments/overtone-synth.js';
 
@@ -241,23 +246,57 @@ function listenerBag() {
 //     spelling and names no scale (§6, §10-H). `PRESETS` is enumerated with Object.keys, so
 //     adding a preset there grows this control with no edit here (A8).
 //   · P4 hoists by DELETING THIS FUNCTION and its panel, creating the project header's own
-//     store, and calling `chord.bindState(projectStore)` plus `roll.bindState(projectStore)`
-//     and `new ScaleCircle(el, input, projectStore)`. Nothing else on this page changes,
+//     store, and calling `comp.bindState(projectStore)` and
+//     `new ScaleCircle(el, input, projectStore)`. Nothing else on this page changes,
 //     because nothing else on this page knows where the scale came from.
+
+/** The scale rows this panel offers. The two minors are left out; what remains is the seven
+ *  modes, in `PRESETS` order. */
+const MODE_NAMES = Object.keys(PRESETS).filter(
+  (name) => name !== 'Harmonic Minor' && name !== 'Melodic Minor'
+);
 
 function createScaleControl(store, listeners) {
   const el = panel(
-    'Scale',
-    'this tool owns its own scale (§4) — in the DAW the project header will'
+    'Scale builder',
+    'current scale parameters, minus the melodic and harmonic minors'
   );
+
+  // The tonal centers and the scales share one centered row across the full panel. Nothing
+  // else sits at this latitude, so the halves below start under it.
+  const topRow = document.createElement('div');
+  topRow.style.display = 'var(--disp-flex)';
+  topRow.style.flexWrap = 'var(--flexwrap-wrap)';
+  topRow.style.justifyContent = 'var(--justify-center)';
+  topRow.style.alignItems = 'var(--align-center)';
+  topRow.style.gap = 'var(--sp-4)';
+  topRow.style.margin = '0 0 var(--sp-7)';
+  el.body.appendChild(topRow);
+
+  // Below it, two halves. The degree rows sit on the left; the wheel they drive mounts into
+  // `circleHost` on the right and is the same scale, not a second one.
+  const split = document.createElement('div');
+  split.style.display = 'var(--disp-flex)';
+  split.style.flexWrap = 'var(--flexwrap-wrap)';
+  split.style.gap = 'var(--sp-6)';
+  split.style.alignItems = 'var(--align-center)';
+  el.body.appendChild(split);
+
+  const left = document.createElement('div');
+  left.style.flex = 'var(--flex-1-1-320)';
+  split.appendChild(left);
+
+  const circleHost = document.createElement('div');
+  circleHost.style.flex = 'var(--flex-1-1-300)';
+  split.appendChild(circleHost);
 
   const keysRow = document.createElement('div');
   keysRow.className = 'hm-keys';
-  el.body.appendChild(keysRow);
+  keysRow.style.justifyContent = 'var(--justify-center)';
+  topRow.appendChild(keysRow);
 
-  // The twelve keys — §4's 2026-08-24 amendment, "the major scale on each of the twelve
-  // chromatic roots". The NAME of each one is `theory/scale.js`'s spelling of that key's own
-  // tonic, so the tie key reads its composite face (A1) and nothing here spells anything.
+  // The twelve tonal centers. Each face is `theory/scale.js`'s spelling of that pitch class,
+  // so nothing here spells anything of its own.
   for (let pc = 0; pc < 12; pc++) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -270,32 +309,62 @@ function createScaleControl(store, listeners) {
 
   const presetRow = document.createElement('div');
   presetRow.className = 'hm-keys';
-  presetRow.style.marginTop = '8px';
-  el.body.appendChild(presetRow);
+  presetRow.style.justifyContent = 'var(--justify-center)';
+  topRow.appendChild(presetRow);
 
-  for (const name of Object.keys(PRESETS)) {
+  for (const name of MODE_NAMES) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'hm-key';
     b.dataset.preset = name;
-    b.style.minWidth = '0';
+    b.style.minWidth = 'var(--sp-0)';
     b.textContent = name;
     presetRow.appendChild(b);
     listeners.add(b, 'click', () => store.setScalePreset(name));
   }
 
+  // One row per degree, 7 at the top down to 1. Degree 1 is the tonal center and carries no
+  // +/- of its own — the twelve buttons above move it.
+  const degreeRows = document.createElement('div');
+  left.appendChild(degreeRows);
+
+  for (let i = 6; i >= 0; i--) {
+    const row = document.createElement('div');
+    row.style.display = 'var(--disp-flex)';
+    row.style.alignItems = 'var(--align-center)';
+    row.style.gap = 'var(--sp-5)';
+    row.style.padding = 'var(--sp-1) 0';
+
+    const num = document.createElement('span');
+    num.style.minWidth = 'var(--sp-9)';
+    num.style.opacity = 'var(--op-strong)';
+    num.textContent = String(i + 1);
+    row.appendChild(num);
+
+    const note = document.createElement('b');
+    note.dataset.degreeNote = String(i);
+    note.style.minWidth = 'var(--sp-17)';
+    row.appendChild(note);
+
+    if (i > 0) {
+      for (const [glyph, delta] of [['+', 1], ['−', -1]]) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'hm-key';
+        b.style.minWidth = 'var(--sp-0)';
+        b.textContent = glyph;
+        row.appendChild(b);
+        listeners.add(b, 'click', () => store.setScaleDegree(i, delta));
+      }
+    }
+
+    degreeRows.appendChild(row);
+  }
+
   const readout = document.createElement('p');
   readout.className = 'hm-scalename';
-  readout.style.margin = '10px 0 0';
-  el.body.appendChild(readout);
-
-  const seam = document.createElement('p');
-  seam.className = 'hm-seam';
-  seam.textContent =
-    'The +/- per degree is on the scale circle and on the diatonic keys, where §4 puts it. ' +
-    'Move one and watch all three surfaces, the shading and the note bank move together — ' +
-    'they are one scale, not three copies.';
-  el.body.appendChild(seam);
+  readout.style.margin = 'var(--sp-5) 0 0';
+  left.appendChild(readout);
 
   function render() {
     const s = store.scale;
@@ -305,12 +374,15 @@ function createScaleControl(store, listeners) {
     for (const b of presetRow.querySelectorAll('[data-preset]')) {
       b.setAttribute('aria-pressed', String(b.dataset.preset === s.preset));
     }
-    // `name` is `scaleName()`'s back-match and `preset` is provenance — A8/§15.5 say reading
-    // 'Dorian' and 'Custom' at the same time is correct, not a bug, so both are shown.
+    for (const n of degreeRows.querySelectorAll('[data-degree-note]')) {
+      n.textContent = spellingOf(s, Number(n.dataset.degreeNote)).text ?? '';
+    }
+    // `name` is `scaleName()`'s back-match and `preset` is provenance. Reading 'Dorian' and
+    // 'Custom' at once is correct, so both are shown.
     readout.innerHTML = '';
-    const key = document.createElement('b');
-    key.textContent = spellingOf(s, 0).text ?? '';
-    readout.appendChild(key);
+    const center = document.createElement('b');
+    center.textContent = spellingOf(s, 0).text ?? '';
+    readout.appendChild(center);
     readout.appendChild(
       document.createTextNode(
         ` · ${s.name}${s.preset === 'Custom' ? ' · you have moved a degree' : ''}`
@@ -320,7 +392,35 @@ function createScaleControl(store, listeners) {
 
   const off = store.on('scale', render);
   render();
-  return { el, render, dispose: off };
+  return { el, circleHost, render, dispose: off };
+}
+
+/** A scale store of its own — the same `scale` / `on` / `setScaleTonic` / `setScalePreset`
+ *  shape the page store has, holding one scale. It subscribes to nothing, so it never
+ *  follows the project. The comp builder holds this one until the toggle says otherwise. */
+function createOwnScaleStore(tonic = 0, presetName = 'Major') {
+  let scale = createScale(tonic, presetName);
+  const subs = new Set();
+
+  function publish() {
+    for (const fn of subs) fn(scale);
+  }
+
+  return {
+    get scale() { return scale; },
+    on(_evt, fn) {
+      subs.add(fn);
+      return () => subs.delete(fn);
+    },
+    setScaleTonic(pc) {
+      scale = setScaleTonic(scale, pc);
+      publish();
+    },
+    setScalePreset(name) {
+      scale = setScalePreset(scale, name);
+      publish();
+    },
+  };
 }
 
 // =========================================================================================
@@ -339,32 +439,20 @@ function mount(host) {
   // §2: an instrument is handed `(ctx, out)`, never makes its own context (§10) and never
   // connects to `ctx.destination`. `createChannel()` is what produces `out` until P4's
   // mixer/strip.js exists.
-  const chordChannel = createChannel();
-  const waveChannel = createChannel();
-  const overtoneChannel = createChannel();
+  // The ids opt both channels into synth voice normalization (core/audio.js section 4a).
+  const waveChannel = createChannel(WaveSynth.id);
+  const overtoneChannel = createChannel(OvertoneSynth.id);
 
-  const chord = new ChordModule(ctx, chordChannel);
   const wave = new WaveSynth(ctx, waveChannel);
   const overtone = new OvertoneSynth(ctx, overtoneChannel);
 
-  // SEAT QUESTION 2 — the routing targets. The page is the only thing that knows which
-  // instruments are LOADED, so the page is what hands the module the list. The module owns
-  // the control (`route.target`) and the choice; this is only the menu's contents.
-  chord.bindTargets([
+  // The engines this page loaded, in menu order. The first is selected at mount.
+  const engines = [
     { id: WaveSynth.id, label: WaveSynth.label, instrument: wave },
     { id: OvertoneSynth.id, label: OvertoneSynth.label, instrument: overtone },
-  ]);
-
-  // SEAT QUESTION 4 — the module's own Play button goes out on §5's bus, so playing THERE
-  // lights the three surfaces exactly the way playing a surface does. The bus comes back
-  // into `chord.noteOn` on the wire at the bottom of this function: one path, no double
-  // trigger.
-  chord.bindInput(input);
-
-  // SEAT QUESTION 5's other end. The module already defaults to the shared §4 store, so this
-  // line changes nothing today — it is written out so the hoist point is VISIBLE: P4 passes
-  // the project header's store here and on the two surfaces below, and nothing else moves.
-  chord.bindState(state);
+  ];
+  let engineId = engines[0].id;
+  const engineOf = (id) => engines.find((e) => e.id === id) ?? engines[0];
 
   // ——— 2 · top bar ————————————————————————————————————————————————————————————————
   const top = document.createElement('header');
@@ -392,22 +480,24 @@ function mount(host) {
   titles.innerHTML = `<h1 class="cbdaw-shell__title"></h1><p class="cbdaw-shell__subtitle"></p>`;
   titles.querySelector('.cbdaw-shell__title').textContent = 'Harmony';
   titles.querySelector('.cbdaw-shell__subtitle').textContent =
-    'One scale, three ways to see it, and every chord it can build. ' +
-    'Colour tells you major from minor so you never memorise which numeral is which.';
+    'One scale, the chords it builds, and one engine to hear them through. ' +
+    'Move a tone and the chord tells you its own name.';
   top.appendChild(titles);
 
   const spacer = document.createElement('div');
   spacer.className = 'cbdaw-shell__spacer';
   top.appendChild(spacer);
 
-  // SEAT QUESTION 8's other half — the CPU meter is visible and `noCap` is one click away,
-  // on the deployed build, per §8. This is `ui/shell.js`'s component, imported and called.
-  const cpu = createCpuMeter({ instrument: chord });
+  // `createCpuMeter` captures its instrument and reads only `cpuWeight`, so the selected
+  // engine is handed to it as a live getter rather than by re-pointing a field.
+  const cpu = createCpuMeter({
+    instrument: { get cpuWeight() { return engineOf(engineId).instrument.cpuWeight; } },
+  });
   top.appendChild(cpu.el);
   root.appendChild(top);
 
   // Everything below the top bar goes in here. `.cbdaw-shell__columns` is the only child
-  // `ui/shell.js` gives `overflow-y: auto`, so this is what makes the page scroll with the
+  // `ui/shell.js` gives `overflow-y: var(--auto)`, so this is what makes the page scroll with the
   // header pinned. Its 2-column grid is overridden to a stack in this page's <style>.
   const columns = document.createElement('div');
   columns.className = 'cbdaw-shell__columns';
@@ -415,118 +505,201 @@ function mount(host) {
 
   // ——— 3 · the scale control (seat question 5) ————————————————————————————————————
   const scaleControl = createScaleControl(state, listeners);
-  columns.appendChild(scaleControl.el);
 
   // ——— 4 · SEAT QUESTION 4 — ALL THREE SURFACES, AT ONCE, ALL LIVE ————————————————
+  // Two full-width panels stacked. The wheel lives inside the scale builder; the comp
+  // builder is its own lesson below it.
   const surfaces = document.createElement('div');
   surfaces.className = 'hm-surfaces';
 
-  const circlePanel = panel('Scale circle', 'inner ring plays the degree · outer ring plays the chord on it');
+  scaleControl.el.style.gridColumn = 'span 3';
 
-  // Beside the wheel, filling the two grid slots the diatonic keys and the piano roll used
-  // to hold. It spans both because it is one lesson in three boxes, not two surfaces.
   const compPanel = panel(
     CompBuilder.label,
     'build the chords · hear them in root position · re-voice them by hand'
   );
-  compPanel.style.gridColumn = 'span 2';
+  compPanel.style.gridColumn = 'span 3';
 
-  surfaces.append(circlePanel, compPanel);
+  surfaces.append(scaleControl.el, compPanel);
   columns.appendChild(surfaces);
 
-  // ——— 5 · the chord module (seat questions 1, 2, 6, 7, 8) ————————————————————————
-  const chordPanel = panel(
-    ChordModule.label,
-    'expanded view — CONTRACTS §2 mountExpanded · the note bank is §15.10'
-  );
-  columns.appendChild(chordPanel);
+  // ——— 5 · the engine ————————————————————————————————————————————————————————————
+  // One dropdown, one mounted UI, both living in the comp builder. The dropdown picks which
+  // instrument the chords play through; the expand button decides whether its controls are
+  // on screen. Filled and placed further down, where the comp builder is built.
+  const engineSelect = document.createElement('select');
+  engineSelect.className = 'hm-key';
 
-  // ——— 6 · what it can drive ————————————————————————————————————————————————————
-  const targetPanel = panel(
-    'Routing targets',
-    'the other instruments loaded on this page — §2 mountCompact'
-  );
-  const targetGrid = document.createElement('div');
-  targetGrid.className = 'hm-targets';
-  targetPanel.body.appendChild(targetGrid);
-  columns.appendChild(targetPanel);
+  const engineGrid = document.createElement('div');
+  engineGrid.className = 'hm-targets';
+  engineGrid.hidden = true;
 
   host.appendChild(root);
 
-  // ——— 7 · mount everything, now that the DOM is in the document ————————————————
-  // Order matters for the piano roll: it measures its container at mount.
-  //
-  // ALL THREE SHARE ONE SCALE AND ONE BUS, AND THAT IS THE WHOLE WIRE.
-  //   · `ScaleCircle` takes the §4 store as its third constructor argument (§12.1 keeps a
-  //     surface from importing a singleton on its own).
-  //   · `DiatonicKeys` imports the shared `state` itself — §12.1's two-argument constructor.
-  //   · `PianoRoll` is an editor, not a §12.1 surface, and binds by duck type.
-  //   Three different wirings, ONE store, because §4 says there is one scale.
+  // ——— 6 · mount everything, now that the DOM is in the document ————————————————
+  // Both surfaces read the §4 store, so there is one scale on the page.
+  //   · `ScaleCircle` takes the store as its third constructor argument (§12.1).
+  //   · `CompBuilder` takes it as its only one.
   const circle = new ScaleCircle(null, input, state);
-  // The degree numbers now ride OUTSIDE the wheel, so the inner ring showing 'number' too
-  // would print 1..7 twice. `overlay` is the surface's own public setter and the overlay
-  // button in its controls bar still switches all four modes — this only picks where it
-  // starts. Result, reading outward: letter on the ring that plays the NOTE, numeral on the
-  // ring that plays the CHORD, number outside on neither.
+  // The surface offers two modes, letter and solfege, and opens on letter. Reading outward:
+  // letter on the ring that plays the NOTE, numeral on the ring that plays the CHORD,
+  // degree number outside the wheel on neither.
   circle.overlay = 'letter';
-  circle.mountExpanded(circlePanel.body);
+  circle.mountExpanded(scaleControl.circleHost);
 
-  // Same store as everything else (§4: one scale), and its sound goes out through the Wave
-  // Synth that is already on this page as a routing target. The surface makes no audio of
-  // its own — `bindPlayer` takes §2's `noteOn`/`noteOff` shape and nothing more, so P4 can
-  // hand it a mixer strip instead without touching the surface.
-  const comp = new CompBuilder(state);
-  comp.bindPlayer(wave);
+  // The surface makes no audio of its own. `bindPlayer` takes §2's `noteOn`/`noteOff` shape
+  // and nothing more, so `selectEngine` can re-point it and P4 can hand it a mixer strip.
+  // ——— the Comp Builder's own tonal center ————————————————————————————————————————
+  // The builder reads whichever store this row hands it. Unchecked — the default — that is
+  // `ownStore`, driven by the two dropdowns below and subscribed to nothing. Checked, it is
+  // `state`, the page store the circle and the scale builder drive. `bindState` swaps the
+  // subscription; the surface is not remounted either way.
+  const ownStore = createOwnScaleStore(0, 'Major');
+
+  const ownRow = document.createElement('div');
+  ownRow.className = 'hm-keys';
+  ownRow.style.marginBottom = 'var(--sp-5)';
+  ownRow.style.alignItems = 'var(--align-center)';
+
+  const followLabel = document.createElement('label');
+  followLabel.className = 'hm-key';
+  followLabel.style.minWidth = 'var(--sp-0)';
+  followLabel.style.cursor = 'var(--cur-pointer)';
+  const followBox = document.createElement('input');
+  followBox.type = 'checkbox';
+  followBox.checked = false;
+  followBox.style.marginRight = 'var(--sp-3)';
+  followLabel.appendChild(followBox);
+  followLabel.appendChild(document.createTextNode('Project tonal center'));
+  ownRow.appendChild(followLabel);
+
+  // The tonal center the builder's own chord math counts from. Faces come from
+  // `theory/scale.js`'s spelling, same as the scale builder's twelve.
+  const centerSelect = document.createElement('select');
+  centerSelect.className = 'hm-key';
+  for (let pc = 0; pc < 12; pc++) {
+    const o = document.createElement('option');
+    o.value = String(pc);
+    o.textContent = spellingOf(createScale(pc, 'Major'), 0).text ?? '';
+    centerSelect.appendChild(o);
+  }
+  ownRow.appendChild(centerSelect);
+
+  const scaleSelect = document.createElement('select');
+  scaleSelect.className = 'hm-key';
+  for (const name of MODE_NAMES) {
+    const o = document.createElement('option');
+    o.value = name;
+    o.textContent = name;
+    scaleSelect.appendChild(o);
+  }
+  ownRow.appendChild(scaleSelect);
+
+  // The engine dropdown and its expand button share this row. The instrument's own controls
+  // sit in `engineGrid` below the builder and start collapsed.
+  ownRow.appendChild(engineSelect);
+
+  const expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'hm-key';
+  expandBtn.style.minWidth = 'var(--sp-0)';
+  ownRow.appendChild(expandBtn);
+
+  compPanel.body.append(ownRow);
+
+  const comp = new CompBuilder(ownStore);
   comp.mountExpanded(compPanel.body);
+  compPanel.body.appendChild(engineGrid);
 
-  chord.mountExpanded(chordPanel.body);
+  /** Shows or hides the selected instrument's controls. */
+  function renderExpand() {
+    expandBtn.textContent = engineGrid.hidden ? 'Show controls' : 'Hide controls';
+    expandBtn.setAttribute('aria-expanded', String(!engineGrid.hidden));
+  }
+  listeners.add(expandBtn, 'click', () => {
+    engineGrid.hidden = !engineGrid.hidden;
+    renderExpand();
+  });
+  renderExpand();
 
-  for (const [instrument, Ctor] of [[wave, WaveSynth], [overtone, OvertoneSynth]]) {
+  listeners.add(centerSelect, 'change', () => ownStore.setScaleTonic(Number(centerSelect.value)));
+  listeners.add(scaleSelect, 'change', () => ownStore.setScalePreset(scaleSelect.value));
+
+  /** Points the builder at one store and redraws this row. The dropdowns are disabled while
+   *  the project store is the one being read, since nothing here drives it. */
+  function renderOwn() {
+    const following = followBox.checked;
+    comp.bindState(following ? state : ownStore);
+    centerSelect.disabled = following;
+    scaleSelect.disabled = following;
+    centerSelect.value = String(ownStore.scale.tonic);
+    scaleSelect.value = ownStore.scale.preset;
+  }
+  listeners.add(followBox, 'change', renderOwn);
+  ownStore.on('scale', renderOwn);
+  renderOwn();
+
+  // One tab and one mounted UI per engine. Both are built once; only visibility changes, so
+  // switching does not unmount an instrument or drop what it is holding.
+  const engineBoxes = new Map();
+  for (const row of engines) {
+    const opt = document.createElement('option');
+    opt.value = row.id;
+    opt.textContent = row.label;
+    engineSelect.appendChild(opt);
+
     const box = document.createElement('div');
     box.className = 'hm-target';
-    box.dataset.instrumentId = Ctor.id;
+    box.dataset.instrumentId = row.id;
     const name = document.createElement('strong');
-    name.textContent = Ctor.label;
-    name.style.fontSize = '12px';
+    name.textContent = row.label;
+    name.style.fontSize = 'var(--fs-base)';
     box.appendChild(name);
     const tag = document.createElement('span');
     tag.className = 'hm-target__tag';
     box.appendChild(tag);
     const mountHost = document.createElement('div');
     box.appendChild(mountHost);
-    targetGrid.appendChild(box);
-    instrument.mountCompact(mountHost);
+    engineGrid.appendChild(box);
+    row.instrument.mountExpanded
+      ? row.instrument.mountExpanded(mountHost)
+      : row.instrument.mountCompact(mountHost);
+    engineBoxes.set(row.id, box);
   }
 
-  /** Which target is receiving right now. Read from the module's own param — the module
-   *  owns the decision and this only reflects it. `change` bubbles out of the module's
-   *  <select>, so no polling and no new interface on the module. */
-  function reflectRoute() {
-    const target = chord.getParam('route.target');
-    for (const box of targetGrid.querySelectorAll('[data-instrument-id]')) {
-      const active = box.dataset.instrumentId === target;
+  /** Points the Comp Builder, the bus and the CPU meter at one engine and shows its UI.
+   *  Notes held by the outgoing engine are released by `bindPlayer`. */
+  function selectEngine(id) {
+    const row = engineOf(id);
+    engineId = row.id;
+    comp.bindPlayer(row.instrument);
+    for (const [rowId, box] of engineBoxes) {
+      const active = rowId === engineId;
+      box.hidden = !active;
       box.dataset.active = String(active);
       box.querySelector('.hm-target__tag').textContent = active
-        ? 'receiving the chord — the Chord Module is silent'
-        : 'idle — pick it in the module’s Route control to drive it';
+        ? 'playing the chords'
+        : '';
     }
+    engineSelect.value = engineId;
   }
-  listeners.add(chordPanel, 'change', reflectRoute);
-  reflectRoute();
+  listeners.add(engineSelect, 'change', () => selectEngine(engineSelect.value));
+  selectEngine(engineId);
 
-  // ——— 8 · THE WIRE: §5's bus → the Chord Module ————————————————————————————————
+  // ——— 7 · THE WIRE: §5's bus → the selected engine ——————————————————————————————
   // §5: all four hardware routes produce identical events and an instrument must never know
-  // which one fired. These two lines are the whole routing layer of this page. Whether the
-  // module then sounds the note itself or hands it to the Wave Synth is the MODULE's
-  // decision (`route.target`), not this page's.
+  // which one fired. These two lines are the whole routing layer of this page. `engineId` is
+  // read per event, so a switch takes effect on the next note with no re-subscription.
   const busUnsubs = [];
   busUnsubs.push(
     input.on('noteon', (e) => {
       unlock();                       // §3 — idempotent, safe from any gesture, never blocks
-      chord.noteOn(e.note, e.velocity);
+      engineOf(engineId).instrument.noteOn(e.note, e.velocity);
     })
   );
-  busUnsubs.push(input.on('noteoff', (e) => chord.noteOff(e.note)));
+  busUnsubs.push(
+    input.on('noteoff', (e) => engineOf(engineId).instrument.noteOff(e.note))
+  );
 
   // A tab-away must not leave a chord ringing. `input.allNotesOff()` emits real note-off
   // events, so nothing downstream has to know why.
@@ -534,11 +707,11 @@ function mount(host) {
 
   // §2's async gate. Every instrument here is `needsLoad = false` and resolves immediately;
   // calling it anyway is what lets a loading instrument drop into this same page later.
-  for (const inst of [chord, wave, overtone]) {
-    inst.ready?.().catch((err) => console.error('[harmony.html] ready() failed:', err));
+  for (const inst of [wave, overtone]) {
+    inst.ready?.().catch((err) => console.error('[harmonyNEW.html] ready() failed:', err));
   }
 
-  // ——— 9 · SEAT QUESTION 9 — teardown, counted rather than claimed ————————————————
+  // ——— 8 · teardown, counted rather than claimed ——————————————————————————————————
   // Order is deliberate: stop new notes arriving, release what is sounding, then take the
   // consumers down before the producers. Deliberately does NOT call `audio.dispose()` (that
   // closes the one AudioContext for the whole document) or `input.dispose()` (the bus is
@@ -550,16 +723,14 @@ function mount(host) {
     busUnsubs.length = 0;
     report.notesReleased = input.allNotesOff();
 
-    report.chord = chord.dispose();
     report.circle = circle.dispose();
     report.comp = comp.dispose();
     report.wave = wave.dispose();
     report.overtone = overtone.dispose();
 
-    releaseChannel(chordChannel);
     releaseChannel(waveChannel);
     releaseChannel(overtoneChannel);
-    report.channelsReleased = 3;
+    report.channelsReleased = 2;
 
     report.cpu = cpu.dispose();
     report.menu = menu.dispose();
@@ -572,7 +743,10 @@ function mount(host) {
   }
   listeners.add(window, 'pagehide', teardown);
 
-  return { root, chord, wave, overtone, circle, comp, cpu, menu, state, teardown };
+  return {
+    root, wave, overtone, circle, comp, cpu, menu, state, teardown,
+    selectEngine, get engineId() { return engineId; },
+  };
 }
 
 // =========================================================================================
@@ -589,7 +763,7 @@ try {
   box.className = 'hm-err';
   box.textContent = `harmony failed to mount:\n\n${err && err.stack ? err.stack : err}`;
   document.body.appendChild(box);
-  console.error('[harmony.html] mount failed:', err);
+  console.error('[harmonyNEW.html] mount failed:', err);
 }
 
 </script>

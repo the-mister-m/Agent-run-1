@@ -234,39 +234,39 @@ const STYLE_TEXT = `
   --grid-dim: var(--text-dim, #93a1b8);
   --grid-accent: var(--accent, #34e5b4);
   --grid-warn: var(--warn, #ff7a1a);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  box-sizing: border-box;
-  font-family: system-ui, -apple-system, sans-serif;
+  display: var(--disp-flex);
+  flex-direction: var(--flexdir-column);
+  gap: var(--sp-3);
+  width: var(--pct-100);
+  box-sizing: var(--box-border-box);
+  font-family: var(--font-ui);
   color: var(--grid-text);
   background: var(--grid-panel);
-  border: 1px solid var(--grid-line);
-  border-radius: 6px;
-  padding: 8px;
-  user-select: none;
-  -webkit-user-select: none;
+  border: var(--bw) solid var(--grid-line);
+  border-radius: var(--r-body);
+  padding: var(--sp-4);
+  user-select: var(--usel-none);
+  -webkit-user-select: var(--usel-none);
 }
 
 .cbdaw-grid__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: 12px;
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-6);
+  flex-wrap: var(--flexwrap-wrap);
+  font-size: var(--fs-base);
   color: var(--grid-dim);
 }
-.cbdaw-grid[data-variant="compact"] .cbdaw-grid__toolbar { font-size: 10px; gap: 8px; }
+.cbdaw-grid[data-variant="compact"] .cbdaw-grid__toolbar { font-size: var(--fs-xs); gap: var(--sp-4); }
 .cbdaw-grid__toolbar button {
-  font: inherit;
-  font-weight: 600;
+  font: var(--font-inherit);
+  font-weight: var(--w-med);
   color: var(--grid-text);
   background: var(--grid-bg);
-  border: 1px solid var(--grid-line);
-  border-radius: 4px;
-  padding: 3px 8px;
-  cursor: pointer;
+  border: var(--bw) solid var(--grid-line);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-1h) var(--sp-4);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-grid__toolbar button:hover { border-color: var(--grid-accent); }
 .cbdaw-grid__toolbar button[aria-pressed="true"] {
@@ -275,120 +275,120 @@ const STYLE_TEXT = `
   border-color: var(--grid-accent);
 }
 .cbdaw-grid__toolbar .cbdaw-grid__timesig {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-variant-numeric: var(--num-tabular);
+  font-weight: var(--w-bold);
   color: var(--grid-text);
 }
 
 .cbdaw-grid__body {
-  position: relative; /* the playhead is one absolutely-positioned line over this whole box */
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  position: var(--pos-relative); /* the playhead is one absolutely-positioned line over this whole box */
+  display: var(--disp-flex);
+  flex-direction: var(--flexdir-column);
+  gap: var(--sp-1);
   background: var(--grid-bg);
-  border: 1px solid var(--grid-line);
-  border-radius: 4px;
-  padding: 4px;
-  overflow: hidden;
+  border: var(--bw) solid var(--grid-line);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-2);
+  overflow: var(--ov-hidden);
 }
 
 /* Ruler + every lane row share this beat-group layout so a triplet lane's cells and a 16th
    lane's cells always land on the same beat boundaries — §13.2: "not two grid
    implementations." Nesting does the alignment; no per-step pixel math is needed. */
 .cbdaw-grid__row {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
+  display: var(--disp-flex);
+  align-items: var(--align-stretch);
+  gap: var(--sp-1);
 }
 .cbdaw-grid__row-label {
-  flex: 0 0 auto;
-  width: 74px;
-  min-width: 74px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  flex: var(--flex-0-0-auto);
+  width: var(--sp-37);
+  min-width: var(--sp-37);
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
   color: var(--grid-dim);
-  padding-right: 4px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  padding-right: var(--sp-2);
+  overflow: var(--ov-hidden);
+  white-space: var(--ws-nowrap);
+  text-overflow: var(--to-ellipsis);
 }
-.cbdaw-grid[data-variant="compact"] .cbdaw-grid__row-label { width: 46px; min-width: 46px; font-size: 9px; }
+.cbdaw-grid[data-variant="compact"] .cbdaw-grid__row-label { width: var(--sp-23); min-width: var(--sp-23); font-size: var(--fs-tiny); }
 .cbdaw-grid__row-label button {
-  font: inherit;
-  font-size: 9px;
-  line-height: 1;
+  font: var(--font-inherit);
+  font-size: var(--fs-tiny);
+  line-height: var(--lh-none);
   color: var(--grid-dim);
-  background: transparent;
-  border: 1px solid var(--grid-line);
-  border-radius: 3px;
-  padding: 1px 3px;
-  cursor: pointer;
+  background: var(--color-transparent);
+  border: var(--bw) solid var(--grid-line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-hair) var(--sp-1h);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-grid__row-label button[aria-pressed="true"] { color: var(--grid-accent); border-color: var(--grid-accent); }
 
 .cbdaw-grid__beats {
-  flex: 1 1 auto;
-  display: flex;
-  gap: 1px;
+  flex: var(--flex-1-1-auto);
+  display: var(--disp-flex);
+  gap: var(--sp-hair);
 }
 .cbdaw-grid__beat {
-  flex: 1 1 0;
-  display: flex;
-  gap: 1px;
-  border-left: 1px solid var(--grid-line);
-  padding-left: 1px;
+  flex: var(--flex-1-1-0);
+  display: var(--disp-flex);
+  gap: var(--sp-hair);
+  border-left: var(--bw) solid var(--grid-line);
+  padding-left: var(--sp-hair);
 }
-.cbdaw-grid__beat:first-child { border-left: none; padding-left: 0; }
+.cbdaw-grid__beat:first-child { border-left: var(--none); padding-left: var(--sp-0); }
 
 .cbdaw-grid__ruler-cell {
-  flex: 1 1 0;
-  text-align: center;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  flex: var(--flex-1-1-0);
+  text-align: var(--ta-center);
+  font-size: var(--fs-sm);
+  font-variant-numeric: var(--num-tabular);
   color: var(--grid-dim);
-  padding: 2px 0;
+  padding: var(--sp-1) 0;
 }
-.cbdaw-grid[data-variant="compact"] .cbdaw-grid__ruler-cell { font-size: 8px; padding: 1px 0; }
-.cbdaw-grid__ruler-cell[data-beat="true"] { color: var(--grid-text); font-weight: 700; }
-.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell { font-size: 18px; padding: 4px 0; }
-.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell[data-beat="true"] { font-size: 22px; }
+.cbdaw-grid[data-variant="compact"] .cbdaw-grid__ruler-cell { font-size: var(--fs-micro); padding: var(--sp-hair) 0; }
+.cbdaw-grid__ruler-cell[data-beat="true"] { color: var(--grid-text); font-weight: var(--w-bold); }
+.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell { font-size: 18px; padding: var(--sp-2) 0; }
+.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
 
 .cbdaw-grid__cell {
-  flex: 1 1 0;
-  position: relative;
-  height: 26px;
+  flex: var(--flex-1-1-0);
+  position: var(--pos-relative);
+  height: var(--sp-13);
   background: var(--grid-panel);
-  border: 1px solid var(--grid-line);
-  border-radius: 2px;
-  cursor: pointer;
-  touch-action: none;
-  overflow: hidden;
+  border: var(--bw) solid var(--grid-line);
+  border-radius: var(--r-cell);
+  cursor: var(--cur-pointer);
+  touch-action: var(--touch-none);
+  overflow: var(--ov-hidden);
 }
-.cbdaw-grid[data-variant="compact"] .cbdaw-grid__cell { height: 14px; }
-.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__cell { height: 40px; }
-.cbdaw-grid__cell[data-beat="true"] { border-left-color: var(--grid-dim); border-left-width: 2px; }
+.cbdaw-grid[data-variant="compact"] .cbdaw-grid__cell { height: var(--sp-7); }
+.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__cell { height: var(--sp-20); }
+.cbdaw-grid__cell[data-beat="true"] { border-left-color: var(--grid-dim); border-left-width: var(--bw-2); }
 .cbdaw-grid__cell-fill {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: var(--pos-absolute);
+  left: var(--sp-0);
+  right: var(--sp-0);
+  bottom: var(--sp-0);
   background: var(--grid-accent);
-  opacity: 0.85;
+  opacity: var(--op-soft);
 }
 .cbdaw-grid__cell[data-off-grid="true"] { box-shadow: inset 0 0 0 1px var(--grid-warn); }
 .cbdaw-grid__cell.is-playing { border-color: var(--grid-accent); }
 
 .cbdaw-grid__playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  width: var(--sp-1);
   background: var(--grid-accent);
   box-shadow: 0 0 4px var(--grid-accent);
-  pointer-events: none;
-  will-change: left;
+  pointer-events: var(--pe-none);
+  will-change: var(--wc-left);
 }
 `;
 
@@ -673,7 +673,7 @@ export default class StepGrid {
 
     const playhead = document.createElement('div');
     playhead.className = 'cbdaw-grid__playhead';
-    playhead.style.left = '0%';
+    playhead.style.left = 'var(--pct-0)';
     body.appendChild(playhead);
 
     this.el = root;
@@ -846,7 +846,7 @@ export default class StepGrid {
       fill.style.height = `${Math.round(clampVelocity(step.v) * 100)}%`;
       cellEl.dataset.on = 'true';
     } else {
-      fill.style.height = '0%';
+      fill.style.height = 'var(--pct-0)';
       cellEl.dataset.on = 'false';
     }
   }

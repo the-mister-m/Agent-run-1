@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>patch-synth harness</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: var(--panel); }
+  .bar button { font: inherit; font-size: 11px; background: var(--raise); color: var(--text);
+                border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+  #readout { padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+  .stage { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; }
+  .pane { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .pane h2 { margin: 0; padding: 4px 8px; font-size: 10px; letter-spacing: .08em;
+             text-transform: uppercase; color: var(--text-dim); background: var(--recess); }
+  #compact { height: 340px; }
+  #expanded { height: 620px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button id="b-start">start audio</button>
+  <button id="b-chain">chain: osc → filter → gain → out</button>
+  <button id="b-lfo">lfo → filter cutoff</button>
+  <button id="b-env">envelope → gain amount</button>
+  <button id="b-parallel">parallel: two filters into one gain</button>
+  <button id="b-note">hold note</button>
+  <button id="b-off">release</button>
+  <button id="b-fill">fill to cap</button>
+  <button id="b-nocap">lift the cap</button>
+  <button id="b-save">save</button>
+  <button id="b-load">load</button>
+  <button id="b-dispose">dispose</button>
+</div>
+<div id="readout">idle</div>
+<div class="stage">
+  <div class="pane"><h2>mountCompact</h2><div id="compact"></div></div>
+  <div class="pane"><h2>mountExpanded</h2><div id="expanded"></div></div>
+</div>
+
+<script type="module">
+import PatchSynth from '../../src/instruments/patch-synth.js';
+
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+const master = ctx.createGain();
+master.gain.value = 0.25;
+master.connect(ctx.destination);
+
+const ps = new PatchSynth(ctx, master);
+ps.mountCompact(document.getElementById('compact'));
+ps.mountExpanded(document.getElementById('expanded'));
+
+const readout = document.getElementById('readout');
+const buf = new Float32Array(2048);
+let peakRms = 0;
+let minRms = 1;
+let saved = null;
+
+function rms() {
+  const an = ps.getAnalyser('scope');
+  if (!an) return 0;
+  an.getFloatTimeDomainData(buf);
+  let s = 0;
+  for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+  return Math.sqrt(s / buf.length);
+}
+
+function tick() {
+  const v = rms();
+  if (v > peakRms) peakRms = v;
+  if (v < minRms) minRms = v;
+  readout.textContent =
+    `rms ${v.toFixed(4)}  peak ${peakRms.toFixed(4)}  min ${minRms.toFixed(4)}  ` +
+    `nodes ${ps.nodeCount}  cables ${ps.listCables().length}  ` +
+    `voices ${ps.voiceCount}  cpu ${ps.cpuWeight}  state ${ctx.state}`;
+  requestAnimationFrame(tick);
+}
+tick();
+
+const on = (id, fn) => document.getElementById(id).addEventListener('click', fn);
+
+on('b-start', () => ctx.resume());
+on('b-chain', () => {
+  ps.addNode('osc', 20, 20);
+  ps.addNode('filter', 180, 20);
+  ps.addNode('gain', 340, 20);
+  ps.connect('osc1', 'out', 'filter1', 'in');
+  ps.connect('filter1', 'out', 'gain1', 'in');
+  ps.connect('gain1', 'out', 'out1', 'in');
+  ps.setParam('osc1.wave', 'saw');
+  ps.setParam('filter1.cutoff', 800);
+  ps.setParam('filter1.q', 8);
+});
+on('b-lfo', () => {
+  ps.addNode('lfo', 20, 240);
+  ps.setParam('lfo1.rate', 3);
+  ps.setParam('lfo1.depth', 0.8);
+  ps.connect('lfo1', 'out', 'filter1', 'cutoff');
+});
+on('b-env', () => {
+  ps.addNode('env', 180, 240);
+  ps.connect('env1', 'out', 'gain1', 'amount');
+  ps.setParam('gain1.amount', 0);
+});
+on('b-parallel', () => {
+  ps.addNode('filter', 180, 400);
+  ps.setParam('filter2.type', 'highpass');
+  ps.setParam('filter2.cutoff', 2000);
+  ps.connect('osc1', 'out', 'filter2', 'in');
+  ps.connect('filter2', 'out', 'gain1', 'in');
+});
+on('b-note', () => { peakRms = 0; minRms = 1; ps.noteOn(45, 0.9); });
+on('b-off', () => ps.noteOff(45));
+on('b-fill', () => { while (ps.addNode('gain').ok) { /* until refused */ } });
+on('b-nocap', async () => {
+  const m = await import('../../src/core/audio.js');
+  m.governor.noCap = true;
+});
+on('b-save', () => { saved = JSON.parse(JSON.stringify(ps.getState())); });
+on('b-load', () => { if (saved) ps.setState(saved); });
+on('b-dispose', () => ps.dispose());
+
+window.ps = ps;
+window.harness = { rms, reset: () => { peakRms = 0; minRms = 1; }, peak: () => peakRms, min: () => minRms, saved: () => saved };
+</script>
+</body>
+</html>

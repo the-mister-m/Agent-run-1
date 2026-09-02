@@ -62,41 +62,41 @@
 <style>
   html, body { margin: 0; padding: 0; background: var(--bg, #0a0d13); }
   .cbdaw-boot {
-    margin: 0; padding: 24px;
-    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: var(--sp-12);
+    font-family: var(--font-ui);
     color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
   }
 
   /* Page layout only. Every colour is a §9 token name; the fallbacks are byte-identical to
      `ui/tokens.css` and exist only so the page renders if that file has not loaded. */
   .hm-surfaces {
-    display: grid; gap: 12px; align-items: start;
+    display: grid; gap: var(--sp-6); align-items: start;
     grid-template-columns: minmax(300px, 0.9fr) minmax(240px, 0.7fr) minmax(340px, 1.4fr);
   }
   @media (max-width: 1100px) { .hm-surfaces { grid-template-columns: 1fr; } }
 
-  .hm-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hm-keys { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
   .hm-key {
-    font: inherit; font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
+    font: inherit; font-size: var(--fs-base); cursor: pointer; padding: 4px 8px; border-radius: var(--r-ctl);
     color: var(--text, #f2f6fc); background: transparent;
-    border: 1px solid var(--line, #3a485f); min-width: 3.4em;
+    border: var(--bw) solid var(--line, #3a485f); min-width: 3.4em;
   }
   .hm-key:hover { border-color: var(--accent, #34e5b4); }
   .hm-key[aria-pressed="true"] {
     border-color: var(--accent, #34e5b4);
     background: color-mix(in srgb, var(--accent, #34e5b4) 18%, transparent);
   }
-  .hm-scalename { font-size: 13px; color: var(--text, #f2f6fc); }
+  .hm-scalename { font-size: var(--fs-md); color: var(--text, #f2f6fc); }
   .hm-scalename b { color: var(--accent, #34e5b4); }
-  .hm-targets { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .hm-targets { display: grid; gap: var(--sp-5); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
   .hm-target { display: flex; flex-direction: column; gap: 5px; }
   .hm-target[data-active="true"] .hm-target__tag { color: var(--accent, #34e5b4); }
   .hm-target__tag {
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
+    font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--track-label);
     color: var(--text-dim, #93a1b8);
   }
   .hm-seam {
-    font-size: 11px; line-height: 1.55; color: var(--text-dim, #93a1b8);
+    font-size: var(--fs-sm); line-height: var(--lh-loose); color: var(--text-dim, #93a1b8);
     border-left: 2px solid var(--line, #3a485f); padding-left: 8px; margin: 4px 0 0;
   }
   .hm-err {

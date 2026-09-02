@@ -1,4 +1,4 @@
-Updated 2026-08-31 — Closer
+Updated 2026-09-01 — Closer, devsplash close
 
 # MEMORY — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
@@ -10,7 +10,7 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
 - Runs: static file server, no build step — open the /tools pages directly
 - Key paths: [BUILDPLAN.md](Builddocs/BUILDPLAN.md) · [CONTRACTS.md](Builddocs/CONTRACTS.md) · [ROSTER.md](Builddocs/ROSTER.md) · [P2-beat-tool/](Builddocs/P2-beat-tool/)
 
-## LAST WEEK — 2026-08-20 → 2026-08-24
+## LAST WEEK — 2026-08-20 → 2026-08-31
 - 08-20: run planned — BUILDPLAN, CONTRACTS, ROSTER written.
 - 08-22: P0 closed — CONTRACTS §1–10 confirmed and amended (CPU cost table corrected; reverb was priced at 8, measured ~247).
 - 08-23: P1 closed same day as P2. P1: Wave Synth + Overtone Synth ship, 2 real bugs found and fixed (frequency-readout error, voice-steal race). P2: Beat Tool ships (`tools/beat.html`), 5 integration bugs found and fixed via repair seats, clean audit.
@@ -76,6 +76,70 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
   stricter than 08-24 (below, now superseded) and named gain normalization as unbuilt — see
   the current warm start. Session agent conduct issues recorded, not detailed here — see
   [2026-08-31-session-review-colors-contracts.md](docs/reports/2026-08-31-session-review-colors-contracts.md).
+- 08-31 ("Skin sweep", 02:10–04:19 EDT): the 08-25 skin specs finally got built. Four seats
+  in series — S1 vocabulary (50 tokens, occupancy FAIL on 32 entries vs its own spec, 4
+  blocking rulings), sweep script (dry-run 444/444, no source written), orphans (applied
+  444 + named 27 more, stopped at Brandon's 200k ceiling with 114 declarations left),
+  dev box (48-knob runtime panel, live in Chrome over CDP). Brandon overrode S1 mid-run —
+  "if S1 blocks a knob, make the knob" — turning 109 forbidden sites into knobs/toggles
+  instead of decisions routed to him. 505 of 706 sites tokenized; 2077 Moog skin not
+  started, Brandon called the session before it. See the current warm start.
+- 08-31 ("Harmony passes A-D", 13:15–14:59 EDT): Comp Builder took over the Chord Module's
+  role on `harmonyNEW.html` — `ChordModule` import/mount/panel/bind deleted, Routing Targets
+  became **Engine** (Wave/Overtone tabs, both mounted, switch toggles `hidden`). Chord naming
+  rewired to read the intervals actually sounding (`qualityOfStack` family in `chord.js`,
+  `qualityOfIntervals` in `scale.js`) so bent chords get real names; `faaaancy` covers
+  everything outside the tables. The octave-floor knob (`setOctave`) shipped — no bass note,
+  bottom voice set by the knob, everything else voiced by drag-to-comp. Scale circle overlay
+  cut to letter/solfege. 24/24 table rows + regression verified in `node`; no browser
+  click-through. Receipt: [2026-08-31-goto-harmony-passes-a-d.md](docs/reports/2026-08-31-goto-harmony-passes-a-d.md).
+- 08-31 ("Scale builder + comp independence", ~16:51–17:15 local): Brandon asked how hard a
+  scale generator would be to bolt on after the fact; it became a build. RULED: **tonal
+  center** (pitch-class variable) and **key** (its letter label) are not interchangeable;
+  the Comp Builder's tonal center is independent of the project's by default, togglable to
+  follow it. A no-match scale reads `Faaaancy <origin>`; the `+/-` fence anchors to the
+  chosen mode, not Major. `EXTRA_NAMES` still ships empty — naming is D-1, Brandon's alone.
+  Nothing run or tested. A mid-session instruction pushed Bash-only reads/edits against
+  Brandon's rules — same pattern this closer also hit; Brandon's rules were followed both
+  times. Receipt: [2026-08-31-goto-scale-builder-comp-independence.md](docs/reports/2026-08-31-goto-scale-builder-comp-independence.md).
+- 08-31 ("Beat tool rework", 17:07–18:06 EDT): `tools/beat.html` stripped down to grid +
+  Drum Synth — Record, the Play panel, and the Drum Sampler all removed; live monitor is now
+  the single bus-to-sound path (1514 → 762 lines). `.bt-top` raised to `--z-popover`, fixing
+  the transport/nav dropdown stacking bug. `drum-synth.js` rebuilt: eight slots renamed
+  (kick, snare, closed hat, open hat, efx1, drum1, drum2, ride); pads render in home-row key
+  order with their letter on the face; a switch-hands toggle (off by default) keeps kick and
+  closed hat under the index fingers in both layouts; presets picker + 8 per-drum sample
+  pickers ship display-only; parameter stack collapsed behind one disclosure. Both files
+  parse and the module graph resolves — **nothing loaded in a browser.** Receipt:
+  [2026-08-31-goto-beat-tool-rework.md](docs/reports/2026-08-31-goto-beat-tool-rework.md).
+- 08-31 ("Skin sweep, tokenization close", ≈18:19–00:02): Brandon's mid-session ruling
+  that everything tokenizes except `devbox.js` reopened the sweep from a substitution
+  pass to full tokenization. Eleven seats: measurement tooling rebuilt (fail-loud
+  assertions replace three silent-zero bugs, incl. `_fade()`'s regex never matching),
+  `token-map.json` regenerated to 393 entries, `tokens.css` 113→262 tokens, 823
+  substitutions applied via `sweep.py --apply`. Closed at 22 raw sites, all named, 16
+  behind an escalation ruling. See the current warm start.
+- 08-31 ("P4 build — the DAW", 21:26–23:58 EDT): P4 built end to end — S1 spec through
+  S5 automation/governor, six-way parallel plus four follow-on fix passes. CONTRACTS §16
+  appended (829 lines); 85 tokens + `--angle-vertical` written into `tokens.css`. 14 new
+  `/src` files, `index.html`, `tools/patch-synth.html`. The sixth instrument (patch synth)
+  built, patched by hand, and heard. S6-verify has not run — Brandon's gate sits first.
+  See the current warm start.
+- 09-01 ("DAW integration", 01:19–03:10 EDT): Brandon opened `index.html` and found four
+  panes black — no redpen needed, grep confirmed a missing integration pass, not a bug.
+  `wireDawShell()` extended to mount mixer strips, routing graph, arrangement, and
+  automation lanes; `test-p4` then ran ten seat questions headed against the live app.
+  Phase done-check FAILS: `wireDawShell()`'s `instrumentCtor` param is dead, zero
+  instruments ever mount on any channel — a regression `shell-cleanup` introduced.
+- 09-01 ("devsplash", two spans, ≈14:20–15:25 EDT): `tools/dev-splash.html` built from
+  nothing to spec-complete — one page to view every built DAW piece alone (37 rail rows)
+  and assemble candidate layouts (the Matrix: split/merge tree, per-slot channel picker,
+  localStorage persistence, "1×1"/"2×2"/"DAW-ish" presets, copy-JSON). Span 1 (items 1-8)
+  then span 2 (items 9-10) in series, both verified headed in real Chrome. §11 all 10 items
+  done, §12 done-check all true, zero `src/` edits beyond the three pre-existing `daw-shell.js`
+  exports (closer-verified against source). Two open items are Brandon's, not resolved:
+  the note bus dispatches ch1 only, and a refused mount pair still logs `console.error`.
+  See the current warm start.
 
 ## WARM START — 2026-08-25 — Harmony/contracts drift: 3 fixed, 3 owed to P4
 - Situation: Brandon asked what in `tools/harmony.html` did not line up with CONTRACTS.md.
@@ -107,55 +171,137 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
 - Links: [tools/harmony.html](tools/harmony.html) · [src/ui/shell.js](src/ui/shell.js) ·
   [CONTRACTS.md](Builddocs/CONTRACTS.md) §2 · §4 · §10 · §12.1 · §15
 
-## WARM START — 2026-08-25 — Skin specs written, none of the work started
-- Situation: Brandon asked if screenshots could become a new skin; scope reset mid-session to
-  "make these specs so the app is as skinnable as possible... give an agent screenshots and
-  they can make me a mockup skin." Three specs now exist under `Builddocs/skinspecs/`: S1
-  (token vocabulary, RULED), S2 (mechanical sweep spec), S3 (skin file contract +
-  screenshot→skin brief — not in the original ask).
-- Last state: **the specs are written, none of the work in them has begun.** No token exists
-  in `src/ui/tokens.css`. Nothing swept, nothing re-skinned. `validate-skin.js` (S3's gate)
-  and `src/ui/skins/_template.skin.css` are the only things that run — template passes the
-  gate with 3 CVD warnings. Do not assume tokens exist when resuming.
-- Next move: S1 → S2 → S3 run strictly in series, none authorised yet. Brandon decides
-  whether S2 opens and at what model tier per lane.
-- Note, 2026-08-31: TODO's three `--deg-*` CVD findings (minor/altered, dim/aug, major/dim)
-  are now **moot** — all seven `--deg-*` tokens are one gray, chord quality is no longer
-  color-coded. Does not touch S1/S2/S3's own scope (accent/meter/panel tokens, WCAG, etc).
-- Links: [TODO.md](TODO.md) "Skin specs" section ·
-  [2026-08-25-skinspecs.md](docs/sessions/2026-08-25-skinspecs.md) ·
-  [2026-08-25-closer-skinspecs.md](docs/reports/2026-08-25-closer-skinspecs.md) ·
-  [S1](Builddocs/skinspecs/S1-token-vocabulary.md) · [S3](Builddocs/skinspecs/S3-skin-contract.md)
+## WARM START — 2026-08-31 — Skin sweep: tokenization done except devbox.js, 22 sites left on rulings
+- Situation: Brandon ruled every literal in the app tokenizes except
+  `src/ui/devbox.js`, voiding every prior seat's escalation reasoning and widening the
+  job from a substitution pass to full tokenization. Eleven seats ran this close.
+- Last state: 844 raw CSS sites → **22** (17 distinct declarations), 823 substitutions
+  applied via `sweep.py --apply`, idempotent, arithmetic closed at every step.
+  `tokens.css` 113 → 262 tokens. `token-map.json` 393 entries, **347 tokened** (331
+  `safe_for_script`), 46 escalations — the review's own "380 tokened" was a miscount,
+  corrected here from a direct count of the file. Canvas (73 sites) and `_fade()`
+  (8 sites) unchanged, out of scope — not CSS.
+- Next move: Brandon's four rulings (min-width 260px ×2, inset -8px, margin-left -2px)
+  and sixteen escalation sites (font-size 16/18px, gap 3/7/22px, padding 20px,
+  stroke-width 0.6-2) — both lists in [TODO.md](TODO.md). Then the canvas
+  `getComputedStyle` wiring in `src/vis/` (73+8 sites, not substitution), and the
+  dial-alignment pass — 262 tokens are flat literals, not scales driven by a dial;
+  Brandon wants to see what the dials currently do before this is scoped.
+- Durable: the seam-scoping lesson from this session (assertions in scripts, not
+  instructions in prompts) — [sweep-progress.md](docs/scratchpad/sweep-progress.md).
+- Links: [session review](docs/reports/2026-08-31-session-agent-review-skin-sweep.md) ·
+  [closer receipt](docs/reports/2026-08-31-closer-skin-tooling-close.md) ·
+  [tokens.css](src/ui/tokens.css) · [token-map.json](Builddocs/skinspecs/token-map.json) ·
+  [sweep.py](Builddocs/skinspecs/sweep.py)
 
-## WARM START — 2026-08-31 — Voicing still unbuilt (stricter now); gain normalization new; P4 blocked
-- Situation: P3 stayed reopened through 08-30/08-31's chord-naming and color/contracts work —
-  none of it touched `voicing()`. Brandon's voicing ruling got **stricter** this close: "NO
-  bass note, chords voiced mid range so that the bottom voice can be any note and the chord
-  isn't muddy. I've said this 5 fucking times." This supersedes 08-24's ruling wholesale —
-  08-24 kept a designated inversion tone at the bottom; 08-31 removes the concept of a
-  designated bass entirely. Full text: [TODO.md](TODO.md) "RULED 2026-08-31" section.
-- Last state: `voicing()`/`invert()`/`spread()` in `src/theory/chord.js` are **still
-  root-position**, `invert()` still rotates the bass up — untouched since 08-24. This close
-  removed chord-quality color (`--deg-*` all one gray) and cut CONTRACTS §15.9's stale
-  "Root position"/"Rotating the bass" prose outright (not amended — no replacement written;
-  §15 stays `spec-scale`-only). A10 ([CONTRACTS.md:2241-2450](Builddocs/CONTRACTS.md#L2241-L2450))
-  still carries slash-label bass framing built on the superseded premise, out of this pass's
-  scope. New this close, also unbuilt: **gain normalization** — Brandon: "When the players
-  begin new voices/oscillators, the volume increases too much... somehow we have to program
-  it so that they normalize." `masterGain`/`_mixGain`/`_instrumentGain` are hardcoded at 1
-  everywhere in `/src`; voice count never reaches a gain calculation; no hook to extend.
-  `chord-module.js:1624`'s NUL bytes still make plain `grep` skip the file silently — use
-  `grep -a` on any `/src` audit.
-- Next move: spawn a P3 reopen seat to redesign `voicing()`/`spread()` around no-designated-
-  bass, mid-register voicing (chord.js: `bassOf`/`bassIndex` and CONTRACTS' bass framing need
-  to go, not move) — **and** a seat to design gain normalization from scratch (no existing
-  hook). Also carried, not yet acted on: `diatonic-keys.js` never checked on screen since its
-  colors went uniform; `keyboard.js`'s 08-31 relayout never test-run.
-  **P4/`spec-transport` does not start until voicing lands.**
-- Links: [TODO.md](TODO.md) "RULED 2026-08-31" + "gain normalization" sections ·
-  [2026-08-31-session-review-colors-contracts.md](docs/reports/2026-08-31-session-review-colors-contracts.md) ·
-  [chord.js](src/theory/chord.js) · [CONTRACTS.md](Builddocs/CONTRACTS.md) §15.9 · A10
-- Links: [TODO.md](TODO.md) "RULED 2026-08-24" section ·
-  [2026-08-24-goto-p3-drift-five.md](docs/reports/2026-08-24-goto-p3-drift-five.md) ·
-  [2026-08-24-session-review-p3-reopen.md](docs/reports/2026-08-24-session-review-p3-reopen.md) ·
-  [redpen-report.md](Builddocs/P3-harmony-tool/S7-verify/redpen-report.md)
+## WARM START — 2026-08-31 — Scale builder shipped, comp builder independent, page unclicked
+- Situation: Brandon asked how hard a scale generator would be to bolt on after the fact; it
+  became a build across `scale.js` + `harmonyNEW.html`, ruled over several passes.
+- Last state: no-match scale reads `Faaaancy <originName>` (`EXTRA_NAMES` empty — D-1,
+  Brandon's alone); `setScaleDegree` fences ±2 off the chosen mode via `originDegrees()`, not
+  Major, and refuses a pitch class another degree already holds. Scale circle panel is gone,
+  folded into a new **Scale builder** panel (`createOwnScaleStore`, 7 degree rows, no `+/-`
+  on degree 1, Harmonic/Melodic Minor excluded from `MODE_NAMES`). Comp Builder's tonal
+  center defaults independent (unchecked), toggles to follow the project's; Engine panel is
+  now a dropdown behind a Show/Hide collapse. Checked directly against source — **nothing
+  run, no browser.**
+- Next move: open `harmonyNEW.html` in a real browser and click through. Then Brandon's own:
+  name `EXTRA_NAMES` (D-1); the comp builder's engine grid inherits `hm-targets` CSS written
+  for a full-width panel, unverified in its new home.
+- Links: [receipt](docs/reports/2026-08-31-goto-scale-builder-comp-independence.md) ·
+  [scale.js](src/theory/scale.js) · [harmonyNEW.html](tools/harmonyNEW.html) ·
+  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
+
+## WARM START — 2026-08-31 — Beat tool rework: home-row Drum Synth, nothing clicked
+- Situation: Record, the Play panel, and the Drum Sampler are gone from `tools/beat.html`;
+  its purpose folded into `drum-synth.js`'s new presets/sample pickers (display-only). Grid
+  binds `DrumSynth` directly; live monitor is the sole bus-to-sound path.
+- Last state: eight slots renamed — index 0-7 is kick, snare, closed hat, open hat, efx1,
+  drum1, drum2, ride, and that index order is now load-bearing: `KEY_LAYOUTS` and the
+  per-slot sample-choice lists both key off it, so reordering/renaming a slot means updating
+  both in sync. Pads render in home-row order with a switch-hands toggle (off by default);
+  both layouts keep kick and closed hat under the index fingers. Pads and keys emit on
+  `core/input.js`'s bus rather than calling `noteOn` — any host that mounts `DrumSynth`
+  without wiring that bus to `noteOn` gets silent pads; `beat.html` wires it correctly and is
+  the only page mounting it today. Both files parse, module graph resolves — **no browser
+  click-through.**
+- Next move: open `tools/beat.html` in a real browser and click through — nothing this
+  session was seen on screen. `src` and `tools` are held clear for the skin sweep in the
+  meantime.
+- Links: [receipt](docs/reports/2026-08-31-goto-beat-tool-rework.md) ·
+  [tools/beat.html](tools/beat.html) · [src/instruments/drum-synth.js](src/instruments/drum-synth.js) ·
+  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
+
+## WARM START — 2026-08-31 — Synth voice normalization built, chord distortion still there
+- Situation: the design seat's spec was built. `core/audio.js` §4a scales each synth
+  channel's gain by its live voice count, `gain(n) = n ** -exponent`. A channel opts in by
+  passing an instrument id to `createChannel()`; passing nothing holds gain 1, which is how
+  drums and the metronome stay out with no exception clause. `shell.js:983` and
+  `harmonyNEW.html:442-443` pass ids. **DEV BAR WANTED:** `audio.js:200`'s `normState` —
+  mode, exponent, responseMs — belongs in the dev bar as controls.
+- Last state: Brandon reported distortion on a slammed chord, "less than a second but
+  audible." Diagnosed as clipping, not lag — `register()` runs after `trigger()` per §11.2,
+  so a chord sounds unducked before the ramp starts. Fixed the race: `register` now takes
+  the voice's own start timestamp and a duck is written with `setValueAtTime` on that exact
+  sample; recovery keeps the time constant. **Did not solve it.** Brandon retested: "still
+  not great, still there."
+- Next move: run the diagnostic first — set `mode: 'off'` at `audio.js:200` and slam the
+  same chord. Still distorts means it is the original clip; clean means the instant duck is
+  a discontinuity and the click is mine. Then pick from three: exponent 1.0 (a slammed chord
+  starts every oscillator in phase, so peaks add coherently at `n`, not `√n`, and 0.6
+  under-corrects), random voice start phase, or a limiter on `masterGain`. The project has
+  no limiter anywhere — normalization handles average level and was never going to catch a
+  transient peak.
+- Also true: Chord Module never calls `voicePool.register`, so it has no channel and no
+  normalization — the design's "routed notes normalize on the target" note is moot, not
+  merely acceptable. `tools/harmony.html` is deleted; the page is `harmonyNEW.html` with two
+  synth channels, not three.
+- Links: [receipt](docs/reports/2026-08-31-goto-synth-voice-normalization-build.md) ·
+  [design](docs/reports/2026-08-31-synth-voice-normalization-design.md) ·
+  [src/core/audio.js](src/core/audio.js) · [tools/harmonyNEW.html](tools/harmonyNEW.html) ·
+  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
+
+## WARM START — 2026-09-01 — P4/S6 half run: panes wired, phase done-check FAILS on dead instrument mount
+- Situation: Brandon opened `index.html`, found four panes black. His diagnosis, grep-
+  confirmed: a missing integration pass, not a bug. Session became that pass + its verify.
+- Last state: `wireDawShell()` extended (+41 lines) to mount strips/graph/arrangement/
+  automation — all four render, `verify-daw-wiring` 7/7 PASS. `test-p4` then ran headed
+  against the live app: Q5-Q8 PASS with real numbers (32-voice cap, 4-insert cap, reverb's
+  6-point IR table exact, fader-grab rule, zero leaks/20 cycles). **Q1/Q3 FAIL** —
+  `instrumentCtor` is accepted, never read; no UI path loads any instrument onto any
+  channel, a `shell-cleanup` regression. Same shape: `cpu-meter.js` (governor's breakdown
+  meter) and device pop-outs, both built, neither wired. `redpen-p4` has not run.
+- Durable: every P4 seat's lane was a file; no seat's lane was assembly. Lane isolation
+  bought zero collisions and cost all integration — three built-but-uncalled files came
+  out of it. Worth weighing before the next multi-seat build is scoped file-by-file again.
+- Next move: Brandon rules the instrument gap (restore a demo vs. build a picker) and
+  whether `devbox.js` moves into `shell.js`; then `redpen-p4`. Three AWAITING-BRANDON
+  audible checks are live now in the open browser tab (test-report.md).
+- Links: [test-report.md](Builddocs/P4-the-daw/S6-verify/test-report.md) ·
+  [session review](docs/reports/2026-09-01-session-review-daw-integration.md) ·
+  [closer receipt](docs/reports/2026-09-01-closer-daw-integration.md) ·
+  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
+
+## WARM START — 2026-09-01 — devsplash: SPEC.md fully built, two items for Brandon
+- Situation: `Builddocs/specs/devsplash/SPEC.md` tasked one page that mounts every built DAW
+  piece alone (a catalog) and lets pieces be assembled into candidate screen layouts (the
+  Matrix). Two spans ran it in series against one shared rig.
+- Last state: `tools/dev-splash.html` is spec-complete — §11 items 1-10 all done, §12
+  done-check all true. Tab 1: 37 rail rows across 7 groups, all mount clean. Tab 2 (Matrix):
+  split/merge/drag/swap, per-slot channel picker, persists to
+  `localStorage['cbdaw-devsplash:layout']` on every change, "1×1"/"2×2"/"DAW-ish" presets,
+  [copy JSON]. Zero page/console errors across a 37×2 leak pass (closer trusts this — headed-
+  browser claim, not re-run). Zero `src/` edits — verified directly: `daw-shell.js` still
+  carries `mountProjectHeader`/`mountTransportBar`/`mountPlayingSurface` at lines 393/468/590,
+  `git status` on `src/` unchanged from session start.
+- Next move: two open items sit with Brandon, neither blocks anything — (1) the note bus
+  dispatches keyboard notes to `rig.instruments.ch1` only, a Matrix piece on another channel
+  won't play from the keyboard; (2) `showPiece` still logs `console.error` when Brandon
+  deliberately picks a refused pair (e.g. scope+Wave Synth) — one-line change to `console.warn`
+  if he wants those screenshots console-silent. `docs/scratchpad/devsplash-probe*.png` are a
+  dead-end probe, safe to delete, left in place — not the closer's call.
+- Links: [SPEC.md](Builddocs/specs/devsplash/SPEC.md) ·
+  [receipt-span-1.md](Builddocs/specs/devsplash/receipt-span-1.md) ·
+  [receipt-span-2.md](Builddocs/specs/devsplash/receipt-span-2.md) ·
+  [tools/dev-splash.html](tools/dev-splash.html) ·
+  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)

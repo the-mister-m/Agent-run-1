@@ -1,0 +1,199 @@
+<!doctype html>
+<!--
+  mixer-strips-test.html — throwaway DONE-CHECK page for `mixer-strips` (P4/S3).
+  Lives in docs/scratchpad, LLM space. Not part of the shipped app. Deletable at any time.
+
+  Imports core/audio.js and the two files this seat owns: mixer/strip.js, vis/meter.js.
+  Does not import daw-shell.js or mixer/graph.js — neither is this seat's to touch, and
+  graph.js does not exist yet. Fake devices below stand in for what graph.js will one day
+  pass to setInserts()/setRouting() — the smallest objects satisfying CONTRACTS §16.2 the
+  slot renderer reads (static label, getAnalyser, readout).
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/docs/scratchpad/mixer-strips-test.html
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<title>mixer-strips DONE-CHECK</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--font-ui); padding: var(--sp-8); }
+  h1 { font-size: var(--fs-lg); }
+  .row { display: flex; gap: var(--sp-4); align-items: center; margin: var(--sp-4) 0; flex-wrap: wrap; }
+  button { font: inherit; padding: var(--sp-2) var(--sp-6); background: var(--panel); color: var(--text);
+           border: var(--bw) solid var(--line); border-radius: var(--r-ctl); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #mixer { display: flex; align-items: stretch; gap: var(--sp-1); padding: var(--sp-1);
+           background: var(--recess); height: 420px; margin-top: var(--sp-6); }
+  .stripHost { width: var(--sp-30); background: var(--strip-head); border: var(--bw) solid var(--line);
+               border-radius: var(--r-cell); box-sizing: border-box; }
+  .stripHost[data-master] { border: var(--bw-2) solid var(--strip-sel); }
+  #log { max-width: 900px; height: 140px; overflow-y: auto; background: var(--panel);
+         border: var(--bw) solid var(--line); border-radius: var(--r-ctl); padding: var(--sp-4);
+         font-size: var(--fs-xs); font-family: var(--font-mono); color: var(--text-dim);
+         white-space: pre-wrap; margin-top: var(--sp-4); }
+  #popout { display: none; padding: var(--sp-4); background: var(--popout-ground);
+            border-radius: var(--r-panel); margin-top: var(--sp-4); max-width: 400px; }
+</style>
+</head>
+<body>
+<h1>mixer-strips — DONE-CHECK page</h1>
+
+<div class="row">
+  <button id="btnUnlock">1. Unlock audio (click first)</button>
+  <button id="btnTone">Play test tone on ch1</button>
+  <button id="btnStopTone">Stop tone</button>
+  <button id="btnLoadInserts">Load fake inserts on ch1 (EQ analyser + Comp readout)</button>
+  <button id="btnRoute">Set fake routing on ch1</button>
+</div>
+
+<div id="mixer"></div>
+
+<div id="popout"></div>
+<div id="log"></div>
+
+<script type="module">
+  import { ctx, unlock } from '../../src/core/audio.js';
+  import { createStrips } from '../../src/mixer/strip.js';
+
+  const log = document.getElementById('log');
+  function say(msg) {
+    log.textContent += msg + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+
+  const popout = document.getElementById('popout');
+  function onCh1Popout(device, index) {
+    popout.style.display = 'block';
+    popout.textContent = '';
+    const h = document.createElement('div');
+    h.textContent = `slot ${index}: ${device.constructor.label} popped out`;
+    popout.appendChild(h);
+    device.mountCompact(popout);
+    say(`slot ${index} clicked -> popout(${device.constructor.label})`);
+  }
+
+  const mixer = document.getElementById('mixer');
+  const specs = [1, 2, 3, 4, 5, 6].map((n) => ({
+    id: `ch${n}`,
+    label: `Channel ${n}`,
+    onSlotPopout: n === 1 ? onCh1Popout : null,
+  }));
+  const { strips } = createStrips(ctx, specs);
+  for (const id of ['ch1', 'ch2', 'ch3', 'ch4', 'ch5', 'ch6', 'master']) {
+    const host = document.createElement('div');
+    host.className = 'stripHost';
+    if (id === 'master') host.dataset.master = '';
+    mixer.appendChild(host);
+    strips[id].mountCompact(host);
+  }
+  say('mounted 6 strips + master');
+
+  // fake §16.2 device: passthrough gain, scope-tap analyser
+  class FakeEQ {
+    static id = 'eq';
+    static label = 'EQ';
+    static estimatedWeight = 29;
+    static params = [];
+    constructor(ctx) {
+      this._in = ctx.createGain();
+      this._analyser = ctx.createAnalyser();
+      this._analyser.fftSize = 1024;
+      this._in.connect(this._analyser);
+      this._out = this._analyser;
+      this._bypass = false;
+    }
+    get input() { return this._in; }
+    get output() { return this._out; }
+    setParam() {}
+    getParam() { return 0; }
+    get bypass() { return this._bypass; }
+    set bypass(v) { this._bypass = !!v; }
+    getState() { return {}; }
+    setState() {}
+    getAnalyser(which) { return which === 'scope' ? this._analyser : null; }
+    get readout() { return null; }
+    mountCompact() {}
+    unmount() {}
+    dispose() { this._in.disconnect(); this._analyser.disconnect(); }
+    get cpuWeight() { return FakeEQ.estimatedWeight; }
+  }
+
+  // fake §16.2 device: passthrough gain, numeric readout, no analyser
+  class FakeComp {
+    static id = 'compressor';
+    static label = 'Compressor';
+    static estimatedWeight = 45;
+    static params = [];
+    constructor(ctx) {
+      this._node = ctx.createGain();
+      this._bypass = false;
+    }
+    get input() { return this._node; }
+    get output() { return this._node; }
+    setParam() {}
+    getParam() { return 0; }
+    get bypass() { return this._bypass; }
+    set bypass(v) { this._bypass = !!v; }
+    getState() { return {}; }
+    setState() {}
+    getAnalyser() { return null; }
+    get readout() { return { reductionDb: -3.2 }; }
+    mountCompact(el) { el.textContent = 'Compressor pop-out'; }
+    unmount() {}
+    dispose() { this._node.disconnect(); }
+    get cpuWeight() { return FakeComp.estimatedWeight; }
+  }
+
+  let eq, comp, osc, voiceGain;
+
+  document.getElementById('btnUnlock').addEventListener('click', async () => {
+    await unlock();
+    say('ctx.state = ' + ctx.state);
+  });
+
+  document.getElementById('btnTone').addEventListener('click', () => {
+    if (osc) return;
+    osc = ctx.createOscillator();
+    voiceGain = ctx.createGain();
+    voiceGain.gain.value = 0.3;
+    osc.connect(voiceGain);
+    voiceGain.connect(strips.ch1.input);
+    osc.start();
+    say('tone -> strips.ch1.input');
+  });
+
+  document.getElementById('btnStopTone').addEventListener('click', () => {
+    if (!osc) return;
+    osc.stop();
+    osc.disconnect();
+    voiceGain.disconnect();
+    osc = null;
+    say('tone stopped');
+  });
+
+  document.getElementById('btnLoadInserts').addEventListener('click', () => {
+    eq = new FakeEQ(ctx);
+    comp = new FakeComp(ctx);
+    strips.ch1.setInserts([eq, comp]);
+    say('ch1 inserts: EQ (analyser), Compressor (readout)');
+  });
+
+  document.getElementById('btnRoute').addEventListener('click', () => {
+    strips.ch1.setRouting({
+      slots: [
+        { slot: 0, deviceId: 'eq', label: 'EQ', to: 'Compressor' },
+        { slot: 1, deviceId: 'compressor', label: 'Compressor', to: 'Master' },
+        { slot: 2, deviceId: null, label: null, to: null },
+        { slot: 3, deviceId: null, label: null, to: null },
+      ],
+      out: ['Master'],
+    });
+    say('ch1 routing chips set');
+  });
+
+  say('routing is read-only on the strip: no control here calls setInserts/setRouting except the two buttons above, which stand in for mixer/graph.js.');
+</script>
+</body>
+</html>

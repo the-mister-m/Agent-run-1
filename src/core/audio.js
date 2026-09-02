@@ -58,7 +58,8 @@ masterAnalyser.fftSize = 2048;
 masterGain.connect(masterAnalyser);
 masterAnalyser.connect(ctx.destination);
 
-const channels = new Set();
+// node -> synthVoiceId, or null for a channel that never normalizes (drums, metronome).
+const channels = new Map();
 
 /**
  * Creates one channel input node and wires it into the master chain. This is what a
@@ -66,12 +67,16 @@ const channels = new Set();
  * in CONTRACTS today — logged as an open decision in this seat's receipt: before
  * `mixer/strip.js` exists (P4), something has to produce the node §2 promises every
  * instrument, and "the master chain" is explicitly this seat's job (STAGE.md).
+ *
+ * `synthVoiceId` is the opt-in for synth voice normalization (section 4a). Pass an
+ * instrument id and this channel's gain tracks that instrument's live voice count; pass
+ * nothing and the gain stays at 1 for the life of the channel.
  */
-export function createChannel() {
+export function createChannel(synthVoiceId = null) {
   const node = ctx.createGain();
   node.gain.value = 1;
   node.connect(masterGain);
-  channels.add(node);
+  channels.set(node, synthVoiceId);
   return node;
 }
 
@@ -181,10 +186,108 @@ function sweepRegistry() {
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// 4a · SYNTH VOICE NORMALIZATION
+// ---------------------------------------------------------------------------------------
+// Channel gain scales with that channel's live voice count: gain(n) = n ** -exponent,
+// gain(0) = 1. A channel created without a synthVoiceId is skipped and holds gain 1.
+// Ducks are written instantly at the new voice's start time; recovery is smoothed.
+
+const normState = { mode: 'per-instrument', exponent: 0.8, responseMs: .05 };
+
+function clamp(v, lo, hi) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : null;
+}
+
+/** Live voice count per normalizing channel id. Zero-filled so a silent channel is listed. */
+function synthVoiceCounts() {
+  const counts = new Map();
+  for (const id of channels.values()) if (id !== null) counts.set(id, 0);
+  if (counts.size === 0) return counts;
+  for (const meta of registry.values()) {
+    if (counts.has(meta.instrumentId)) counts.set(meta.instrumentId, counts.get(meta.instrumentId) + 1);
+  }
+  return counts;
+}
+
+/** Writes every normalizing channel to its target gain at `when`. No-op when none exist. */
+function renormalize(when) {
+  const counts = synthVoiceCounts();
+  if (counts.size === 0) return;
+
+  let total = 0;
+  for (const n of counts.values()) total += n;
+
+  const at = Math.max(ctx.currentTime, Number.isFinite(when) ? when : 0);
+  const tau = Math.max(0.001, normState.responseMs / 1000);
+
+  for (const [node, id] of channels) {
+    if (id === null) continue;
+    let gain = 1;
+    if (normState.mode !== 'off') {
+      // master mode changes the count, never the node the gain lands on.
+      const n = normState.mode === 'master' ? total : counts.get(id);
+      if (n > 0) gain = Math.pow(n, -normState.exponent);
+    }
+    if (gain < node.gain.value) {
+      node.gain.cancelScheduledValues(at);
+      node.gain.setValueAtTime(gain, at);
+    } else {
+      node.gain.setTargetAtTime(gain, at, tau);
+    }
+  }
+}
+
+/** The dev box's write surface. Every setter re-ramps; bad values are dropped, not thrown. */
+export const synthVoiceNorm = {
+  get mode() {
+    return normState.mode;
+  },
+  set mode(v) {
+    if (v !== 'off' && v !== 'per-instrument' && v !== 'master') return;
+    normState.mode = v;
+    renormalize();
+  },
+
+  get exponent() {
+    return normState.exponent;
+  },
+  set exponent(v) {
+    const n = clamp(v, 0, 1);
+    if (n === null) return;
+    normState.exponent = n;
+    renormalize();
+  },
+
+  get responseMs() {
+    return normState.responseMs;
+  },
+  set responseMs(v) {
+    const n = clamp(v, 0, 120);
+    if (n === null) return;
+    normState.responseMs = n;
+  },
+
+  /** Snapshot for the dev box readout: [{ id, voices, gain }], one per normalizing
+   *  channel on this page. Empty array means no channel opted in. */
+  readout() {
+    const counts = synthVoiceCounts();
+    let total = 0;
+    for (const n of counts.values()) total += n;
+    const rows = [];
+    for (const [node, id] of channels) {
+      if (id === null) continue;
+      rows.push({ id, voices: normState.mode === 'master' ? total : counts.get(id), gain: node.gain.value });
+    }
+    return rows;
+  },
+};
+
 export const voicePool = {
   /** Called by an instrument's noteOn, after governor.request(cost) grants the
    *  allocation and trigger() has been called (§11.2 step 3). Never called by a voice. */
-  register(voice, instrumentId) {
+  register(voice, instrumentId, atTime) {
     const cost = typeof voice.cpuWeight === 'number' ? voice.cpuWeight : 0;
     registry.set(voice, {
       instrumentId,
@@ -193,6 +296,7 @@ export const voicePool = {
       cost,
     });
     governorAllocatedWeight += cost;
+    renormalize(atTime);
   },
 
   /** Called by Voice.free() once it has disconnected its own nodes (§11.1). */
@@ -201,6 +305,7 @@ export const voicePool = {
     if (!meta) return;
     governorAllocatedWeight = Math.max(0, governorAllocatedWeight - meta.cost);
     registry.delete(voice);
+    renormalize();
   },
 
   /** Returns the DAW's longest-released voice, or if none is releasing, its
@@ -247,6 +352,7 @@ export const voicePool = {
       if (meta) {
         governorAllocatedWeight = Math.max(0, governorAllocatedWeight - meta.cost);
         registry.delete(target);
+        renormalize();
       }
     }
 
@@ -372,7 +478,7 @@ export function dispose() {
 
   clearInterval(probeIntervalHandle);
 
-  for (const node of channels) {
+  for (const node of channels.keys()) {
     node.disconnect();
     nodesDisconnected++;
   }

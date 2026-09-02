@@ -42,6 +42,12 @@ const TOKEN_FALLBACK = {
   '--text-dim': '#93a1b8',
   '--accent': '#34e5b4',
   '--warn': '#ff7a1a',
+  // _fade() alphas — CONTRACTS §16.10's P4 fade dials, read by value match against the
+  // literals this file already drew with, so the substitution changes no pixel.
+  '--fade-faint': '0.22',
+  '--fade-mid': '0.55',
+  '--fade-strong': '0.7',
+  '--fade-label': '0.82',
 };
 
 function readTokens(el) {
@@ -217,11 +223,11 @@ export default class Spectrum {
     const wrap = document.createElement('div');
     wrap.className = `vis vis-spectrum vis-${mode}`;
     wrap.style.cssText =
-      'position:relative;width:100%;box-sizing:border-box;' +
+      'position:var(--pos-relative);width:var(--pct-100);box-sizing:var(--box-border-box);' +
       `height:${this.heightOverride ?? cfg.height}px;`;
 
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'display:block;width:100%;height:100%;';
+    canvas.style.cssText = 'display:var(--disp-block);width:var(--pct-100);height:var(--pct-100);';
     canvas.setAttribute('role', 'img');
     canvas.setAttribute(
       'aria-label',
@@ -610,7 +616,7 @@ export default class Spectrum {
     for (let c = 0; c < count; c++) g.lineTo(p.x0 + c, yOf(vals[c]));
     g.lineTo(p.x0 + count - 1, p.y0 + p.h);
     g.closePath();
-    g.fillStyle = this._fade(t['--accent'], 0.22);
+    g.fillStyle = this._fade(t['--accent'], t['--fade-faint']);
     g.fill();
 
     g.beginPath();
@@ -639,7 +645,7 @@ export default class Spectrum {
       if (c === 0) g.moveTo(p.x0 + c, y);
       else g.lineTo(p.x0 + c, y);
     }
-    g.strokeStyle = this._fade(t['--text-dim'], 0.55);
+    g.strokeStyle = this._fade(t['--text-dim'], t['--fade-mid']);
     g.lineWidth = 1;
     g.stroke();
   }
@@ -697,7 +703,7 @@ export default class Spectrum {
         g.beginPath();
         g.moveTo(p.x0, y);
         g.lineTo(p.x0 + p.w, y);
-        g.strokeStyle = this._fade(t['--line'], 0.55);
+        g.strokeStyle = this._fade(t['--line'], t['--fade-mid']);
         g.stroke();
         if (i > 0) g.fillText(`${Math.round(db)}`, p.x0 - 5, y);
       }
@@ -723,7 +729,7 @@ export default class Spectrum {
 
     // Overtones first, so the fundamental's marker draws on top of them.
     if (cfg.overtoneMarks) {
-      g.strokeStyle = this._fade(t['--text-dim'], 0.7);
+      g.strokeStyle = this._fade(t['--text-dim'], t['--fade-strong']);
       g.fillStyle = t['--text-dim'];
       g.textAlign = 'center';
       g.textBaseline = 'top';
@@ -771,7 +777,7 @@ export default class Spectrum {
 
     // Sit below the ×2/×3 overtone row rather than on top of it.
     const ly = p.y0 + (cfg.overtoneMarks ? p.font + 7 : 2);
-    g.fillStyle = this._fade(t['--bg'], 0.82);
+    g.fillStyle = this._fade(t['--bg'], t['--fade-label']);
     g.fillRect(lx - 3, ly, wLabel + 6, p.font + 5);
     g.fillStyle = t['--text'];
     g.textAlign = 'left';

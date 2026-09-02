@@ -40,6 +40,10 @@ const TOKEN_FALLBACK = {
   '--text-dim': '#93a1b8',
   '--accent': '#34e5b4',
   '--warn': '#ff7a1a',
+  // _fade() alphas — CONTRACTS §16.10's P4 fade dials, read by value match against the
+  // literals this file already drew with, so the substitution changes no pixel.
+  '--fade-half': '0.5',
+  '--fade-near': '0.9',
 };
 
 function readTokens(el) {
@@ -215,11 +219,11 @@ export default class Scope {
     const wrap = document.createElement('div');
     wrap.className = `vis vis-scope vis-${mode}`;
     wrap.style.cssText =
-      'position:relative;width:100%;box-sizing:border-box;' +
+      'position:var(--pos-relative);width:var(--pct-100);box-sizing:var(--box-border-box);' +
       `height:${this.heightOverride ?? cfg.height}px;`;
 
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'display:block;width:100%;height:100%;';
+    canvas.style.cssText = 'display:var(--disp-block);width:var(--pct-100);height:var(--pct-100);';
     canvas.setAttribute('role', 'img');
     canvas.setAttribute(
       'aria-label',
@@ -633,7 +637,7 @@ export default class Scope {
     if (this._peak < SILENCE_PEAK) {
       this._trace = null;
       this._ghosts = [];
-      g.strokeStyle = this._fade(t['--accent'], 0.5);
+      g.strokeStyle = this._fade(t['--accent'], t['--fade-half']);
       g.lineWidth = cfg.lineWidth;
       g.beginPath();
       g.moveTo(p.x0, midY);
@@ -712,7 +716,7 @@ export default class Scope {
     // so it gets labelled in the expanded view rather than being an unexplained grid.
     for (const level of [1, 0.5, 0, -0.5, -1]) {
       const y = Math.round(midY - level * halfH) + 0.5;
-      g.strokeStyle = level === 0 ? t['--line'] : this._fade(t['--line'], 0.5);
+      g.strokeStyle = level === 0 ? t['--line'] : this._fade(t['--line'], t['--fade-half']);
       g.beginPath();
       g.moveTo(p.x0, y);
       g.lineTo(p.x0 + p.w, y);
@@ -742,7 +746,7 @@ export default class Scope {
       const y = p.y0 - Math.round(p.font * 0.9);
       const x1 = p.x0;
       const x2 = p.x0 + p.w;
-      g.strokeStyle = this._fade(t['--text-dim'], 0.9);
+      g.strokeStyle = this._fade(t['--text-dim'], t['--fade-near']);
       g.lineWidth = 1;
       g.beginPath();
       g.moveTo(x1 + 0.5, y + 5);

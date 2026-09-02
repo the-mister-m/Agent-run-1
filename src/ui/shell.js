@@ -43,6 +43,7 @@ import { spellingOf } from '../theory/scale.js';
 import Keyboard, { PLACEHOLDER_LETTERS } from '../surfaces/keyboard.js';
 import DiatonicKeys from '../surfaces/diatonic-keys.js';
 import ScaleCircle from '../surfaces/scale-circle.js';
+import './devbox.js';
 
 // =======================================================================================
 // 1 · REGISTRIES — the two data tables that make this shell reusable
@@ -60,7 +61,7 @@ export const TOOLS = [
   { id: 'wave-synth', label: 'Wave Synth', href: 'wave-synth.html', available: true, phase: 'P1' },
   { id: 'overtone-synth', label: 'Overtone Synth', href: 'overtone-synth.html', available: true, phase: 'P1' },
   { id: 'beat', label: 'Beat', href: 'beat.html', available: true, phase: 'P2' },
-  { id: 'harmony', label: 'Harmony', href: 'harmony.html', available: true, phase: 'P3' },
+  { id: 'harmony', label: 'Harmony', href: 'harmonyNEW.html', available: true, phase: 'P3' },
   { id: 'patch-synth', label: 'Patch Synth', href: 'patch-synth.html', available: false, phase: 'P4' },
   { id: 'daw', label: 'The DAW', href: '../index.html', available: false, phase: 'P4' },
 ];
@@ -147,170 +148,170 @@ let shellStyleRefs = 0;
 const STYLE_TEXT = `
 .cbdaw-shell {
   --shell-gap: 12px;
-  display: flex;
-  flex-direction: column;
+  display: var(--disp-flex);
+  flex-direction: var(--flexdir-column);
   gap: var(--shell-gap);
-  min-height: 100vh;
-  box-sizing: border-box;
-  padding: 10px 14px 14px;
+  min-height: var(--vh-100);
+  box-sizing: var(--box-border-box);
+  padding: var(--sp-5) var(--sp-7) var(--sp-7);
   background: var(--bg, #0a0d13);
   color: var(--text, #f2f6fc);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
 }
-.cbdaw-shell *, .cbdaw-shell *::before, .cbdaw-shell *::after { box-sizing: border-box; }
+.cbdaw-shell *, .cbdaw-shell *::before, .cbdaw-shell *::after { box-sizing: var(--box-border-box); }
 
 /* ——— top bar: file menu · title · status cluster ——————————————————————————— */
 .cbdaw-shell__top {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 8px 12px;
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-8);
+  flex-wrap: var(--flexwrap-wrap);
+  padding: var(--sp-4) var(--sp-6);
   background: var(--panel, #1b2332);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 8px;
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-panel);
 }
 .cbdaw-shell__title {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-tight);
+  margin: var(--sp-0);
 }
 .cbdaw-shell__subtitle {
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: var(--fs-md);
+  line-height: var(--lh-base);
   color: var(--text-dim, #93a1b8);
-  margin: 0;
+  margin: var(--sp-0);
 }
 /* Shrinkable so a long lesson line wraps inside its own box instead of pushing the CPU
    meter onto a second row. The meter has to stay where a teacher can see it. */
-.cbdaw-shell__titles { flex: 1 1 240px; min-width: 0; }
-.cbdaw-shell__spacer { flex: 0 1 auto; }
+.cbdaw-shell__titles { flex: var(--flex-1-1-240); min-width: var(--sp-0); }
+.cbdaw-shell__spacer { flex: var(--flex-0-1-auto); }
 
 /* ——— the file menu (§2) ——————————————————————————————————————————————————— */
-.cbdaw-menu { position: relative; }
+.cbdaw-menu { position: var(--pos-relative); }
 .cbdaw-menu__button {
-  font: inherit;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
+  font: var(--font-inherit);
+  font-weight: var(--w-med);
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-4);
+  padding: var(--sp-3h) var(--sp-6);
   color: var(--text, #f2f6fc);
   background: var(--bg, #0a0d13);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 6px;
-  cursor: pointer;
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-body);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-menu__button:hover, .cbdaw-menu__button:focus-visible { border-color: var(--accent, #34e5b4); }
-.cbdaw-menu__caret { color: var(--text-dim, #93a1b8); font-size: 11px; }
+.cbdaw-menu__caret { color: var(--text-dim, #93a1b8); font-size: var(--fs-sm); }
 .cbdaw-menu__list {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 40;
+  position: var(--pos-absolute);
+  top: var(--dropdown-offset);
+  left: var(--sp-0);
+  z-index: var(--z-popover);
   min-width: 260px;
-  margin: 0;
-  padding: 6px;
-  list-style: none;
+  margin: var(--sp-0);
+  padding: var(--sp-3);
+  list-style: var(--ls-none);
   background: var(--panel, #1b2332);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 8px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-raised);
 }
-.cbdaw-menu[data-open="false"] .cbdaw-menu__list { display: none; }
+.cbdaw-menu[data-open="false"] .cbdaw-menu__list { display: var(--disp-none); }
 .cbdaw-menu__item {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  width: 100%;
-  font: inherit;
-  text-align: left;
-  padding: 8px 10px;
+  display: var(--disp-flex);
+  align-items: var(--align-baseline);
+  justify-content: var(--justify-space-between);
+  gap: var(--sp-7);
+  width: var(--pct-100);
+  font: var(--font-inherit);
+  text-align: var(--ta-left);
+  padding: var(--sp-4) var(--sp-5);
   color: var(--text, #f2f6fc);
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  cursor: pointer;
+  background: var(--color-transparent);
+  border: var(--sp-0);
+  border-radius: var(--r-ctl);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-menu__item:hover:not(:disabled) { background: var(--bg, #0a0d13); }
-.cbdaw-menu__item[aria-current="true"] { color: var(--accent, #34e5b4); font-weight: 700; }
-.cbdaw-menu__item:disabled { color: var(--text-dim, #93a1b8); cursor: not-allowed; opacity: 0.65; }
-.cbdaw-menu__tag { font-size: 11px; color: var(--text-dim, #93a1b8); letter-spacing: 0.06em; }
+.cbdaw-menu__item[aria-current="true"] { color: var(--accent, #34e5b4); font-weight: var(--w-bold); }
+.cbdaw-menu__item:disabled { color: var(--text-dim, #93a1b8); cursor: var(--cur-not-allowed); opacity: var(--op-mid); }
+.cbdaw-menu__tag { font-size: var(--fs-sm); color: var(--text-dim, #93a1b8); letter-spacing: var(--track-label); }
 
 /* ——— status cluster: audio state · CPU meter · noCap (§5) ————————————————— */
-.cbdaw-status { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12px; }
-.cbdaw-status__group { display: flex; align-items: center; gap: 6px; color: var(--text-dim, #93a1b8); }
-.cbdaw-status__value { color: var(--text, #f2f6fc); font-variant-numeric: tabular-nums; }
+.cbdaw-status { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-7); flex-wrap: var(--flexwrap-wrap); font-size: var(--fs-base); }
+.cbdaw-status__group { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); color: var(--text-dim, #93a1b8); }
+.cbdaw-status__value { color: var(--text, #f2f6fc); font-variant-numeric: var(--num-tabular); }
 .cbdaw-cpu__track {
-  position: relative;
-  width: 120px;
-  height: 10px;
+  position: var(--pos-relative);
+  width: var(--sp-60);
+  height: var(--sp-5);
   background: var(--bg, #0a0d13);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 5px;
-  overflow: hidden;
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-ctl);
+  overflow: var(--ov-hidden);
 }
 .cbdaw-cpu__fill {
-  height: 100%;
-  width: 0%;
+  height: var(--pct-100);
+  width: var(--pct-0);
   background: var(--meter-ok, #6ee05a);
-  transition: width 90ms linear;
+  transition: var(--tr-width);
 }
 .cbdaw-cpu__fill[data-band="warn"] { background: var(--warn, #ff7a1a); }
 .cbdaw-cpu__fill[data-band="hot"] { background: var(--meter-hot, #ff3b30); }
-.cbdaw-nocap { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.cbdaw-nocap { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); cursor: var(--cur-pointer); user-select: var(--usel-none); }
 .cbdaw-nocap input { accent-color: var(--warn, #ff7a1a); }
-.cbdaw-nocap[data-on="true"] { color: var(--warn, #ff7a1a); font-weight: 700; }
+.cbdaw-nocap[data-on="true"] { color: var(--warn, #ff7a1a); font-weight: var(--w-bold); }
 .cbdaw-shell__unlock {
-  font: inherit;
-  font-weight: 700;
-  padding: 6px 12px;
+  font: var(--font-inherit);
+  font-weight: var(--w-bold);
+  padding: var(--sp-3) var(--sp-6);
   color: var(--bg, #0a0d13);
   background: var(--accent, #34e5b4);
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
+  border: var(--sp-0);
+  border-radius: var(--r-body);
+  cursor: var(--cur-pointer);
 }
-.cbdaw-shell__unlock[hidden] { display: none; }
+.cbdaw-shell__unlock[hidden] { display: var(--disp-none); }
 
 /* ——— panels ————————————————————————————————————————————————————————————— */
 .cbdaw-panel {
   background: var(--panel, #1b2332);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-panel);
+  padding: var(--sp-6) var(--sp-7);
 }
 .cbdaw-panel__head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
+  display: var(--disp-flex);
+  align-items: var(--align-baseline);
+  gap: var(--sp-5);
+  flex-wrap: var(--flexwrap-wrap);
+  margin-bottom: var(--sp-5);
 }
 .cbdaw-panel__title {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+  font-size: var(--fs-md);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--track-label);
+  text-transform: var(--tt-label);
   color: var(--text, #f2f6fc);
-  margin: 0;
+  margin: var(--sp-0);
 }
-.cbdaw-panel__note { font-size: 12px; color: var(--text-dim, #93a1b8); }
+.cbdaw-panel__note { font-size: var(--fs-base); color: var(--text-dim, #93a1b8); }
 /* Two columns — instrument on the left, the visual and the scale seam on the right, the
    playing surface across the bottom. This ordering is not decoration: at 1366×768, the
    Chromebook screen this ships to, a full-width visual pushed the KEYBOARD — the primary
    way a student gets in — below the fold. Measured, then fixed. See the receipt. */
 .cbdaw-shell__columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  display: var(--disp-grid);
+  grid-template-columns: var(--grid-1-115);
   gap: var(--shell-gap);
-  align-items: start;
+  align-items: var(--align-start);
 }
-.cbdaw-shell__col { display: flex; flex-direction: column; gap: var(--shell-gap); }
-@media (max-width: 900px) { .cbdaw-shell__columns { grid-template-columns: minmax(0, 1fr); } }
-.cbdaw-shell__instrument > * { width: 100%; }
+.cbdaw-shell__col { display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--shell-gap); }
+@media (max-width: 900px) { .cbdaw-shell__columns { grid-template-columns: var(--grid-minmax-0-1fr); } }
+.cbdaw-shell__instrument > * { width: var(--pct-100); }
 
 /* ——— the surface switcher (§3) ——————————————————————————————————————————— */
 /* THE PLAYING SURFACE IS ALWAYS ON SCREEN, and that is measured rather than assumed.
@@ -323,92 +324,92 @@ const STYLE_TEXT = `
    visual + scale) is the part that scrolls. On a very short window it falls back to
    ordinary document scrolling rather than squeezing the middle to nothing. */
 .cbdaw-shell__surface {
-  margin-top: auto;
-  box-shadow: 0 -14px 26px -12px rgba(0, 0, 0, 0.75);
+  margin-top: var(--auto);
+  box-shadow: var(--shadow-lifted);
 }
 @media (min-height: 620px) {
-  .cbdaw-shell { height: 100vh; overflow: hidden; }
+  .cbdaw-shell { height: var(--vh-100); overflow: var(--ov-hidden); }
   .cbdaw-shell__columns {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding-right: 4px;
+    flex: var(--flex-1-1-auto);
+    min-height: var(--sp-0);
+    overflow-y: var(--auto);
+    overflow-x: var(--ov-hidden);
+    padding-right: var(--sp-2);
   }
 }
-.cbdaw-switcher { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cbdaw-switcher { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); flex-wrap: var(--flexwrap-wrap); }
 .cbdaw-switcher__button {
-  font: inherit;
-  font-size: 13px;
-  padding: 6px 12px;
+  font: var(--font-inherit);
+  font-size: var(--fs-md);
+  padding: var(--sp-3) var(--sp-6);
   color: var(--text-dim, #93a1b8);
   background: var(--bg, #0a0d13);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 999px;
-  cursor: pointer;
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-pill);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-switcher__button[aria-pressed="true"] {
   color: var(--bg, #0a0d13);
   background: var(--accent, #34e5b4);
   border-color: var(--accent, #34e5b4);
-  font-weight: 700;
+  font-weight: var(--w-bold);
 }
-.cbdaw-switcher__button:disabled { opacity: 0.5; cursor: not-allowed; }
+.cbdaw-switcher__button:disabled { opacity: var(--op-dim); cursor: var(--cur-not-allowed); }
 
 /* ——— the scale seam (§4) ————————————————————————————————————————————————— */
-.cbdaw-scale { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
-.cbdaw-scale__row { display: flex; align-items: center; gap: 8px; }
-.cbdaw-scale__label { color: var(--text-dim, #93a1b8); min-width: 66px; }
+.cbdaw-scale { display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-5); font-size: var(--fs-md); }
+.cbdaw-scale__row { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-4); }
+.cbdaw-scale__label { color: var(--text-dim, #93a1b8); min-width: var(--sp-33); }
 .cbdaw-scale button {
-  font: inherit;
-  font-weight: 700;
-  min-width: 30px;
-  padding: 4px 9px;
+  font: var(--font-inherit);
+  font-weight: var(--w-bold);
+  min-width: var(--sp-15);
+  padding: var(--sp-2) var(--sp-4);
   color: var(--text, #f2f6fc);
   background: var(--bg, #0a0d13);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 4px;
-  cursor: pointer;
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-ctl);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-scale button:hover { border-color: var(--accent, #34e5b4); }
 .cbdaw-scale__readout {
-  min-width: 34px;
-  text-align: center;
-  font-weight: 700;
+  min-width: var(--sp-17);
+  text-align: var(--ta-center);
+  font-weight: var(--w-bold);
   font-size: 16px;
   color: var(--accent, #34e5b4);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--num-tabular);
 }
 .cbdaw-scale__degrees {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-  font-variant-numeric: tabular-nums;
+  display: var(--disp-flex);
+  gap: var(--sp-2h);
+  flex-wrap: var(--flexwrap-wrap);
+  font-variant-numeric: var(--num-tabular);
 }
 .cbdaw-scale__degree {
-  min-width: 26px;
-  padding: 3px 0;
-  text-align: center;
+  min-width: var(--sp-13);
+  padding: var(--sp-1h) 0;
+  text-align: var(--ta-center);
   color: var(--text, #f2f6fc);
   background: var(--bg, #0a0d13);
-  border: 1px solid var(--line, #3a485f);
-  border-radius: 4px;
+  border: var(--bw) solid var(--line, #3a485f);
+  border-radius: var(--r-ctl);
 }
 .cbdaw-seam {
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
   color: var(--warn, #ff7a1a);
 }
 
 .cbdaw-shell__error {
-  padding: 16px;
-  border: 1px solid var(--meter-hot, #ff3b30);
-  border-radius: 8px;
+  padding: var(--sp-8);
+  border: var(--bw) solid var(--meter-hot, #ff3b30);
+  border-radius: var(--r-panel);
   background: var(--panel, #1b2332);
   color: var(--text, #f2f6fc);
-  white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
+  white-space: var(--ws-prewrap);
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
 }
 `;
 
@@ -654,7 +655,7 @@ export function createSurfaceSwitcher({ kind = 'pitch', onChange = null } = {}) 
     // seam is stated on screen so it reads as "one so far", not as a broken menu.
     const seam = document.createElement('div');
     seam.className = 'cbdaw-seam';
-    seam.style.marginTop = '8px';
+    seam.style.marginTop = 'var(--sp-4)';
     seam.textContent =
       'SEAM — P1 ships one playing surface. P3 registers diatonic keys and the scale ' +
       'circle here (shell.registerSurface). Surfaces switch, they never stack.';
@@ -745,7 +746,7 @@ export function createScaleControl(store = state) {
         <button type="button" data-tonic="1" aria-label="tonic up">+</button>
         <span class="cbdaw-panel__note" data-scale-name>Major</span>
       </div>
-      <div class="cbdaw-scale__row" style="align-items:flex-start">
+      <div class="cbdaw-scale__row" style="align-items:var(--align-flex-start)">
         <span class="cbdaw-scale__label">Degrees</span>
         <div class="cbdaw-scale__degrees" data-degrees></div>
       </div>
@@ -979,7 +980,9 @@ export class ToolShell {
     // §2: an instrument is handed `(ctx, out)` and never makes its own context and never
     // connects to `ctx.destination`. `createChannel()` (core/audio.js) is what produces
     // `out` before P4's mixer/strip.js exists.
-    this.channel = createChannel();
+    // The id opts this channel into synth voice normalization. Every tool that mounts
+    // through this path today is a synth; a drum page built on it would need a config flag.
+    this.channel = createChannel(cfg.Instrument.id);
     this.instrument = new cfg.Instrument(ctx, this.channel);
 
     // ——— 1a · ONE VISUAL, AND THE RIGHT ONE — asserted before anything is drawn ————

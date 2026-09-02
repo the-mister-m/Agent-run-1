@@ -73,14 +73,13 @@ import { input as sharedInput, DEFAULT_VELOCITY } from '../core/input.js';
 // 1 · CONSTANTS
 // -----------------------------------------------------------------------------------------
 
-/** §6's closed enum for a pitch surface. Not this file's list — §6's, copied as an enum
- *  guard exactly the way `surfaces/keyboard.js` already does. These are MODE NAMES, not
- *  pitch labels. */
-const OVERLAYS = ['none', 'letter', 'number', 'solfege'];
+/** This surface's overlay modes. MODE NAMES, not pitch labels. The degree numbers already
+ *  ride outside the wheel, so 'number' would print 1..7 twice and 'none' leaves the ring
+ *  blank; neither is offered here. `keyboard.js` and `diatonic-keys.js` keep their own
+ *  four-mode lists — this narrowing is the circle's alone. */
+const OVERLAYS = ['letter', 'solfege'];
 
-/** §6's outline clause is "labaled with digits, 1/8 for Do", so digits are what this surface
- *  opens on. Every other mode is one click away. */
-const DEFAULT_OVERLAY = 'number';
+const DEFAULT_OVERLAY = 'letter';
 
 /** The circle's home octave. `midiOf(tonic, 4)` puts Do at middle C in the key of C — §15.1,
  *  "middle C (C4) is midi 60". `input.octaveShift` moves what SOUNDS (§5, applied by the
@@ -150,40 +149,40 @@ let liveInstances = 0;
 
 const STYLE_TEXT = `
 .cbdaw-circle {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  box-sizing: border-box;
-  font-family: system-ui, -apple-system, sans-serif;
+  display: var(--disp-flex);
+  flex-direction: var(--flexdir-column);
+  align-items: var(--align-center);
+  gap: var(--sp-4);
+  width: var(--pct-100);
+  box-sizing: var(--box-border-box);
+  font-family: var(--font-ui);
   color: var(--text);
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 10px;
-  user-select: none;
-  -webkit-user-select: none;
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-body);
+  padding: var(--sp-5);
+  user-select: var(--usel-none);
+  -webkit-user-select: var(--usel-none);
 }
-.cbdaw-circle[data-variant="compact"] { padding: 4px; gap: 0; }
+.cbdaw-circle[data-variant="compact"] { padding: var(--sp-2); gap: var(--sp-0); }
 
 .cbdaw-circle__svg {
-  display: block;
-  width: 100%;
-  max-width: 460px;
-  height: auto;
-  touch-action: none;
-  overflow: visible;
+  display: var(--disp-block);
+  width: var(--pct-100);
+  max-width: var(--sp-230);
+  height: var(--auto);
+  touch-action: var(--touch-none);
+  overflow: var(--ov-visible);
 }
-.cbdaw-circle[data-variant="compact"] .cbdaw-circle__svg { max-width: 190px; }
+.cbdaw-circle[data-variant="compact"] .cbdaw-circle__svg { max-width: var(--sp-95); }
 
 /* ——— the two playable rings ——————————————————————————————————————————————— */
 .cbdaw-circle__zone {
-  cursor: pointer;
+  cursor: var(--cur-pointer);
   stroke: var(--line);
   stroke-width: 0.6;
 }
-.cbdaw-circle__zone:focus { outline: none; }
+.cbdaw-circle__zone:focus { outline: var(--none); }
 .cbdaw-circle__zone:focus-visible {
   stroke: var(--accent);
   stroke-width: 2;
@@ -194,46 +193,46 @@ const STYLE_TEXT = `
    which teaches a colour that is not in the palette. The two rings are separated by the
    stroke between them and by WHAT IS WRITTEN ON THEM (a roman numeral outside, the degree's
    own label inside), never by a second colour and never by a value the projector can eat. */
-.cbdaw-circle__zone[data-ring="degree"] { opacity: 1; }
-.cbdaw-circle__zone[data-ring="numeral"] { opacity: 0.86; }
-.cbdaw-circle__zone:hover { opacity: 1; }
+.cbdaw-circle__zone[data-ring="degree"] { opacity: var(--op-full); }
+.cbdaw-circle__zone[data-ring="numeral"] { opacity: var(--op-soft); }
+.cbdaw-circle__zone:hover { opacity: var(--op-full); }
 
 /* Note-on. Driven from the INPUT BUS, never from a local pointer handler, so a MIDI key and
    a mouse click light the same slot by the same two lines (§5: "an instrument must never
    know which one fired" — nor must a surface). */
 .cbdaw-circle__zone.is-on {
-  opacity: 1;
+  opacity: var(--op-full);
   stroke: var(--text);
   stroke-width: 1.6;
 }
 /* §9: "Standalone views may animate. DAW views stay still." */
 .cbdaw-circle[data-variant="expanded"] .cbdaw-circle__zone {
-  transition: opacity 90ms linear, stroke-width 90ms linear;
+  transition: var(--tr-opacity-stroke);
 }
 
 /* ——— text on the rings ——————————————————————————————————————————————————— */
 .cbdaw-circle__text {
-  pointer-events: none;
-  text-anchor: middle;
-  dominant-baseline: central;
-  font-weight: 700;
+  pointer-events: var(--pe-none);
+  text-anchor: var(--text-anchor-middle);
+  dominant-baseline: var(--dominant-baseline-central);
+  font-weight: var(--w-bold);
   fill: var(--bg);
 }
 /* Dark ink on the teaching colour, on BOTH rings. --text on a bright amber is the one
    pairing in this palette that does not survive the room test. */
-.cbdaw-circle__text[data-ring="numeral"] { font-weight: 800; }
+.cbdaw-circle__text[data-ring="numeral"] { font-weight: var(--w-heavy); }
 .cbdaw-circle__well {
-  pointer-events: none;
+  pointer-events: var(--pe-none);
   fill: var(--panel);
   stroke: var(--line);
   stroke-width: 0.6;
 }
 .cbdaw-circle__hub {
-  pointer-events: none;
-  text-anchor: middle;
-  dominant-baseline: central;
+  pointer-events: var(--pe-none);
+  text-anchor: var(--text-anchor-middle);
+  dominant-baseline: var(--dominant-baseline-central);
   fill: var(--text-dim);
-  font-weight: 600;
+  font-weight: var(--w-med);
 }
 
 /* ——— the degree number, outside the outer ring ————————————————————————————
@@ -249,31 +248,31 @@ const STYLE_TEXT = `
    The label is entry.number verbatim, which is slotNumberLabel()'s output, which is where
    '1/8' on the merged Do slot comes from (A4). This file spells nothing. */
 .cbdaw-circle__slotnum {
-  pointer-events: none;
-  text-anchor: middle;
-  dominant-baseline: central;
+  pointer-events: var(--pe-none);
+  text-anchor: var(--text-anchor-middle);
+  dominant-baseline: var(--dominant-baseline-central);
   fill: var(--text-dim);
-  font-weight: 600;
+  font-weight: var(--w-med);
 }
 
 /* ——— the +/- per degree, §4 ————————————————————————————————————————————— */
-.cbdaw-circle__pm { cursor: pointer; }
+.cbdaw-circle__pm { cursor: var(--cur-pointer); }
 .cbdaw-circle__pm circle {
   fill: var(--panel);
   stroke: var(--line);
   stroke-width: 0.8;
 }
 .cbdaw-circle__pm:hover circle { stroke: var(--accent); }
-.cbdaw-circle__pm:focus { outline: none; }
+.cbdaw-circle__pm:focus { outline: var(--none); }
 .cbdaw-circle__pm:focus-visible circle { stroke: var(--accent); stroke-width: 1.8; }
 .cbdaw-circle__pm text {
-  pointer-events: none;
-  text-anchor: middle;
-  dominant-baseline: central;
+  pointer-events: var(--pe-none);
+  text-anchor: var(--text-anchor-middle);
+  dominant-baseline: var(--dominant-baseline-central);
   fill: var(--text);
-  font-weight: 700;
+  font-weight: var(--w-bold);
 }
-.cbdaw-circle[data-variant="compact"] .cbdaw-circle__pm { display: none; }
+.cbdaw-circle[data-variant="compact"] .cbdaw-circle__pm { display: var(--disp-none); }
 
 /* The student MOVED this degree — §4's scale.altered[i], which is NOT the colour.
    A5 is explicit: the --deg-altered token names the QUALITY (a stack that is not a triad), and
@@ -281,35 +280,35 @@ const STYLE_TEXT = `
    accent and a dashed outline: a shape cue as well as a colour one, which is what
    tokens.css asks every P3 surface for. */
 .cbdaw-circle__moved {
-  fill: none;
+  fill: var(--none);
   stroke: var(--accent);
   stroke-width: 1.4;
-  stroke-dasharray: 2.4 2;
-  cursor: pointer;
+  stroke-dasharray: var(--stroke-dash);
+  cursor: var(--cur-pointer);
 }
 
 /* ——— the controls bar, expanded only ——————————————————————————————————— */
 .cbdaw-circle__controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: center;
-  font-size: 13px;
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-5);
+  flex-wrap: var(--flexwrap-wrap);
+  justify-content: var(--justify-center);
+  font-size: var(--fs-md);
   color: var(--text-dim);
 }
 .cbdaw-circle__controls button {
-  font: inherit;
-  font-weight: 600;
-  padding: 4px 10px;
+  font: var(--font-inherit);
+  font-weight: var(--w-med);
+  padding: var(--sp-2) var(--sp-5);
   color: var(--text);
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  cursor: pointer;
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-circle__controls button:hover { border-color: var(--accent); }
-.cbdaw-circle[data-variant="compact"] .cbdaw-circle__controls { display: none; }
+.cbdaw-circle[data-variant="compact"] .cbdaw-circle__controls { display: var(--disp-none); }
 `;
 
 function acquireStyle() {
@@ -457,7 +456,7 @@ export default class ScaleCircle {
    * RENAMED 2026-08-24 from `attachState`, which was the same operation under a second name
    * (`redpen-p3` Q9 item 9 / Q7 finding 6). `bindState` won on call sites: two definitions
    * (`surfaces/piano-roll.js`, `instruments/chord-module.js`) and two live callers
-   * (`tools/harmony.html`), against `attachState`'s one definition and zero callers. No
+   * (`tools/harmonyNEW.html`), against `attachState`'s one definition and zero callers. No
    * `attachState` METHOD remains anywhere in `/src` or `/tools` — the only occurrences of
    * the word left are the three in this note. Behaviour is unchanged, and the
    * constructor's required-`store` argument is untouched — that one is Brandon's.
@@ -657,7 +656,7 @@ export default class ScaleCircle {
           'data-ring': 'degree',
           x: dx.toFixed(3),
           y: dy.toFixed(3),
-          'font-size': this._overlay === 'number' ? 7.5 : 6.2,
+          'font-size': 6.2,
         });
         degreeText.textContent = text;
         rings.appendChild(degreeText);
@@ -758,16 +757,14 @@ export default class ScaleCircle {
     return g;
   }
 
-  /** §6's four modes, read off the row `circlePositions()` already finished.
-   *  `letter` can be null on a degree pushed past `DEGREE_CLAMP` (scale.js returns
-   *  `text: null` rather than a wrong name); an empty string is the honest draw. */
+  /** Read off the row `circlePositions()` already finished. `letter` can be null on a degree
+   *  pushed past `DEGREE_CLAMP` (scale.js returns `text: null` rather than a wrong name); an
+   *  empty string is the honest draw. */
   _overlayTextFor(entry) {
     switch (this._overlay) {
-      case 'letter': return entry.letter ?? '';
-      case 'number': return entry.number;
       case 'solfege': return entry.solfege;
-      case 'none':
-      default: return '';
+      case 'letter':
+      default: return entry.letter ?? '';
     }
   }
 

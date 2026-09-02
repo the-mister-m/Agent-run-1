@@ -360,7 +360,7 @@ export default class OvertoneSynth {
     const allocate = () => {
       const voice = new Voice(this._ctx, this._instrumentGain, cost, this._partials, this._env);
       voice.trigger(note, velocity, t);
-      voicePool.register(voice, OvertoneSynth.id);
+      voicePool.register(voice, OvertoneSynth.id, t);
       this._allVoices.add(voice);
       this._voicesByNote.set(note, voice);
       voice.onFree(() => {
@@ -616,14 +616,14 @@ export default class OvertoneSynth {
     root.style.cssText = [
       `background: var(--panel, #1b2332)`,
       `color: var(--text, #f2f6fc)`,
-      `border: 1px solid var(--line, #3a485f)`,
-      `font-family: system-ui, sans-serif`,
+      `border: var(--bw) solid var(--line, #3a485f)`,
+      `font-family: var(--font-ui)`,
       `padding: ${compact ? '8px' : '24px'}`,
-      `display: flex`,
-      `flex-direction: column`,
+      `display: var(--disp-flex)`,
+      `flex-direction: var(--flexdir-column)`,
       `gap: ${compact ? '4px' : '16px'}`,
-      `box-sizing: border-box`,
-      `transition: box-shadow 150ms ease-out`,
+      `box-sizing: var(--box-border-box)`,
+      `transition: var(--tr-shadow)`,
     ].join(';');
 
     const teardownFns = [];
@@ -644,14 +644,14 @@ export default class OvertoneSynth {
     };
 
     const rows = document.createElement('div');
-    rows.style.cssText = `display:flex;flex-direction:column;gap:${compact ? '2px' : '10px'};`;
+    rows.style.cssText = `display:var(--disp-flex);flex-direction:var(--flexdir-column);gap:${compact ? '2px' : '10px'};`;
 
     for (let i = 0; i < PARTIAL_COUNT; i++) {
       const row = document.createElement('div');
       row.className = 'overtone-synth__partial-row';
       row.dataset.partialIndex = String(i);
       row.style.cssText =
-        `display:flex;align-items:center;gap:8px;font-size:${compact ? '11px' : '15px'};`;
+        `display:var(--disp-flex);align-items:var(--align-center);gap:var(--sp-4);font-size:${compact ? '11px' : '15px'};`;
 
       const label = document.createElement('span');
       label.className = 'overtone-synth__partial-label';
@@ -699,7 +699,7 @@ export default class OvertoneSynth {
       levelInput.max = '1';
       levelInput.step = '0.01';
       levelInput.value = String(this._partials[i].level);
-      levelInput.style.cssText = 'flex:1;';
+      levelInput.style.cssText = 'flex:var(--flex-1);';
       row.appendChild(levelInput);
       refs.levelInputs[i] = levelInput;
 
@@ -707,11 +707,11 @@ export default class OvertoneSynth {
       if (!compact) {
         const barTrack = document.createElement('div');
         barTrack.style.cssText =
-          'width:120px;height:10px;background:var(--line, #3a485f);border-radius:4px;overflow:hidden;';
+          'width:var(--sp-60);height:var(--sp-5);background:var(--line, #3a485f);border-radius:var(--r-ctl);overflow:var(--ov-hidden);';
         bar = document.createElement('div');
         bar.style.cssText = [
-          'height:100%',
-          'width:100%',
+          'height:var(--pct-100)',
+          'width:var(--pct-100)',
           'transform-origin:left',
           `background:${i === 0 ? 'var(--accent, #34e5b4)' : 'var(--meter-ok, #6ee05a)'}`,
           `transform:scaleX(${this._partials[i].level})`,
@@ -733,11 +733,11 @@ export default class OvertoneSynth {
 
     const env = document.createElement('div');
     env.className = 'overtone-synth__envelope';
-    env.style.cssText = `display:flex;gap:8px;font-size:${compact ? '10px' : '13px'};flex-wrap:wrap;`;
+    env.style.cssText = `display:var(--disp-flex);gap:var(--sp-4);font-size:${compact ? '10px' : '13px'};flex-wrap:var(--flexwrap-wrap);`;
     for (const stage of ['attack', 'decay', 'sustain', 'release']) {
       const [lo, hi] = ENV_RANGES[stage];
       const wrap = document.createElement('label');
-      wrap.style.cssText = 'display:flex;flex-direction:column;gap:2px;color:var(--text-dim, #93a1b8);';
+      wrap.style.cssText = 'display:var(--disp-flex);flex-direction:var(--flexdir-column);gap:var(--sp-1);color:var(--text-dim, #93a1b8);';
       wrap.textContent = stage[0].toUpperCase();
       const input = document.createElement('input');
       input.type = 'range';

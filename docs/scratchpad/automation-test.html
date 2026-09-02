@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>automation.js DONE-CHECK harness</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+</head>
+<body>
+<button id="unlock">Unlock</button>
+<button id="run">Run</button>
+<div id="stripHost" style="width:120px;height:320px;background:#111;"></div>
+<div id="laneHost" style="width:400px;height:60px;"></div>
+<pre id="log"></pre>
+<script type="module">
+import { ctx, masterAnalyser, unlock } from '../../src/core/audio.js';
+import Strip from '../../src/mixer/strip.js';
+import { clock, ticksPerBar } from '../../src/core/clock.js';
+import { AutomationLane, createChannelAutomation } from '../../src/mixer/automation.js';
+
+window.__mods = { ctx, masterAnalyser, Strip, clock, ticksPerBar, AutomationLane, createChannelAutomation };
+
+const logEl = document.getElementById('log');
+function log(msg) { logEl.textContent += msg + '\n'; }
+
+// rAF-write-guard: fails loudly if any strip target is written from inside a rAF frame.
+let insideRAF = false;
+const origRAF = window.requestAnimationFrame.bind(window);
+window.requestAnimationFrame = (cb) => origRAF((ts) => {
+  insideRAF = true;
+  try { cb(ts); } finally { insideRAF = false; }
+});
+window.__rafWriteViolation = false;
+for (const prop of ['gain', 'pan', 'mute', 'solo']) {
+  const desc = Object.getOwnPropertyDescriptor(Strip.prototype, prop);
+  Object.defineProperty(Strip.prototype, prop, {
+    get: desc.get,
+    set(v) {
+      if (insideRAF) window.__rafWriteViolation = true;
+      desc.set.call(this, v);
+    },
+    configurable: true,
+  });
+}
+
+document.getElementById('unlock').addEventListener('click', async () => {
+  await unlock();
+  log('ctx.state=' + ctx.state);
+});
+
+document.getElementById('run').addEventListener('click', () => {
+  const strip = new Strip(ctx, { id: 'ch1', label: 'Test' });
+  strip.mountCompact(document.getElementById('stripHost'));
+  window.__strip = strip;
+
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = 220;
+  osc.connect(strip.input);
+  osc.start();
+
+  strip.gain = 0;
+  clock.bpm = 480; // compress a 4-bar fade to ~2s real time
+  clock.songLengthBars = 16;
+
+  const gainLane = new AutomationLane(strip, 'strip.gain');
+  const bar = ticksPerBar(clock.timeSignature);
+  gainLane.setPoints([{ tick: 0, value: 0 }, { tick: 4 * bar, value: 1.2 }]);
+  gainLane.mountCompact(document.getElementById('laneHost'));
+  window.__gainLane = gainLane;
+
+  const panLane = new AutomationLane(strip, 'strip.pan');
+  panLane.setPoints([{ tick: 0, value: -1 }, { tick: 4 * bar, value: 1 }]);
+  window.__panLane = panLane;
+
+  const muteLane = new AutomationLane(strip, 'strip.mute');
+  muteLane.setPoints([{ tick: 1 * bar, value: 1 }, { tick: 2 * bar, value: 0 }]);
+  window.__muteLane = muteLane;
+
+  window.__samples = [];
+  const buf = new Float32Array(masterAnalyser.fftSize);
+  const timer = setInterval(() => {
+    masterAnalyser.getFloatTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i]));
+    window.__samples.push({
+      t: ctx.currentTime,
+      tick: clock.positionTicks,
+      gain: strip.gain,
+      pan: strip.pan,
+      mute: strip.mute,
+      peak,
+    });
+  }, 40);
+  window.__timer = timer;
+
+  clock.play();
+  setTimeout(() => {
+    clock.stop();
+    clearInterval(timer);
+    window.__done = true;
+    log('done, samples=' + window.__samples.length);
+  }, 2700);
+});
+</script>
+</body>
+</html>

@@ -10,6 +10,7 @@
 import {
   stackOffset,      // offset of a stacked chord tone from the root
   degreeQuality,    // quality of a chord built on a scale degree
+  qualityOfIntervals, // quality of a chord built from MEASURED intervals
   degreeColor,      // color token for a scale degree
   spellingOf,       // degree index → letter spelling
   spellingOfPc,     // pitch class → letter spelling
@@ -207,6 +208,92 @@ export function numeralParts(scale, root, count = 3) {
   return {
     base: applyCase(ROMAN[root], q),
     sup: SUFFIX[q] + (EXT[clampCount(count)] ?? ''),
+  };
+}
+
+// -----------------------------------------------------------------------------------------
+// 4a · NAMING FROM MEASURED INTERVALS
+// -----------------------------------------------------------------------------------------
+// The functions above derive a chord's intervals from the scale and the degree. These take
+// the intervals directly: `offsets` is the semitones sounding above the chord's own root, in
+// stack order, `offsets[0] === 0`.
+//
+// Same tables as the degree-driven path — QUALITY, SEVENTH_CLASS, NINTH_CLASS, SUFFIX,
+// LETTER_SUFFIX, SEVENTH_NAME, NINTH_NAME. No second table.
+// -----------------------------------------------------------------------------------------
+
+/** Triad quality from a measured stack. Needs three tones; fewer is not a triad. */
+export function qualityOfStack(offsets) {
+  if (!Array.isArray(offsets) || offsets.length < 3) return 'altered';
+  return qualityOfIntervals(offsets[1] - offsets[0], offsets[2] - offsets[0]);
+}
+
+/** → 'dim' | 'min' | 'maj' | 'altered', from the measured root-to-7th span. */
+export function seventhQualityOfStack(offsets) {
+  if (!Array.isArray(offsets) || offsets.length < 4) return 'altered';
+  return SEVENTH_CLASS[mod(offsets[3] - offsets[0], 12)] ?? 'altered';
+}
+
+/** → 'min' | 'maj' | 'altered', from the measured root-to-9th span. */
+export function ninthQualityOfStack(offsets) {
+  if (!Array.isArray(offsets) || offsets.length < 5) return 'altered';
+  return NINTH_CLASS[mod(offsets[4] - offsets[0], 12)] ?? 'altered';
+}
+
+/** The label for a stack the tables do not name. */
+export const FANCY = 'faaaancy';
+
+/** True when a measured stack lands outside every naming table: a triad quality, seventh
+ *  class or ninth class that comes back 'altered', a stack deeper than five, or a table row
+ *  that does not exist. */
+export function isFancyStack(offsets) {
+  if (!Array.isArray(offsets) || offsets.length < 3) return true;
+  const q = qualityOfStack(offsets);
+  if (q === 'altered') return true;
+  const c = clampCount(offsets.length);
+  if (c > 5) return true;
+  if (c >= 4) {
+    const seventh = seventhQualityOfStack(offsets);
+    if (seventh === 'altered') return true;
+    if (c === 4) return SEVENTH_NAME[q]?.[seventh] == null;
+    const ninth = ninthQualityOfStack(offsets);
+    if (ninth === 'altered') return true;
+    return NINTH_NAME[q]?.[seventh]?.[ninth] == null;
+  }
+  return false;
+}
+
+/** Everything after the letter head, from a measured stack. Reads the same tables in the
+ *  same order as `letterSuffixOf`, and returns FANCY where they run out. */
+function letterSuffixOfStack(offsets) {
+  if (isFancyStack(offsets)) return FANCY;
+  const q = qualityOfStack(offsets);
+  const c = clampCount(offsets.length);
+  if (c === 4) return SEVENTH_NAME[q][seventhQualityOfStack(offsets)];
+  if (c === 5) return NINTH_NAME[q][seventhQualityOfStack(offsets)][ninthQualityOfStack(offsets)];
+  return LETTER_SUFFIX[q] + (EXT[c] ?? '');
+}
+
+/** → { base: 'vi', sup: 'b5' } — the numeral for a measured stack. `root` is a degree index;
+ *  `offsets` are the semitones sounding above the root. Sup is '?' where the tables run
+ *  out — the numeral button is one cell wide and FANCY does not fit in it. */
+export function numeralPartsOfStack(scale, root, offsets) {
+  const q = qualityOfStack(offsets);
+  if (isFancyStack(offsets)) {
+    return { base: applyCase(ROMAN[root], q === 'altered' ? 'major' : q), sup: '?' };
+  }
+  return {
+    base: applyCase(ROMAN[root], q),
+    sup: SUFFIX[q] + (EXT[clampCount(offsets.length)] ?? ''),
+  };
+}
+
+/** → { base: 'C', sup: 'Maj9b5' } — the letter name for a measured stack. Base is the root's
+ *  own spelling; bends do not move it. */
+export function chordNamePartsOfStack(scale, root, offsets) {
+  return {
+    base: spellingOf(scale, root).text ?? '',
+    sup: letterSuffixOfStack(offsets),
   };
 }
 

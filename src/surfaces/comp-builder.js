@@ -18,12 +18,11 @@
 //   `spellingOfPc()`, every name from `chordNameParts()` and every numeral from
 //   `numeralParts()`. This file spells nothing and names nothing.
 //
-// FAILING OUT LOUD
-//   `chordNameParts` names a tertian stack on a scale degree. The moment a student bends a
-//   tone with +/-, or turns on a 9th while the 5th is off, the thing on screen is no longer
-//   that, and no exported function in `theory/` will name it. So this file does not guess:
-//   it marks the chord broken, in --warn, with a dashed edge and the words. The notes stay
-//   correct and still play — it is the name that is missing, and the student is told which.
+// NAMING
+//   `chordNamePartsOfStack` names the intervals that are sounding, so bent tones are named.
+//   Three states have no name and are marked in --warn with a dashed edge and the reason:
+//   a moved root, a stack under three notes, a gap with more tones above it. A stack the
+//   tables do not reach reads FANCY. Notes always play; only the name is ever missing.
 //
 // SOUND
 //   None is made here. `bindPlayer()` takes anything with `noteOn(midi, vel)` / `noteOff(midi)`
@@ -37,8 +36,8 @@ import {
 
 import {
   voicing,
-  chordNameParts,
-  numeralParts,
+  chordNamePartsOfStack,
+  numeralPartsOfStack,
   chordToneScaleNumber,
 } from '../theory/chord.js';
 
@@ -65,8 +64,11 @@ const DEFAULT_DEGREES = Object.freeze([0, 4, 5, 3, 1]);
 // and `_syncComp` resizes the column when a chip is switched, keeping what is already
 // placed anchored to the BOTTOM square so the stack does not jump.
 
-/** Where `voicing()` puts the stack. Matches the Chord Module's own default octave. */
+/** The octave the lowest note of every chord sits in. `voicing()` takes an absolute octave
+ *  and 4 is middle C. Same range as every other instrument's octave selector. */
 const BASE_OCTAVE = 4;
+const OCTAVE_MIN = 1;
+const OCTAVE_MAX = 7;
 
 /** How far a +/- may bend one tone before the control stops. Two semitones each way is
  *  `scale.js`'s own DEGREE_CLAMP, reused so the two +/- controls on this page behave alike. */
@@ -99,146 +101,173 @@ let styleRefs = 0;
 // happened in scale-circle.js this session and blanked the page.)
 const STYLE_TEXT = `
 .cb-root {
-  display: grid; gap: 10px;
-  grid-template-columns: minmax(205px, 0.6fr) minmax(320px, 1.4fr);
-  align-items: start;
+  display: var(--disp-grid); gap: var(--sp-5);
+  grid-template-columns: var(--grid-60-140);
+  align-items: var(--align-start);
   color: var(--text, #f2f6fc);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
+
+  /* Cell size for .cb-note, .cb-square and .cb-numeral — all three read this one value. */
+  --cb-cell: var(--sp-20);
 }
-@media (max-width: 900px) { .cb-root { grid-template-columns: 1fr; } }
-.cb-root *, .cb-root *::before, .cb-root *::after { box-sizing: border-box; }
+@media (max-width: 900px) { .cb-root { grid-template-columns: var(--grid-1fr); } }
+.cb-root *, .cb-root *::before, .cb-root *::after { box-sizing: var(--box-border-box); }
 
 .cb-box {
-  border: 1px solid var(--line, #3a485f);
+  border: var(--bw) solid var(--line, #3a485f);
   background: var(--panel, #1b2332);
-  border-radius: 5px;
-  padding: 9px 10px 11px;
+  border-radius: var(--r-ctl);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5h);
 }
-.cb-box + .cb-box { margin-top: 10px; }
+.cb-box + .cb-box { margin-top: var(--sp-5); }
 .cb-box__title {
-  margin: 0 0 9px; text-align: center;
-  font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+  margin: 0 0 var(--sp-4h); text-align: var(--ta-center);
+  font-size: var(--fs-base); font-weight: var(--w-med); letter-spacing: var(--track-mid);
   color: var(--text, #f2f6fc);
 }
-.cb-right { display: flex; flex-direction: column; }
+.cb-right { display: var(--disp-flex); flex-direction: var(--flexdir-column); }
 
 /* ——— CHORD BANK ————————————————————————————————————————————————————————— */
-.cb-slot { padding: 7px 0; }
-.cb-slot + .cb-slot { border-top: 1px solid var(--line, #3a485f); }
+.cb-slot { padding: var(--sp-3h) 0; }
+.cb-slot + .cb-slot { border-top: var(--bw) solid var(--line, #3a485f); }
 
-.cb-slot__head { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
-.cb-arrows { display: flex; flex-direction: column; gap: 2px; }
+.cb-slot__head { display: var(--disp-flex); align-items: var(--align-center); gap: 7px; margin-bottom: var(--sp-2h); }
+.cb-arrows { display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-1); }
 .cb-arrow {
-  font: inherit; font-size: 9px; line-height: 1; cursor: pointer;
-  padding: 2px 5px; border-radius: 3px;
-  color: var(--text, #f2f6fc); background: transparent;
-  border: 1px solid var(--line, #3a485f);
+  font: var(--font-inherit); font-size: var(--fs-tiny); line-height: var(--lh-none); cursor: var(--cur-pointer);
+  padding: var(--sp-1) var(--sp-2h); border-radius: var(--r-sm);
+  color: var(--text, #f2f6fc); background: var(--color-transparent);
+  border: var(--bw) solid var(--line, #3a485f);
 }
 .cb-arrow:hover { border-color: var(--accent, #34e5b4); }
-.cb-arrow:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: 1px; }
+.cb-arrow:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: var(--ring-off); }
 
-.cb-slot__root { font-size: 17px; font-weight: 700; min-width: 2.1em; }
-.cb-slot__name { font-size: 11px; color: var(--text-dim, #93a1b8); }
-.cb-slot__name sup { font-size: 0.7em; }
+.cb-slot__root { font-size: var(--fs-chord); font-weight: var(--w-bold); min-width: var(--sp-em-21); }
+.cb-slot__name { font-size: var(--fs-sm); color: var(--text-dim, #93a1b8); }
+.cb-slot__name sup { font-size: var(--fs-em-70); }
 
 /* The chip row. Each chip is a tone; the +/- rides directly above it, which is where the
    sketch puts it and why the caption and the pair share one column. */
-.cb-chips { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.cb-tone { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.cb-bend { display: flex; gap: 2px; }
+/* Bottom-aligned so the Root chip, which carries no +/- above it, still sits on the same
+   line as the four that do. */
+.cb-chips { display: var(--disp-flex); flex-wrap: var(--flexwrap-wrap); align-items: var(--align-flex-end); gap: var(--sp-2) var(--sp-5); }
+.cb-tone { display: var(--disp-flex); flex-direction: var(--flexdir-column); align-items: var(--align-center); gap: var(--sp-1); }
+.cb-bend { display: var(--disp-flex); gap: var(--sp-1); }
 .cb-bend button {
-  font: inherit; font-size: 9px; line-height: 1; cursor: pointer;
-  width: 15px; padding: 1px 0; border-radius: 3px;
-  color: var(--text-dim, #93a1b8); background: transparent;
-  border: 1px solid var(--line, #3a485f);
+  font: var(--font-inherit); font-size: var(--fs-tiny); line-height: var(--lh-none); cursor: var(--cur-pointer);
+  width: var(--sp-7h); padding: var(--sp-hair) 0; border-radius: var(--r-sm);
+  color: var(--text-dim, #93a1b8); background: var(--color-transparent);
+  border: var(--bw) solid var(--line, #3a485f);
 }
 .cb-bend button:hover { border-color: var(--accent, #34e5b4); color: var(--text, #f2f6fc); }
-.cb-bend button:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: 1px; }
+.cb-bend button:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: var(--ring-off); }
 
 .cb-chip {
-  font: inherit; font-size: 10px; cursor: pointer;
-  padding: 3px 7px; border-radius: 9px; min-width: 3.6em;
-  color: var(--text-dim, #93a1b8); background: transparent;
-  border: 1px solid var(--line, #3a485f);
+  font: var(--font-inherit); font-size: var(--fs-xs); cursor: var(--cur-pointer);
+  padding: var(--sp-1h) var(--sp-3h); border-radius: var(--r-chip); min-width: var(--sp-em-36);
+  color: var(--text-dim, #93a1b8); background: var(--color-transparent);
+  border: var(--bw) solid var(--line, #3a485f);
 }
 .cb-chip:hover { border-color: var(--accent, #34e5b4); }
-.cb-chip:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: 1px; }
+.cb-chip:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: var(--ring-off); }
 .cb-chip[aria-pressed="true"] {
   color: var(--text, #f2f6fc);
   border-color: var(--accent, #34e5b4);
   background: color-mix(in srgb, var(--accent, #34e5b4) 16%, transparent);
 }
-.cb-chip__letter { display: block; font-size: 11px; font-weight: 700; }
+.cb-chip__letter { display: var(--disp-block); font-size: var(--fs-sm); font-weight: var(--w-bold); }
 /* A tone the student bent with the +/-. Marked by SHAPE as well as colour, which is what
    tokens.css asks every teaching surface for. */
-.cb-chip[data-bent="true"] { border-style: dashed; border-color: var(--warn, #ff7a1a); }
+.cb-chip[data-bent="true"] { border-style: var(--line-dashed); border-color: var(--warn, #ff7a1a); }
 
 .cb-autofill {
-  display: flex; align-items: center; gap: 6px; margin-top: 6px;
-  font-size: 11px; color: var(--text-dim, #93a1b8); cursor: pointer;
+  display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); margin-top: var(--sp-3);
+  font-size: var(--fs-sm); color: var(--text-dim, #93a1b8); cursor: var(--cur-pointer);
 }
-.cb-autofill input { cursor: pointer; }
+.cb-autofill input { cursor: var(--cur-pointer); }
 
 /* ——— ROOT POSITIONS ——————————————————————————————————————————————————— */
-.cb-cols { display: grid; grid-template-columns: repeat(${SLOTS}, minmax(0, 1fr)); gap: 6px; }
-.cb-col { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.cb-cols { display: var(--disp-grid); grid-template-columns: repeat(${SLOTS}, minmax(0, 1fr)); gap: var(--sp-3); }
+.cb-col { display: var(--disp-flex); flex-direction: var(--flexdir-column); align-items: var(--align-center); gap: 3px; }
+
+/* Root Positions columns hang from the bottom of the box, Comp Positions columns from the
+   top, which puts both numerals against the gap between the two boxes. */
+.cb-col--roots { justify-content: var(--justify-flex-end); }
+.cb-col--comp { justify-content: var(--justify-flex-start); }
 
 .cb-note {
-  font: inherit; font-size: 13px; cursor: grab;
-  width: 100%; padding: 2px 0; border-radius: 3px; text-align: center;
-  color: var(--text, #f2f6fc); background: transparent;
-  border: 1px solid transparent;
+  font: var(--font-inherit); font-size: var(--fs-lg); font-weight: var(--w-med); cursor: var(--cur-grab);
+  width: var(--pct-100); max-width: var(--cb-cell); aspect-ratio: var(--aspect-square); min-height: var(--cb-cell);
+  display: var(--disp-flex); align-items: var(--align-center); justify-content: var(--justify-center);
+  border-radius: var(--r-sm); text-align: var(--ta-center);
+  color: var(--text, #f2f6fc); background: var(--color-transparent);
+  border: var(--bw) solid var(--line, #3a485f);
 }
 .cb-note:hover { border-color: var(--accent, #34e5b4); }
-.cb-note:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: 1px; }
-.cb-note:active { cursor: grabbing; }
+.cb-note:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: var(--ring-off); }
+.cb-note:active { cursor: var(--cur-grabbing); }
 .cb-note.is-on { border-color: var(--text, #f2f6fc); }
 
-/* Rule 1 and rule 2, drawn. A tone in this chord that the PREVIOUS chord also had is a
-   common note; one a semitone away from a previous tone is a neighbour. Both are marked on
-   the LATER chord. */
-.cb-note[data-lead="common"] { background: color-mix(in srgb, var(--accent, #34e5b4) 20%, transparent); }
-.cb-note[data-lead="neighbor"] { box-shadow: inset 0 -2px 0 0 var(--warn, #ff7a1a); }
-
 .cb-numeral {
-  font: inherit; font-size: 14px; cursor: pointer; margin-top: 4px;
-  width: 100%; padding: 2px 0; border-radius: 3px;
-  color: var(--text, #f2f6fc); background: transparent;
-  border: 1px solid var(--line, #3a485f);
+  font: var(--font-inherit); font-size: var(--fs-numeral); cursor: var(--cur-pointer); margin-top: var(--sp-2);
+  width: var(--pct-100); max-width: var(--cb-cell); padding: var(--sp-1) 0; border-radius: var(--r-sm);
+  color: var(--text, #f2f6fc); background: var(--color-transparent);
+  border: var(--bw) solid var(--line, #3a485f);
 }
+/* The Comp Positions numeral sits ABOVE its squares, so its margin is on the other side. */
+.cb-numeral--comp { margin-top: var(--sp-0); margin-bottom: var(--sp-2); }
 .cb-numeral:hover { border-color: var(--accent, #34e5b4); }
-.cb-numeral:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: 1px; }
-.cb-numeral sup { font-size: 0.62em; }
+.cb-numeral:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: var(--ring-off); }
+.cb-numeral sup { font-size: var(--fs-em-62); }
 
 /* FAIL OUT LOUD. Not a tooltip, not a console line — the chord wears it. */
 .cb-broken {
   color: var(--warn, #ff7a1a);
   border-color: var(--warn, #ff7a1a);
-  border-style: dashed;
+  border-style: var(--line-dashed);
 }
 .cb-why {
-  margin: 4px 0 0; font-size: 10px; line-height: 1.4; text-align: center;
+  margin: var(--sp-2) 0 0; font-size: var(--fs-xs); line-height: var(--lh-base); text-align: var(--ta-center);
   color: var(--warn, #ff7a1a);
 }
 
 /* ——— COMP POSITIONS ———————————————————————————————————————————————————— */
-/* Smaller than the note buttons above them on purpose — the squares are a worksheet, not a
-   keyboard, and a column of five must still fit under a chord without pushing the rules off
-   the bottom of the box. Capped and centred rather than full-width. */
+/* Same box as .cb-note, off the same --cb-cell. */
 .cb-square {
-  width: 100%; max-width: 44px; aspect-ratio: 1 / 1; min-height: 22px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px;
-  border: 1px solid var(--line, #3a485f); border-radius: 3px;
-  color: var(--text, #f2f6fc); background: transparent;
+  width: var(--pct-100); max-width: var(--cb-cell); aspect-ratio: var(--aspect-square); min-height: var(--cb-cell);
+  display: var(--disp-flex); align-items: var(--align-center); justify-content: var(--justify-center);
+  font-size: var(--fs-lg); font-weight: var(--w-med);
+  border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-sm);
+  color: var(--text, #f2f6fc); background: var(--color-transparent);
 }
-.cb-square[data-over="true"] { border-color: var(--accent, #34e5b4); border-style: dashed; }
-.cb-square[data-filled="true"] { cursor: pointer; border-color: var(--text-dim, #93a1b8); }
+.cb-square[data-over="true"] { border-color: var(--accent, #34e5b4); border-style: var(--line-dashed); }
+.cb-square[data-filled="true"] { cursor: var(--cur-pointer); border-color: var(--text-dim, #93a1b8); }
 
-.cb-rules { margin: 9px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-dim, #93a1b8); }
-.cb-rules__lede { font-style: italic; font-size: 12px; color: var(--text, #f2f6fc); margin: 0 0 6px; }
-.cb-rules ol { margin: 0; padding-left: 18px; }
-.cb-rules li { margin: 2px 0; }
+/* ——— THE FLOOR KNOB ————————————————————————————————————————————————————— */
+/* Top of Root Positions. One stepper for the whole progression. */
+.cb-floor {
+  display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3);
+  margin: 0 0 var(--sp-4); font-size: var(--fs-sm); color: var(--text-dim, #93a1b8);
+}
+.cb-floor__label { flex: var(--flex-1); }
+.cb-floor__value {
+  font-size: var(--fs-md); font-weight: var(--w-bold);
+  color: var(--text, #f2f6fc); min-width: var(--sp-em-14); text-align: var(--ta-center);
+}
+.cb-floor button {
+  font: var(--font-inherit); font-size: var(--fs-sm); line-height: var(--lh-none); cursor: var(--cur-pointer);
+  width: var(--sp-9); padding: var(--sp-1) 0; border-radius: var(--r-sm);
+  color: var(--text, #f2f6fc); background: var(--color-transparent);
+  border: var(--bw) solid var(--line, #3a485f);
+}
+.cb-floor button:hover:not(:disabled) { border-color: var(--accent, #34e5b4); }
+.cb-floor button:focus-visible { outline: 2px solid var(--accent, #34e5b4); outline-offset: var(--ring-off); }
+.cb-floor button:disabled { opacity: var(--op-faint); cursor: var(--cur-default); }
+
+.cb-rules { margin: var(--sp-4h) 0 0; font-size: var(--fs-sm); line-height: var(--lh-loose); color: var(--text-dim, #93a1b8); }
+.cb-rules__lede { font-style: var(--font-style-italic); font-size: var(--fs-base); color: var(--text, #f2f6fc); margin: 0 0 var(--sp-3); }
+.cb-rules ol { margin: var(--sp-0); padding-left: var(--sp-9); }
+.cb-rules li { margin: var(--sp-1) 0; }
 `;
 
 function acquireStyle() {
@@ -301,9 +330,21 @@ export default class CompBuilder {
     return this;
   }
 
-  /** Anything with `noteOn(midi, velocity)` / `noteOff(midi)`. The page picks. */
+  /** Anything with `noteOn(midi, velocity)` / `noteOff(midi)`. The page picks and re-picks.
+   *  Held notes are released against the outgoing player before the swap. */
   bindPlayer(instrument) {
+    this._releaseAll();
     this.player = instrument ?? null;
+    if (this.mounted) this._render();
+    return this;
+  }
+
+  /** The octave the lowest note of every chord sits in. Clamped, redraws on change. */
+  setOctave(n) {
+    const next = Math.min(OCTAVE_MAX, Math.max(OCTAVE_MIN, Math.trunc(n)));
+    if (!Number.isFinite(next) || next === this.octave) return this;
+    this._releaseAll();
+    this.octave = next;
     if (this.mounted) this._render();
     return this;
   }
@@ -429,32 +470,56 @@ export default class CompBuilder {
   }
 
   /**
-   * Can `theory/chord.js` name this thing?
+   * → `{ offsets, reason }`. `offsets` is the measured stack in semitones above the root,
+   * for `chordNamePartsOfStack` / `numeralPartsOfStack`. Exactly one of the two is non-null.
    *
-   * It names a TERTIAN STACK ON A DEGREE, counted from the root — nothing else. So the name
-   * survives exactly two conditions: no tone was bent, and the lit chips are an unbroken run
-   * from the root. Root+3rd+9th is a real sound a student can build here and there is no
-   * exported function that will name it, so this returns null and the UI says so.
-   *
-   * Returns the COUNT to hand `chordNameParts`/`numeralParts`, or null to fail out loud.
+   * Bent tones are named, not refused. Three states have no name:
+   *   · slot.bend[0] is non-zero — the root moved, and the letter head would not follow.
+   *   · fewer than three lit chips.
+   *   · a dark chip with lit chips above it.
    */
-  _nameableCount(slot) {
-    if (slot.bend.some((b) => b !== 0)) return null;
+  _nameStack(slot) {
+    if (slot.bend[0] !== 0) {
+      return { offsets: null, reason: 'root moved — pick a new root instead' };
+    }
     let count = 0;
     while (count < TONES && slot.on[count]) count += 1;
-    if (count < 3) return null;                       // two notes is not a chord to name
-    if (slot.on.slice(count).some(Boolean)) return null;  // a gap, then more tones
-    return count;
+    if (count < 3) {
+      return { offsets: null, reason: 'needs three notes' };
+    }
+    if (slot.on.slice(count).some(Boolean)) {
+      return { offsets: null, reason: 'gap in the stack — no name for this one' };
+    }
+    const tones = this._liveTonesOf(slot);
+    const base = tones[0].midi;
+    return { offsets: tones.map((t) => t.midi - base), reason: null };
   }
 
-  /** Why the name is missing, in the student's words. One of these, or null when it is fine. */
-  _brokenReason(slot) {
-    if (slot.bend.some((b) => b !== 0)) return 'bent — no name for this one';
-    let count = 0;
-    while (count < TONES && slot.on[count]) count += 1;
-    if (count < 3) return 'needs three notes';
-    if (slot.on.slice(count).some(Boolean)) return 'gap in the stack — no name for this one';
-    return null;
+  /** The numeral button both boxes carry. `notes()` supplies what it plays; an unnameable
+   *  chord wears '?' and still plays. */
+  _numeralButton(slot, i, { variant, label, notes }) {
+    const scale = this.scale;
+    const num = document.createElement('button');
+    num.type = 'button';
+    num.className = 'cb-numeral';
+    if (variant === 'comp') num.classList.add('cb-numeral--comp');
+
+    const { offsets } = this._nameStack(slot);
+    if (offsets === null) {
+      num.classList.add('cb-broken');
+      num.textContent = '?';
+    } else {
+      const parts = numeralPartsOfStack(scale, slot.degree, offsets);
+      num.textContent = parts.base;
+      if (parts.sup) {
+        const sup = document.createElement('sup');
+        sup.textContent = parts.sup;
+        num.appendChild(sup);
+      }
+    }
+    num.setAttribute('aria-label', `${label} ${i + 1}`);
+    this._listen(num, 'pointerdown', () => this._press(notes()));
+    return num;
   }
 
   /** Rules 1 and 2, computed. For chord `i`, compare each of its tones to chord `i-1`:
@@ -545,12 +610,12 @@ export default class CompBuilder {
       // The chord's own name, or the loud reason there isn't one.
       const nameEl = document.createElement('span');
       nameEl.className = 'cb-slot__name';
-      const count = this._nameableCount(slot);
-      if (count === null) {
+      const { offsets, reason } = this._nameStack(slot);
+      if (offsets === null) {
         nameEl.classList.add('cb-broken');
-        nameEl.textContent = this._brokenReason(slot);
+        nameEl.textContent = reason;
       } else {
-        const parts = chordNameParts(scale, slot.degree, count);
+        const parts = chordNamePartsOfStack(scale, slot.degree, offsets);
         nameEl.textContent = parts.base;
         if (parts.sup) {
           const sup = document.createElement('sup');
@@ -568,25 +633,28 @@ export default class CompBuilder {
         const cell = document.createElement('div');
         cell.className = 'cb-tone';
 
-        const bend = document.createElement('div');
-        bend.className = 'cb-bend';
-        for (const [glyph, delta, aria] of [['+', +1, 'up'], ['−', -1, 'down']]) {
-          const b = document.createElement('button');
-          b.type = 'button';
-          b.textContent = glyph;
-          b.setAttribute(
-            'aria-label',
-            `chord ${i + 1} ${TONE_CAPTION[tone.number] ?? tone.number} a semitone ${aria}`
-          );
-          this._listen(b, 'click', () => {
-            const next = slot.bend[tone.j] + delta;
-            if (Math.abs(next) > BEND_CLAMP) return;
-            slot.bend[tone.j] = next;
-            this._render();
-          });
-          bend.appendChild(b);
+        // The root carries no +/-. It is moved with the arrows in the head, not bent.
+        if (tone.j > 0) {
+          const bend = document.createElement('div');
+          bend.className = 'cb-bend';
+          for (const [glyph, delta, aria] of [['+', +1, 'up'], ['−', -1, 'down']]) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = glyph;
+            b.setAttribute(
+              'aria-label',
+              `chord ${i + 1} ${TONE_CAPTION[tone.number] ?? tone.number} a semitone ${aria}`
+            );
+            this._listen(b, 'click', () => {
+              const next = slot.bend[tone.j] + delta;
+              if (Math.abs(next) > BEND_CLAMP) return;
+              slot.bend[tone.j] = next;
+              this._render();
+            });
+            bend.appendChild(b);
+          }
+          cell.appendChild(bend);
         }
-        cell.appendChild(bend);
 
         const chip = document.createElement('button');
         chip.type = 'button';
@@ -632,19 +700,54 @@ export default class CompBuilder {
     });
   }
 
+  /** The floor stepper. Sets `this.octave`, which `voicing()` reads for every slot. */
+  _renderFloor(host) {
+    const row = document.createElement('div');
+    row.className = 'cb-floor';
+
+    const label = document.createElement('span');
+    label.className = 'cb-floor__label';
+    label.textContent = 'Lowest note sits in octave';
+    row.appendChild(label);
+
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.textContent = '−';
+    down.disabled = this.octave <= OCTAVE_MIN;
+    down.setAttribute('aria-label', 'lowest octave down');
+    this._listen(down, 'click', () => this.setOctave(this.octave - 1));
+    row.appendChild(down);
+
+    const value = document.createElement('span');
+    value.className = 'cb-floor__value';
+    value.textContent = String(this.octave);
+    row.appendChild(value);
+
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.textContent = '+';
+    up.disabled = this.octave >= OCTAVE_MAX;
+    up.setAttribute('aria-label', 'lowest octave up');
+    this._listen(up, 'click', () => this.setOctave(this.octave + 1));
+    row.appendChild(up);
+
+    host.appendChild(row);
+  }
+
   _renderRoots() {
     const host = this.nodes.roots;
     host.textContent = '';
     const scale = this.scale;
+
+    this._renderFloor(host);
 
     const cols = document.createElement('div');
     cols.className = 'cb-cols';
 
     this.slots.forEach((slot, i) => {
       const col = document.createElement('div');
-      col.className = 'cb-col';
+      col.className = 'cb-col cb-col--roots';
 
-      const lead = this._leadingFor(i);
       // Highest note first — the sketch stacks them with the root at the bottom.
       const tones = this._liveTonesOf(slot).slice().reverse();
 
@@ -655,8 +758,6 @@ export default class CompBuilder {
         b.draggable = true;
         b.dataset.midi = String(tone.midi);
         b.dataset.slot = String(i);
-        const mark = lead.get(tone.j);
-        if (mark) b.dataset.lead = mark;
         b.textContent = spellingOfPc(scale, mod(tone.midi, 12)).text ?? '';
         b.setAttribute(
           'aria-label',
@@ -685,32 +786,18 @@ export default class CompBuilder {
       }
 
       // ——— the numeral, which is also the whole-chord play button ————————————
-      const num = document.createElement('button');
-      num.type = 'button';
-      num.className = 'cb-numeral';
-      const count = this._nameableCount(slot);
-      if (count === null) {
-        num.classList.add('cb-broken');
-        num.textContent = '?';
-      } else {
-        const parts = numeralParts(scale, slot.degree, count);
-        num.textContent = parts.base;
-        if (parts.sup) {
-          const sup = document.createElement('sup');
-          sup.textContent = parts.sup;
-          num.appendChild(sup);
-        }
-      }
-      num.setAttribute('aria-label', `play chord ${i + 1}`);
-      this._listen(num, 'pointerdown', () =>
-        this._press(this._liveTonesOf(slot).map((t) => t.midi))
-      );
-      col.appendChild(num);
+      // Bottom of the column. Plays the chord as stacked — root position.
+      col.appendChild(this._numeralButton(slot, i, {
+        variant: 'roots',
+        label: 'play chord',
+        notes: () => this._liveTonesOf(slot).map((t) => t.midi),
+      }));
 
-      if (count === null) {
+      const { offsets, reason } = this._nameStack(slot);
+      if (offsets === null) {
         const why = document.createElement('p');
         why.className = 'cb-why';
-        why.textContent = this._brokenReason(slot);
+        why.textContent = reason;
         col.appendChild(why);
       }
 
@@ -730,9 +817,18 @@ export default class CompBuilder {
 
     this.slots.forEach((slot, i) => {
       const col = document.createElement('div');
-      col.className = 'cb-col';
+      col.className = 'cb-col cb-col--comp';
 
       this._syncComp(slot);
+
+      // ——— the numeral ——————————————————————————————————————————————————————
+      // Top of the column. Plays the contents of `slot.comp`; an empty column is silent.
+      col.appendChild(this._numeralButton(slot, i, {
+        variant: 'comp',
+        label: 'play your voicing of chord',
+        notes: () => slot.comp.filter((m) => m !== null),
+      }));
+
       for (let r = 0; r < slot.comp.length; r++) {
         const cell = document.createElement('div');
         cell.className = 'cb-square';

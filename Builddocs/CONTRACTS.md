@@ -3756,3 +3756,835 @@ swap. **Decider moves from "the S5 surface seats, together" to §15** — one ta
 ---
 
 *End of `spec-scale`'s section. §1–§14 were not touched. No `/src` file was written.*
+
+---
+
+# 16 · CHANNELS, DEVICES, AND GRAPH
+
+Written by `spec-transport` (P4/S1), 2026-08-31 21:26 EDT. Extends §1–§15, amends nothing.
+This section exists to let **six seats build at the same time without talking to each
+other.** Everything here is an interface or a file boundary. Nothing here is a music
+decision; the four that are music decisions are named in §16.12 with Brandon as decider.
+
+## 16.0 · HOW TO READ THIS SECTION
+
+**The whole thing in one paragraph.** Six fixed channels plus a master. An instrument's
+output enters its channel, passes up to four **inserts** (devices), then the fader, the
+pan, and the mute/solo gate, is tapped for the **meter**, and lands on `masterGain`. A
+**device** is a two-port box with a named parameter list; five of them exist. The
+**graph** is the only thing that decides which device is on which channel and where its
+output goes; the **strip** displays that and can change none of it. **Automation** draws
+four mixer controls over time. The **patch synth** is a sixth instrument with its own,
+separate node graph inside it.
+
+**Which subsection is yours.** Read §16.0 and §16.11 always. Then:
+
+| Seat | Read | Skip |
+|---|---|---|
+| `mixer-strips` | 16.1, 16.4, 16.8, 16.10 | 16.7 |
+| `device-dynamics` | 16.2, 16.3a, 16.3b, 16.10 | 16.5, 16.6, 16.7 |
+| `device-spectral` | 16.2, 16.3c, 16.10 | 16.5, 16.6, 16.7 |
+| `device-space` | 16.2, 16.3d, 16.3e, 16.10 | 16.5, 16.6, 16.7 |
+| `arrangement` | 16.9, 16.10 | 16.2, 16.3, 16.5, 16.7 |
+| `patch-synth` | 16.7 (all of it), 16.8, 16.10 | 16.1, 16.3, 16.4, 16.5, 16.6 |
+| `node-graph` (S4) | 16.1, 16.2, 16.4, 16.5, 16.8, 16.10 | 16.7 |
+| `automation` (S5) | 16.1, 16.6, 16.10 | 16.2, 16.3, 16.7 |
+| `governor` (S5) | 16.8, 16.10 | everything else |
+
+**What already exists and is NOT respecified here.** Read the file, do not redesign it:
+`core/audio.js` (`ctx`, `masterGain`, `masterAnalyser`, `createChannel`, `releaseChannel`,
+`governor`, `voicePool`, `synthVoiceNorm`, `unlock`) · `core/clock.js` (`PPQ = 480`,
+`clock.on('tick')`, `clock.schedule`, `clock.loop`, `clock.position`) · `core/capture.js` ·
+`core/state.js` · `ui/shell.js` (`TOOLS`, `registerSurface`, `surfacesOfKind`, `ToolShell`,
+`createScaleControl`, `createCpuMeter`, `createSurfaceSwitcher`, `createFileMenu`) ·
+instruments `wave-synth`, `overtone-synth`, `drum-synth`, `drum-sampler`, `chord-module` ·
+surfaces `keyboard`, `diatonic-keys`, `scale-circle`, `piano-roll`, `step-grid`,
+`comp-builder` · visuals `spectrum`, `scope`. **`patch-synth` is not built.**
+
+**Where CONTRACTS and the shipped code disagree, the code and SESSIONLOG are the
+evidence.** §16 flags every place it found a disagreement rather than picking silently;
+see §16.8 and §16.9. Do not "fix" §1–§15 to match. Report it.
+
+### 16.0a · CODE COMMENT CONVENTION — every P4 seat
+
+Comments state **what a thing is** and **what state it is in**. Nothing else.
+
+- ALLOWED: what a function does; what a variable holds; units; the node a value lands on;
+  a non-obvious ordering requirement; a `TODO` naming the seat that owns it.
+- FORBIDDEN: contract text copied into a comment · rationale, justification, or history ·
+  "Brandon's call" / "Brandon wants" / any attribution · argument with another file ·
+  a second copy of this section.
+- Reasoning goes in the receipt. The receipt is not a novella.
+
+### 16.0b · TOKEN RULE
+
+**Every P4 dial is already in `ui/tokens.css`** — 85 of them, with real values, appended
+2026-08-31 on Brandon's order so the DAW is skinnable on the first build, not on a second
+pass. So every colour, radius, size, spacing, weight, stroke, opacity, shadow and
+transition in a P4 file is `var(--token)` — **no fallback**, because a fallback means the
+dial does not exist and someone has to come back for it. **A raw literal is a defect.**
+The list, by surface, is **§16.10**. A seat that needs a name that is not there escalates;
+it does not invent one, and it does not write `tokens.css`.
+
+---
+
+## 16.1 · WHAT A CHANNEL IS
+
+**Six fixed channels, `ch1`…`ch6`, plus one master.** Multi-instance is DEFERRED.
+
+The chain from an instrument's output to the master bus, in order:
+
+```
+  instrument voices  (the instrument owns everything above this line)
+      │
+  [1] channelIn    GainNode          ← createChannel(instrumentId), core/audio.js
+      │                                this is §2's `out`. The instrument connects here.
+  [2] insert 0..3  device.input → device.output      ← 0 to 4 devices, in slot order
+      │                                the graph decides which and in what order
+  [3] stripGain    GainNode          ← `strip.gain`   THE FADER
+      │
+  [4] stripPan     StereoPannerNode  ← `strip.pan`
+      │
+  [5] stripMute    GainNode          ← mute/solo resolution, gain is exactly 0 or 1
+      │
+  [6] meterTap     AnalyserNode      ← THE METER READS HERE. Post-fader, post-pan,
+      │                                post-mute: the meter shows what leaves the channel.
+      └──→ masterGain                 (core/audio.js, frozen)
+```
+
+**Four rules that are not negotiable, because breaking one breaks a frozen file:**
+
+1. **`channelIn.gain` belongs to `core/audio.js`.** `synthVoiceNorm` writes it (a
+   `setTargetAtTime` ramp, every time a voice registers or releases). **The fader is NOT
+   this node.** `strip.gain` is `stripGain` at position [3] and nothing else. A seat that
+   puts the fader on `channelIn` will watch it move on its own.
+2. **`createChannel()` connects its node straight to `masterGain`.** `strip.js` calls
+   `createChannel(id)`, then **`channelIn.disconnect()`**, then connects `channelIn` into
+   its own chain. This is legal and edits nothing: the node stays in `audio.js`'s registry
+   (so voice normalization keeps working) and only its downstream connection changes.
+   Teardown calls `releaseChannel(channelIn)`.
+3. **Nothing connects to `ctx.destination`.** §2's rule, unchanged. `masterGain` is the
+   only destination any channel knows.
+4. **The insert chain is patched by exactly one method, `strip.setInserts()` (§16.4), and
+   the only caller is `mixer/graph.js`.**
+
+### 16.1a · The master
+
+`masterGain → masterAnalyser → ctx.destination` is built at module load in `core/audio.js`
+and is **frozen**. The master strip therefore differs from a channel:
+
+| | channel | master |
+|---|---|---|
+| fader | `stripGain.gain` | `masterGain.gain` — audio.js's own node, written by nobody else |
+| pan | yes | **none** |
+| mute / solo | yes | **none** |
+| inserts | 4 slots | **none in P4** — inserting would require breaking a frozen connection |
+| meter | `meterTap` | reads `masterAnalyser` — already in the chain, never reconnected |
+
+**§7's `master` object round-trips as `{"gain": <number>, "inserts": []}`.** `inserts` is
+written as an empty array and read back as one. Master inserts are §16.12's item 1.
+
+### 16.1b · Mute and solo, resolved
+
+One rule, applied to all six channels on every change, by `strip.js`:
+
+```
+  anySolo = ch1.solo || … || ch6.solo
+  audible(ch) = anySolo ? (ch.solo && !ch.mute) : !ch.mute
+  stripMute.gain = audible(ch) ? 1 : 0     // setTargetAtTime, 8 ms, never a hard step
+```
+
+Solo is not exclusive: two channels can be soloed at once. Mute wins over solo on the same
+channel. Master has neither.
+
+---
+
+## 16.2 · WHAT A DEVICE IS
+
+**One interface. Five implementations. There is no base class and no shared file — see
+§16.11.** Every device is a plain ES module with a default-exported class.
+
+```js
+export default class Device {
+  static id                  // 'gate'|'compressor'|'eq'|'reverb'|'delay'
+  static label               // 'Gate' — the words on the slot and the pop-out
+  static estimatedWeight     // integer, §8 — what the governor is asked for BEFORE
+                             //   `new Device()` runs. gate 3 · delay 5 · eq 29 ·
+                             //   compressor 45 · reverb 135
+  static params              // ordered array, the pop-out draws it in this order:
+                             //   { path, label, min, max, default, unit, curve, step }
+                             //   unit  : 'dB'|'Hz'|'ms'|'%'|'x'|''
+                             //   curve : 'linear'|'log'   (log = frequency and time)
+
+  constructor(ctx)           // ctx ONLY. Never `out`, never a channel, never the graph.
+                             //   Builds every node it will ever own, right here.
+
+  get input()                // AudioNode. What feeds this device.
+  get output()               // AudioNode. What this device feeds.
+
+  setParam(path, value)      // path is a `static params` path. Out-of-range CLAMPS.
+  getParam(path)
+
+  get bypass()
+  set bypass(v)              // true → input reaches output unprocessed and inaudibly
+                             //   crossfaded. See the invariant below.
+
+  getState()                 // JSON-safe object → §7 `inserts[].state`. No nodes,
+  setState(obj)              //   no functions, no undefined.
+
+  getAnalyser(which)         // 'spectrum'|'scope' → an AnalyserNode ALREADY in this
+                             //   device's chain, or null. The reader never reconnects it.
+  get readout()              // live numbers a visual may poll, or null. JSON-safe.
+                             //   Polled from rAF by the visual; never scheduled from.
+
+  mountCompact(el)           // the pop-out panel. Devices have no expanded view.
+  unmount()
+  dispose()                  // every node disconnected, every frame cancelled,
+                             //   every listener dropped
+
+  get cpuWeight()            // integer, LIVE. May differ from `estimatedWeight`
+                             //   (reverb's changes with its IR).
+}
+```
+
+**THE INVARIANT THAT MAKES THE GRAPH POSSIBLE: `input` and `output` return the same two
+nodes for the life of the device.** The graph connects to them once. Bypass, parameter
+changes, and `setState()` must all happen *inside* the box. A device that swaps its own
+input or output node silently disconnects itself from the mixer.
+
+**`readout` vs `getAnalyser`.** `getAnalyser` hands back a real `AnalyserNode` for anything
+that draws a waveform or a spectrum. `readout` is for numbers a `AnalyserNode` cannot give
+— a compressor's live gain reduction, a gate's open/closed. Return `null` from either when
+the device does not offer it. `vis/spectrum.js` throws a clear `TypeError` on an object
+with no `getAnalyser`, so every device implements the method even when it returns `null`.
+
+**Do not extend this interface.** Six seats build against it. If yours needs something
+that is not here, that is an escalation, not an eighth method.
+
+---
+
+## 16.3 · THE FIVE DEVICES — PARAMETERS AND WHAT EACH SHOWS
+
+**Two devices get a picture. Three teach by parameter.**
+
+| device | its visual | file that draws it |
+|---|---|---|
+| `eq` | **spectrum analyzer**, with the band curve over it | `vis/spectrum.js` (P1, reused) |
+| `compressor` | **gain-reduction display** | `vis/gain-reduction.js` (new) |
+| `gate` | one open/closed indicator and its threshold readout | none — DOM, in the pop-out |
+| `reverb` | parameter readouts only | none |
+| `delay` | parameter readouts only | none |
+
+### 16.3a · `gate` — `devices/gate.js`
+
+"Mutes track under certain gain level."
+
+| path | label | range | unit | curve | default |
+|---|---|---|---|---|---|
+| `threshold` | Threshold | -80 … 0 | dB | linear | -40 |
+| `attack` | Attack | 0.1 … 100 | ms | log | 2 |
+| `release` | Release | 5 … 2000 | ms | log | 100 |
+
+`readout` → `{ open: <bool>, levelDb: <number> }`. Nothing else. Built from an
+`AnalyserNode` plus a `GainNode` (§8: weight 3). `getAnalyser('scope')` may return the
+analyser; `getAnalyser('spectrum')` returns `null`.
+
+### 16.3b · `compressor` — `devices/compressor.js`
+
+"Makes soundwave peaks smaller and troughs larger."
+
+| path | label | range | unit | curve | default |
+|---|---|---|---|---|---|
+| `threshold` | Threshold | -60 … 0 | dB | linear | -24 |
+| `ratio` | Ratio | 1 … 20 | x | linear | 4 |
+| `attack` | Attack | 0 … 1000 | ms | log | 3 |
+| `release` | Release | 10 … 1000 | ms | log | 250 |
+| `makeup` | Makeup | 0 … 24 | dB | linear | 0 |
+
+`readout` → `{ reductionDb: <number ≤ 0>, inputDb, outputDb }`, sampled fresh on every
+read. `reductionDb` is `DynamicsCompressorNode.reduction`. **`vis/gain-reduction.js` polls
+`device.readout` from rAF and touches no audio node.** §8 weight 45.
+
+### 16.3c · `eq` — `devices/eq.js`
+
+"Adds/removes gain to a specific band (consecutive group) of frequencies."
+
+**Three bands.** §8 already prices `eq.js` as `3 × biquad + analyser = 29`; three is the
+number the budget was written for. Each band is a `BiquadFilterNode` of type `peaking`, so
+all three parameters mean something on all three bands.
+
+Per band `n` ∈ 0,1,2 — **these three words appear on screen exactly as written:**
+
+| path | label | range | unit | curve | default |
+|---|---|---|---|---|---|
+| `band<n>.gain` | **Gain** | -24 … +24 | dB | linear | 0 |
+| `band<n>.freq` | **Freq** | 20 … 20000 | Hz | log | 200 / 1000 / 5000 |
+| `band<n>.q` | **Q** | 0.1 … 18 | '' | log | 1 |
+
+Do not rename them. Do not add a fourth parameter, a filter-type selector, or a band.
+
+**The picture.** `getAnalyser('spectrum')` returns the device's own `AnalyserNode`, placed
+**after** the three filters, so a student sees the result of the shaping.
+`vis/spectrum.js` is constructed with the device itself — `new Spectrum(device)` — and is
+**not edited**. The band curve is drawn by `eq.js` on its **own** canvas, positioned over
+the Spectrum's element with the same Hz axis (log, 20 Hz … 20 kHz — `Spectrum`'s
+`minHz`/`maxHz` options set it and its getters read it back). One spectrum analyzer exists
+in this app. Do not write a second.
+
+### 16.3d · `reverb` — `devices/reverb.js`
+
+"Sound of waves echoing off solid structures."
+
+| path | label | range | unit | curve | default |
+|---|---|---|---|---|---|
+| `size` | Size | 0.1 … 4.0 | s | log | 1.5 |
+| `damping` | Damping | 0 … 100 | % | linear | 40 |
+| `mix` | Mix | 0 … 100 | % | linear | 25 |
+
+`ConvolverNode` with a generated impulse response; `size` is the IR length in seconds.
+**`cpuWeight` is read from the current IR, never a constant** — §8's table: 0.1 s → 133,
+0.25 s → 150, 0.5 s → 165, 1.0 s → 184, 2.0 s → 235, 4.0 s → 325. Interpolate between
+rows. `getAnalyser()` returns `null`. `readout` returns `null`.
+
+**When the governor refuses it:** the device is not constructed at all — the graph asks
+`governor.request(Reverb.estimatedWeight)` first — and the refusal is drawn (§16.5c). A
+refused reverb never half-exists.
+
+### 16.3e · `delay` — `devices/delay.js`
+
+"Repeating the sound and manipulating the process."
+
+| path | label | range | unit | curve | default |
+|---|---|---|---|---|---|
+| `time` | Time | 10 … 2000 | ms | log | 250 |
+| `feedback` | Feedback | 0 … 95 | % | linear | 35 |
+| `tone` | Tone | 200 … 12000 | Hz | log | 6000 |
+| `mix` | Mix | 0 … 100 | % | linear | 30 |
+
+`feedback` is hard-clamped at 95 so a runaway is not reachable. §8 weight 5.
+`getAnalyser()` and `readout` return `null`.
+
+### 16.3f · Both space devices must survive a branch
+
+Nothing in `reverb.js` or `delay.js` may assume it is inline. The graph will put either on
+a branch beside a dry path (§16.5b). That means: `mix` is a **wet/dry balance inside the
+box**, and a device on a branch is simply run at `mix = 100`. No device ever reads the
+graph to find out where it is.
+
+---
+
+## 16.4 · THE STRIP — WHAT IS ON IT, AND WHAT IS ONLY DISPLAYED
+
+`mixer/strip.js` builds all six channels and the master. On a strip: **fader, level meter,
+pan, mute/solo, and four insert slots. Nothing else.**
+
+```js
+export default class Strip {
+  constructor(ctx, { id, label, instrumentId = null, isMaster = false })
+  get input()                 // the channelIn node — this is §2's `out`
+  get output()                // masterGain, or ctx.destination's feed for the master
+  get gain()  set gain(v)     // 0 … 1.5   → stripGain.gain          automation target
+  get pan()   set pan(v)      // -1 … 1    → stripPan.pan            automation target
+  get mute()  set mute(v)     // bool                                automation target
+  get solo()  set solo(v)     // bool                                automation target
+  get meterTap()              // AnalyserNode — vis/meter.js reads this, never reconnects
+  setInserts(devices)         // ORDERED array of §16.2 devices. Rebuilds the insert
+                              //   chain. THE ONLY ROUTE-CHANGING METHOD ON THIS CLASS.
+  get inserts()               // read-only copy of that array
+  setRouting(view)            // display only — see below. Draws; changes no connection.
+  getState()  setState(obj)   // §7 `strip` + `inserts[]` ids, JSON-safe
+  mountCompact(el)  unmount()  dispose()
+}
+export function createStrips(ctx, specs)   // the six + master, with solo resolved across them
+```
+
+**`setInserts()` has exactly one caller in the whole app: `mixer/graph.js`.** It is not
+called from anywhere inside `strip.js`, and no click handler in `strip.js` reaches it.
+`strip.js` **does not import `mixer/graph.js`** — that file does not exist while
+`mixer-strips` is building, and it must never need to.
+
+### 16.4a · The insert slot, and "where it is being sent"
+
+Four slots. A slot displays three things and offers **no control except the pop-out**:
+
+1. **What is loaded** — the device's `static label`, or the empty-slot mark.
+2. **Its meter** — the device's own `readout` or `getAnalyser()`, drawn small.
+3. **Where it is being sent** — a read-only destination chip.
+
+**There is no send knob on the strip.** There is no add, no remove, no reorder, no
+drag. Adding a device happens in the graph.
+
+`setRouting(view)` is how the strip learns routing without knowing the graph exists.
+`view` is plain JSON-safe data, pushed in by `graph.js` after every change:
+
+```js
+{
+  slots: [ { slot: 0, deviceId: 'eq',   label: 'EQ',   to: 'Compressor' },
+           { slot: 1, deviceId: 'comp', label: 'Compressor', to: 'Master' },
+           { slot: 2, deviceId: null,   label: null,   to: null },
+           { slot: 3, deviceId: null,   label: null,   to: null } ],
+  out:   [ 'Master', 'Reverb' ]        // one entry per outgoing edge, in port order
+}
+```
+
+The chip reads `→ Master`. Two entries in `out` means the channel is going two places, and
+both are drawn. Until `setRouting()` is called, a strip draws `→ Master` for its output and
+an empty mark for every slot — the state of a fresh project.
+
+### 16.4b · The meter — `vis/meter.js`
+
+Owned by `mixer-strips`. One class, used seven times plus once per insert slot.
+
+```js
+export default class Meter {
+  constructor(analyser, { peakHoldMs = 1200, orientation = 'vertical' } = {})
+  mount(el)  unmount()  dispose()
+  get level()   // 0..1, the value last drawn
+  get peak()    // 0..1, held
+}
+```
+
+Reads `getByteTimeDomainData` from the analyser it is handed, draws from rAF, and
+**cancels its frame on `unmount()`** — a hidden meter costs nothing. Uses
+`IntersectionObserver` to stop when scrolled out of view, the same way `vis/spectrum.js`
+already does. `--meter-ok` below the hot band, `--meter-hot` above it, `--meter-peak` for
+the held line, `--meter-clip` at 1.0.
+
+**`vis/meter.js` is not used by any device seat.** The gain-reduction display is a separate
+file with a separate owner (§16.11).
+
+---
+
+## 16.5 · THE GRAPH, AS DATA
+
+Per §7's `graph` object, unchanged: `{ nodes: [...], edges: [...] }`.
+
+```jsonc
+"nodes": [ { "id": "n1", "type": "channel", "ref": "ch1", "x": 120, "y": 40 } ]
+"edges": [ { "from": "n1", "fromPort": 0, "to": "master", "toPort": 0 } ]
+```
+
+**Node types — there are three.**
+
+| `type` | `ref` | is |
+|---|---|---|
+| `channel` | `'ch1'`…`'ch6'` | one of the six fixed channels, at its post-fader output |
+| `insert` | `inserts[].id`, e.g. `'i1'` | one device, living in a slot on one channel |
+| `master` | — | exactly one, `id: "master"`, cannot be deleted or moved off screen |
+
+There is no `send` node type. **A send is a channel node with more than one outgoing
+edge** — that is exactly what "where it is being sent" means on the strip, and it needs no
+new field in §7.
+
+**Legal edges — everything not on this list is refused.**
+
+- `channel → insert` · `channel → master`
+- `insert → insert` · `insert → master`
+- `toPort` is always `0`; every device is one-in.
+- `fromPort` numbers the outgoing branches of one node: `0` is the main path, `1` and `2`
+  are the extra ones. Two edges may not share a `fromPort` on the same node.
+- REFUSED: any edge **into** a `channel` (a channel's input is its instrument, always) ·
+  any edge **out of** `master` · a self-edge · **any edge that closes a cycle** — walk the
+  graph before accepting.
+- A node with no path to `master` is legal, silent, and drawn dimmed. It is never deleted
+  for being unreachable.
+
+### 16.5a · Deleting a node
+
+**Deleting a node deletes every edge that touches it, in the same operation.** No dangling
+edge ever reaches `getState()`. If the deleted node was an insert, its device is
+`dispose()`d and `strip.setInserts()` is called with the remaining devices. The strip's
+`setRouting()` is re-pushed. A student who deletes a device with three cables on it sees
+three cables vanish, not an error.
+
+### 16.5b · A parallel chain, written out
+
+One source, two branches, recombining at the master. This is the shape the graph exists
+for. Web Audio sums at a node's input, so "recombining" is just two edges landing on the
+same node.
+
+```jsonc
+"edges": [
+  { "from": "ch1", "fromPort": 0, "to": "i1", "toPort": 0 },   // dry-ish branch: EQ
+  { "from": "ch1", "fromPort": 1, "to": "i2", "toPort": 0 },   // wet branch: reverb
+  { "from": "i1",  "fromPort": 0, "to": "master", "toPort": 0 },
+  { "from": "i2",  "fromPort": 0, "to": "master", "toPort": 0 }
+]
+```
+
+Both branches are audible at once and both reach `master`. **This must work or the stage
+failed.**
+
+### 16.5c · A refusal is drawn, never dropped
+
+A refused edge, a refused device, and a refused node all do the same thing: the attempted
+connection or node flashes `--edge-refused` and a one-line reason appears next to it. It is
+never silently discarded, and the graph state is never partially written.
+
+### 16.5d · One-way, in one sentence
+
+**`mixer/graph.js` is the only file in the app that changes a route.** It calls
+`strip.setInserts()` and `strip.setRouting()`; the strip calls nothing back. `strip.js`
+does not import `graph.js`; `graph.js` reads `strip.js` and never edits it.
+
+---
+
+## 16.6 · AUTOMATION
+
+Four targets. Nothing else automates, ever. `mixer/automation.js`, per §7:
+
+```jsonc
+"automation": [ { "target": "strip.gain", "points": [ { "tick": 0, "value": 0.8 } ] } ]
+```
+
+| target | domain | kind |
+|---|---|---|
+| `strip.gain` | 0 … 1.5 | continuous |
+| `strip.pan` | -1 … 1 | continuous |
+| `strip.mute` | 0 or 1 | stepped |
+| `strip.solo` | 0 or 1 | stepped |
+
+- Points are sorted by `tick`, ascending. **One point per tick per target** — writing a
+  second point at the same tick replaces the first.
+- **Continuous:** linear interpolation in the target's own domain between adjacent points.
+  Before the first point and after the last, the value is **held flat**. Applied as
+  `setValueAtTime(v, timeOf(tick))` at the point, then
+  `linearRampToValueAtTime(next, timeOf(nextTick))`.
+- **Stepped:** no interpolation. `setValueAtTime(v, timeOf(tick))` and hold. A mute does
+  not fade. (`mute` and `solo` land on `stripMute.gain` through §16.1b's resolution, not
+  directly — automation writes the flag, `strip.js` resolves it.)
+- **Values are scheduled from `clock.on('tick')`, inside the half-open window
+  `[fromTick, toTick)`, using that payload's `timeOf(tick)`.** Never from rAF. §3 and §10.
+- An empty lane is not written to the project file.
+
+The fader-grab rule is §16.12's item 3.
+
+---
+
+## 16.7 · THE PATCH SYNTH
+
+`instruments/patch-synth.js` implements **§2 in full** — it is an instrument, not a device.
+Its graph is **its own, internal, and completely separate from `mixer/graph.js`.** It shares
+no code with that file and does not import it.
+
+**This subsection is numbered so it can be split.** A handoff may say "16.7.1–16.7.4 DONE,
+16.7.5–16.7.8 OPEN" and the next agent needs only the open subsections and the file.
+
+### 16.7.1 · The instrument shell
+
+Standard §2: `static id = 'patch-synth'`, `static label = 'Patch Synth'`,
+`static playable = true`, `static needsLoad = false`, `static pieces = null`,
+`static emitsNotes = false`. `constructor(ctx, out)`, `noteOn`/`noteOff`/`allNotesOff`,
+`setParam`/`getParam`, `getState`/`setState`, `voiceCount`, `cpuWeight`, `mountCompact`,
+`mountExpanded`, `unmount`, `dispose`, `getAnalyser(which)`.
+
+`cpuWeight` is **summed from the nodes actually in the patch**, using §8's measured table
+— `GainNode` 1, `WaveShaperNode` 3, `DelayNode` 4, `StereoPannerNode` 4,
+`BiquadFilterNode` 9, plain voice 10. A flat per-node number is wrong and §8 says so.
+
+### 16.7.2 · Sources
+
+| node | in ports | out ports | params |
+|---|---|---|---|
+| `osc` | `freq` (control), `detune` (control) | `out` (audio) | `wave` (sine/triangle/square/saw), `octave`, `detune` |
+| `noise` | — | `out` (audio) | `color` (white/pink) |
+
+### 16.7.3 · Modulators
+
+| node | in ports | out ports | params |
+|---|---|---|---|
+| `lfo` | — | `out` (control) | `rate` (Hz), `depth`, `wave` |
+| `env` | `gate` (trigger) | `out` (control) | `attack`, `decay`, `sustain`, `release` |
+
+**The envelope's four stages are labelled `Attack`, `Decay`, `Sustain`, `Release`.** Those
+four words, in that order. The LFO is a fixed low-frequency oscillator; it has no gate.
+
+### 16.7.4 · Processors
+
+| node | in ports | out ports | params |
+|---|---|---|---|
+| `filter` | `in` (audio), `cutoff` (control), `q` (control) | `out` (audio) | `type`, `cutoff`, `q` |
+| `gain` | `in` (audio), `amount` (control) | `out` (audio) | `amount` |
+| `out` | `in` (audio) | — | — |
+
+There is exactly one `out` node per patch. It cannot be deleted. It is the only thing wired
+to §2's `out` argument.
+
+### 16.7.5 · Math nodes, and how they stay optional
+
+| node | in ports | out ports | params |
+|---|---|---|---|
+| `add` | `a` (control), `b` (control) | `out` (control) | `b` (when unconnected) |
+| `multiply` | `a` (control), `b` (control) | `out` (control) | `b` (when unconnected) |
+| `scale` | `in` (control) | `out` (control) | `mul`, `add` |
+| `invert` | `in` (control) | `out` (control) | — |
+
+**They stay optional, not hidden, by four mechanical rules:**
+
+1. The palette has four groups in this order: **Sources · Modulators · Processors ·
+   Math.** Math is last.
+2. The Math group is **collapsed on first load**. It opens on a click and stays open for
+   the session. It is never removed.
+3. **No starting patch and no default contains a math node.** Every one of §16.7's example
+   wirings works with zero math nodes in it.
+4. Nothing in the instrument refuses to function without one. A student who never opens
+   the group has a complete instrument.
+
+### 16.7.6 · Cables — what may connect to what
+
+Ports carry one of two **domains**: `audio` or `control`.
+
+- `audio → audio` — legal.
+- `control → control` — legal.
+- `audio → control` and `control → audio` — **refused, visibly**, with the reason drawn.
+- One cable per **input** port; an input already taken refuses a second cable and says so.
+- An **output** port may fan out to many inputs. That is how a parallel chain starts.
+- Cycles are refused.
+
+It is **patch cables, dragged from an output to an input.** Not a matrix, not a dropdown.
+
+### 16.7.7 · A parallel chain inside the instrument
+
+One `osc` fanning out to two `filter` nodes, both feeding one `gain`, that `gain` feeding
+`out`. Two branches, recombined. Web Audio sums at the `gain`'s input; the instrument does
+not need a mixer node to make it work.
+
+### 16.7.8 · Caps, state, and views
+
+- **24 nodes**, `noCap` lifts it. The count is the patch synth's own nodes only — it is a
+  **different count from `mixer/graph.js`'s 24** (§16.8). Ask
+  `governor.request(<the node's weight>)` before creating; on refusal, draw the refusal on
+  the palette entry and create nothing.
+- `getState()`/`setState()` round-trip **every node and every cable**: node id, kind, x, y,
+  every param value; cable from-node/from-port/to-node/to-port. JSON-safe, no nodes, no
+  functions, no `undefined`.
+- `mountCompact(el)` — the DAW: small, still, readable. `mountExpanded(el)` — the
+  standalone page: the patch is the visual and gets the animation budget.
+- `dispose()` — every node, every cable, every listener, every frame.
+- **`tools/patch-synth.html` and `shell.js`'s `TOOLS` flag are not in this seat's lane.**
+  See §16.12 item 5.
+
+---
+
+## 16.8 · THE GOVERNOR, IN P4 TERMS
+
+§8 restated against the four things P4 can allocate. **Nothing here changes a cap number.**
+
+| what | default cap | who enforces it |
+|---|---|---|
+| voices | **32** total | `core/audio.js` — already does, frozen |
+| inserts | **4 per channel** | `mixer/graph.js`, before constructing a device |
+| sends | **2 per channel** | `mixer/graph.js` — an "extra" outgoing edge past the first |
+| graph nodes | **24** | two separate counts: `mixer/graph.js` for the mixer graph, `instruments/patch-synth.js` for its own |
+
+**`noCap` lifts all four. The meter still reads and still turns red. Nothing is blocked.**
+`governor.noCap` is a plain runtime property on the object exported by `core/audio.js`, not
+a build-time flag — **it ships on the deployed build** and nothing strips it.
+
+**Where §8 and the shipped code disagree, stated rather than picked:**
+`governor.request(cost)` in `src/core/audio.js` takes `cost` and **does not read it** — it
+returns `voicePool.count < 32`, or `true` when `noCap` is on. The insert, send, and node
+caps are **not in `audio.js` at all.** Two consequences for P4, both of them lane rules:
+
+1. A P4 seat that calls `governor.request(weight)` gets a **voice-count answer**, not a
+   weight answer. Call it — the caps you own are yours to enforce **in addition**, in your
+   own file, against the numbers in the table above.
+2. `governor.allocatedWeight` exists and tracks live voice weight only. It is telemetry.
+   Do not treat it as an admission threshold, and **do not edit `audio.js`.** If this looks
+   wrong to you, report it; the governor's logic was measured in P1 and is frozen.
+
+Every refusal, everywhere, is **visible**: a refused voice, node, insert, send, or edge is
+drawn as refused with a one-line reason. Never a silent drop.
+
+---
+
+## 16.9 · THE BIND METHODS — NAMED, RECONCILED, AND CLOSED
+
+Four P3 seats independently invented wiring methods because §4 orders every surface to
+subscribe to a store and never says how the store arrives. §2's `[AMENDED 2026-08-25]`
+block already named three of them against the shipped code. §16 closes the rest and gives
+the shape one name so a P4 seat matches it instead of inventing an eighth.
+
+**The convention. Every `bindX` in this app has the same five properties:**
+
+1. It takes one duck-typed thing, never a singleton import.
+2. It **drops the previous binding first**, then adopts the new one.
+3. It redraws **once**, immediately.
+4. It returns `this`.
+5. It is **optional** — unbound, the object still works on a sensible default.
+   `unbindX()` drops the subscription and touches nothing already drawn.
+
+**The eight names, and where they live now.** Nothing is renamed; this records what
+shipped.
+
+| method | on | status |
+|---|---|---|
+| `bindState(store)` / `unbindState()` | `piano-roll`, `scale-circle`, `chord-module`, `comp-builder` | **the name.** §2 amendment |
+| `attachState(store)` | — | **struck.** Zero occurrences remain in `/src` or `/tools` |
+| `bindInput(bus)` / `unbindInput()` | `chord-module` | kept. §2 amendment |
+| `bindTargets(rows)` / `unbindTargets()` | `chord-module` | kept. §2 amendment |
+| `bindCapture(capture)` / `unbindCapture()` | `piano-roll` | kept — **with the rule below** |
+| `bindInstrument(inst)` / `unbindInstrument()` | `step-grid` | kept. Named here for the first time |
+| `getNotes()` / `setNotes(notes)` | `piano-roll`, `capture` | kept |
+| `addNotes(notes)` / `toProjectNotes()` | `piano-roll`, `capture` | kept |
+
+**`setNotes` replaces. `addNotes` appends. `getNotes` returns the live objects;
+`toProjectNotes` returns §7's four fields and is what `save.js` writes.**
+
+### 16.9a · The capture-commit rule — read this before binding a Capture
+
+`core/capture.js` emits `'commit'` with three `kind` values and they are **not the same
+kind of message**:
+
+| `kind` | `notes[]` is | the consumer must |
+|---|---|---|
+| `'capture'` | this take's notes | **add** |
+| `'discard'` | `[]` | **ignore** |
+| `'requantize'` | **every note of every take, restated in full** | **replace** |
+
+`piano-roll.js`'s `_onCaptureCommit` does not branch on `kind` and calls `addNotes()` for
+all three, so a requantize adds a second copy of everything on the roll. It was never
+reachable in P3 and `piano-roll.js` is **frozen — report it, do not fix it.**
+
+**So the `arrangement` seat does not call `roll.bindCapture()`.** It subscribes to
+`capture.on('commit', …)` itself, branches on `kind`, and calls `roll.addNotes()` or
+`roll.setNotes(capture.getNotes())` accordingly. Routing around a frozen file, without
+editing it.
+
+---
+
+## 16.10 · TOKENS
+
+**The tokens exist. They are in `ui/tokens.css` right now, with real values, appended
+under the `P4 — THE DAW` heading — 85 of them.** Brandon's order, 2026-08-31: the DAW is
+skinnable on the first build, not on a second pass.
+
+**So: no fallback. Write `var(--token)`, not `var(--token, #131a26)`.** A fallback means
+the dial does not exist. Every dial below exists. A raw colour, radius, or size literal
+anywhere in a P4 file is a defect.
+
+**Reuse before you reach for a P4 name.** These already say it: `--bg` `--panel` `--line`
+`--text` `--text-dim` `--accent` `--warn` `--meter-ok` `--meter-hot` `--glow`
+`--shadow-raised` `--r-*` `--sp-*` `--fs-*` `--w-*` `--track-*` `--lh-*` `--op-*` `--z-*`
+`--bw-*` `--stroke-*` `--fade-*` `--dur-*` `--ease` `--ease-linear` `--tr-*` `--font-ui`
+`--font-mono` `--canvas-*` and the whole layout/cursor/keyword axis. A panel is `--panel`.
+A rule is `--line`. A refusal is `--warn`. Motion off in the DAW is `--dur-fast: 0ms` on
+one root, not a rule each seat remembers.
+
+**Geometry composes from `--sp-*` and is not tokenised separately** — strip `--sp-30`,
+meter `--sp-4`, lane row `--sp-14`, node `--sp-60` — so `--sp-unit` stays the single
+density dial for the whole DAW.
+
+**The 85 P4 dials, by surface.** Read them out of `ui/tokens.css`; each carries a comment
+saying what it is for.
+
+| surface | tokens |
+|---|---|
+| ground | `--recess` `--raise` |
+| strip | `--strip-head` `--strip-sel` `--fader-track` `--fader-fill` `--fader-thumb` `--pan-track` `--pan-thumb` `--pan-center` `--mute-on` `--solo-on` `--slot-face` `--slot-empty` `--slot-route` |
+| meter | `--meter-track` `--meter-peak` `--meter-clip` `--meter-tick` |
+| gain reduction | `--reduction-track` `--reduction-fill` `--reduction-zero` |
+| devices | `--device-head` `--knob-track` `--knob-fill` `--knob-pointer` `--bypass-on` `--bypass-off` |
+| EQ | `--band-curve` `--band-fill` `--band-handle` `--band-1` `--band-2` `--band-3` |
+| gate | `--gate-open` `--gate-closed` `--gate-threshold` |
+| pop-out | `--popout-ground` `--scrim` |
+| graph + cables | `--graph-ground` `--graph-grid` `--node-fill` `--node-head` `--node-border` `--node-selected` `--node-dragging` `--node-dimmed` `--port-in` `--port-out` `--port-active` `--edge-audio` `--edge-control` `--edge-refused` `--edge-hover` `--cable-drag` `--math-group` |
+| automation | `--lane-ground` `--lane-grid` `--lane-curve` `--lane-point` `--lane-point-on` `--lane-step` |
+| arrangement | `--ruler-ground` `--ruler-tick-bar` `--ruler-tick-beat` `--lane-head` `--lane-row` `--lane-row-alt` `--clip-fill` `--playhead-line` `--loop-region` `--punch-region` `--arm-on` |
+| transport + header | `--transport-ground` `--btn-face` `--btn-active` `--play-on` `--rec-on` |
+| stacking | `--z-scrim` `--z-drag` |
+| motion | `--tr-transform` `--tr-stroke` `--tr-color` |
+| canvas | `--canvas-lw-2` `--canvas-lw-3` |
+
+**Two rules carried forward from the file's own header, because P4 can break them:**
+
+- A **derived** token — anything that should rescale off `--fs-root`, `--sp-unit`,
+  `--r-unit`, `--bw`, `--stroke-w`, or `--canvas-lw` — lives in the `*` block, never in
+  `:root`. Declaring one on `:root` freezes it against a variant and looks correct until
+  someone opens an expanded view.
+- **Never borrow a `--deg-*` hue for a visual.** §9: a student would learn a teaching
+  association that is not true. The three EQ band colours are their own for this reason.
+
+**A P4 seat still does not write `ui/tokens.css`.** The dials are already in it. A seat
+that finds a surface with no dial escalates and one seat adds it, so the file keeps one
+owner at a time.
+
+## 16.11 · THE FILE LIST — ONE OWNER PER FILE
+
+**No file below is written by two seats. This is the whole reason six seats can run at
+once.** Writing a file you do not own is a STOP condition.
+
+| seat | stage | writes, and only these |
+|---|---|---|
+| `daw-shell` | S2 | `/index.html` · `/src/ui/daw-shell.js` · `/src/core/state.js` |
+| `arrangement` | S3 ‖ | `/src/ui/arrangement.js` |
+| `mixer-strips` | S3 ‖ | `/src/mixer/strip.js` · `/src/vis/meter.js` |
+| `device-dynamics` | S3 ‖ | `/src/devices/gate.js` · `/src/devices/compressor.js` · `/src/vis/gain-reduction.js` |
+| `device-spectral` | S3 ‖ | `/src/devices/eq.js` |
+| `device-space` | S3 ‖ | `/src/devices/reverb.js` · `/src/devices/delay.js` |
+| `patch-synth` | S3 ‖ | `/src/instruments/patch-synth.js` |
+| `node-graph` | S4 | `/src/mixer/graph.js` |
+| `automation` | S5 ‖ | `/src/mixer/automation.js` |
+| `governor` | S5 ‖ | `/src/ui/cpu-meter.js` |
+
+**Written by nobody in P4 — read only:** `/src/ui/tokens.css` · `/src/ui/shell.js` ·
+`/src/core/audio.js` · `/src/core/clock.js` · `/src/core/input.js` · `/src/core/capture.js`
+· every file under `/src/instruments/` except `patch-synth.js` · every file under
+`/src/surfaces/` · `/src/theory/` · `/src/vis/spectrum.js` · `/src/vis/scope.js` ·
+`/tools/*.html` · `Builddocs/CONTRACTS.md`.
+
+**Three traps, named so nobody walks into them:**
+
+1. **There is no `/src/devices/device.js`.** The device interface is §16.2, in text. Three
+   seats build devices at the same time; a shared base class is a file two of them would
+   write. **Do not create one.** Copy the shape; do not extract it.
+2. **`/src/vis/meter.js` belongs to `mixer-strips`.** `/src/vis/gain-reduction.js` belongs
+   to `device-dynamics`. They are two files with two owners, and neither imports the other.
+3. **`/src/mixer/graph.js` does not exist while S3 runs.** No S3 seat imports it, waits for
+   it, or stubs it. The graph reaches the strip through `setInserts()`/`setRouting()` and
+   reaches a device through `input`/`output` — both defined here, both buildable blind.
+
+---
+
+## 16.12 · OPEN DECISIONS — `spec-transport`
+
+None of these blocks a seat. Every one has a working default written above, and every one
+is a small, named change point.
+
+1. **Master inserts.** §16.1a ships `master.inserts` as an always-empty array, because
+   `masterGain → masterAnalyser → ctx.destination` is built inside frozen `audio.js`.
+   Enabling them means breaking one connection in a frozen file. **Decider: Brandon,
+   through the Troubleshooter.** Change point: `Strip`'s `isMaster` branch, one place.
+
+2. **Where the meter taps.** §16.1 puts `meterTap` **after** the fader, pan, and mute, so
+   the meter moves when the fader moves. Pre-fader metering shows the signal arriving
+   instead. This is how signal flow reads to a student. **Decider: Brandon.** Change point:
+   one `connect()` target in `strip.js`.
+
+3. **The fader-grab rule.** A student grabs an automated fader mid-playback. Default
+   written above: **the hand wins while held, the lane resumes at the next point.** The
+   alternative is that the lane wins and the fader snaps back. **Decider: Brandon** — the
+   `automation` seat's brief escalates this by name.
+
+4. **Gate / reverb / delay visuals.** §16.3 gives the gate an open/closed indicator and
+   gives reverb and delay parameter readouts only. The brief says keep those three
+   minimal; how minimal is what a student sees. **Decider: Brandon.**
+
+5. **`tools/patch-synth.html` and its `TOOLS` row.** `ui/shell.js` carries
+   `{ id: 'patch-synth', href: 'patch-synth.html', available: false }`. Flipping it is a
+   one-boolean edit to `shell.js`, which **no P4 seat owns**, and the page itself is in no
+   seat's file list. **Decider: the Troubleshooter** — assign it to a seat or defer it to
+   P5. Not `patch-synth`'s to take.
+
+6. **EQ band type.** §16.3c ships three `peaking` bands so Gain, Freq, and Q all mean
+   something on every band. Shelves at the ends are the common alternative and would make
+   Q meaningless on two of the three. **Decider: Brandon** — the `device-spectral` brief
+   escalates parameter naming and band count by name.
+
+7. **`governor.request(cost)` ignores `cost`.** §16.8 states it as found rather than
+   working around it. `core/audio.js` is frozen and P1 measured it. **Decider: the
+   Troubleshooter**, if a P4 seat reports that the voice-count-only answer bit them.
+
+---
+
+*End of `spec-transport`'s section. §1–§15 were not touched. No `/src` file was written.*

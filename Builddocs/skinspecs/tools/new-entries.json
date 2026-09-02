@@ -1,0 +1,101 @@
+[
+  {
+    "axis": "shape",
+    "property": "CanvasRenderingContext2D.lineWidth",
+    "value": "cfg.lineWidth",
+    "token": null,
+    "expected_sites": null,
+    "measured_sites": 3,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "value is a variable, nothing to replace"
+  },
+  {
+    "axis": "shape",
+    "property": "CanvasRenderingContext2D.lineWidth",
+    "value": "1",
+    "token": "--canvas-lw",
+    "expected_sites": null,
+    "measured_sites": 5,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "Job 2 token, new. FENCE 1-style: a JS property assignment, not CSS. Reachable by the extended sweep.py canvas-assignment regex, but the replacement needs the TOKENS getComputedStyle plumbing (see spectrum.js:48 / scope.js:46), not a bare value swap -- hand work."
+  },
+  {
+    "axis": "shape",
+    "property": "CanvasRenderingContext2D.lineWidth",
+    "value": "width",
+    "token": null,
+    "expected_sites": null,
+    "measured_sites": 1,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "value is a variable, nothing to replace"
+  },
+  {
+    "axis": "depth",
+    "property": "_fade() alpha argument",
+    "value": "0.22",
+    "token": "--fade-faint",
+    "expected_sites": null,
+    "measured_sites": 1,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "Job 2 token, new. Second argument to the canvas _fade(color, alpha) helper (spectrum.js/scope.js) -- a JS call argument, not a CSS declaration; hand work, not a script substitution."
+  },
+  {
+    "axis": "depth",
+    "property": "_fade() alpha argument",
+    "value": "0.55",
+    "token": "--fade-mid",
+    "expected_sites": null,
+    "measured_sites": 2,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "Job 2 token, new. Second argument to the canvas _fade(color, alpha) helper (spectrum.js/scope.js) -- a JS call argument, not a CSS declaration; hand work, not a script substitution."
+  },
+  {
+    "axis": "depth",
+    "property": "_fade() alpha argument",
+    "value": "0.7",
+    "token": "--fade-strong",
+    "expected_sites": null,
+    "measured_sites": 1,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "Job 2 token, new. Second argument to the canvas _fade(color, alpha) helper (spectrum.js/scope.js) -- a JS call argument, not a CSS declaration; hand work, not a script substitution."
+  },
+  {
+    "axis": "depth",
+    "property": "_fade() alpha argument",
+    "value": "0.82",
+    "token": "--fade-label",
+    "expected_sites": null,
+    "measured_sites": 1,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "Job 2 token, new. Second argument to the canvas _fade(color, alpha) helper (spectrum.js/scope.js) -- a JS call argument, not a CSS declaration; hand work, not a script substitution."
+  },
+  {
+    "axis": "depth",
+    "property": "_fade() alpha argument",
+    "value": "0.5",
+    "token": "--fade-half",
+    "expected_sites": null,
+    "measured_sites": 2,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "Job 2 token, new. Second argument to the canvas _fade(color, alpha) helper (spectrum.js/scope.js) -- a JS call argument, not a CSS declaration; hand work, not a script substitution."
+  },
+  {
+    "axis": "depth",
+    "property": "_fade() alpha argument",
+    "value": "0.9",
+    "token": "--fade-near",
+    "expected_sites": null,
+    "measured_sites": 1,
+    "reconciles": null,
+    "safe_for_script": false,
+    "reason": "Job 2 token, new. Second argument to the canvas _fade(color, alpha) helper (spectrum.js/scope.js) -- a JS call argument, not a CSS declaration; hand work, not a script substitution."
+  }
+]

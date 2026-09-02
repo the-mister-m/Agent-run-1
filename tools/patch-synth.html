@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patch Synth — Chromebook DAW</title>
+
+<!--
+  /tools/patch-synth.html — the Patch Synth standalone page.
+
+  Serve the PROJECT ROOT over static HTTP. ES modules do not load from file://.
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/tools/patch-synth.html
+
+  ASSEMBLES
+    core/audio.js ................ context, channel, unlock
+    core/input.js ................ the note bus every surface emits on
+    surfaces/keyboard.js ......... the 12-note keyboard that plays it
+    instruments/patch-synth.js ... the instrument this page drives
+    ui/shell.js .................. file menu, CPU meter
+-->
+
+<link rel="stylesheet" href="../src/ui/tokens.css">
+<style>
+  /* 1 · SHELL CHROME — copied from shell.js's STYLE_TEXT, for the classes createFileMenu and
+     createCpuMeter emit. shell.js injects that stylesheet only from ToolShell.mount(), which
+     this page does not call. This is a duplicate and it drifts. */
+
+  .cbdaw-panel {
+    background: var(--panel, #1b2332);
+    border: var(--bw) solid var(--line, #3a485f);
+    border-radius: var(--r-panel);
+    padding: var(--sp-6) var(--sp-7);
+  }
+  .cbdaw-panel__head {
+    display: var(--disp-flex); align-items: var(--align-baseline); gap: var(--sp-5); flex-wrap: var(--flexwrap-wrap); margin-bottom: var(--sp-5);
+  }
+  .cbdaw-panel__title {
+    font-size: var(--fs-md); font-weight: var(--w-bold); letter-spacing: var(--track-label); text-transform: var(--tt-label);
+    color: var(--text, #f2f6fc); margin: var(--sp-0);
+  }
+  .cbdaw-panel__note { font-size: var(--fs-base); color: var(--text-dim, #93a1b8); }
+
+  .cbdaw-menu { position: var(--pos-relative); }
+  .cbdaw-menu__button {
+    font: var(--font-inherit); font-weight: var(--w-med); display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-4);
+    padding: var(--sp-3h) var(--sp-6); color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-body); cursor: var(--cur-pointer);
+  }
+  .cbdaw-menu__button:hover, .cbdaw-menu__button:focus-visible { border-color: var(--accent, #34e5b4); }
+  .cbdaw-menu__caret { color: var(--text-dim, #93a1b8); font-size: var(--fs-sm); }
+  .cbdaw-menu__list {
+    position: var(--pos-absolute); top: var(--dropdown-offset); left: var(--sp-0); z-index: var(--z-popover); min-width: 260px;
+    margin: var(--sp-0); padding: var(--sp-3); list-style: var(--ls-none); background: var(--panel, #1b2332);
+    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-panel);
+    box-shadow: var(--shadow-raised);
+  }
+  .cbdaw-menu[data-open="false"] .cbdaw-menu__list { display: var(--disp-none); }
+  .cbdaw-menu__item {
+    display: var(--disp-flex); align-items: var(--align-baseline); justify-content: var(--justify-space-between); gap: var(--sp-7);
+    width: var(--pct-100); font: var(--font-inherit); text-align: var(--ta-left); padding: var(--sp-4) var(--sp-5);
+    color: var(--text, #f2f6fc); background: var(--color-transparent); border: var(--sp-0); border-radius: var(--r-ctl);
+    cursor: var(--cur-pointer);
+  }
+  .cbdaw-menu__item:hover:not(:disabled) { background: var(--bg, #0a0d13); }
+  .cbdaw-menu__item[aria-current="true"] { color: var(--accent, #34e5b4); font-weight: var(--w-bold); }
+  .cbdaw-menu__item:disabled { color: var(--text-dim, #93a1b8); cursor: var(--cur-not-allowed); opacity: var(--op-mid); }
+  .cbdaw-menu__tag { font-size: var(--fs-sm); color: var(--text-dim, #93a1b8); letter-spacing: var(--track-label); }
+
+  .cbdaw-status { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-7); flex-wrap: var(--flexwrap-wrap); font-size: var(--fs-base); }
+  .cbdaw-status__group { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); color: var(--text-dim, #93a1b8); }
+  .cbdaw-status__value { color: var(--text, #f2f6fc); font-variant-numeric: var(--num-tabular); }
+  .cbdaw-cpu__track {
+    position: var(--pos-relative); width: var(--sp-60); height: var(--sp-5); background: var(--bg, #0a0d13);
+    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-ctl); overflow: var(--ov-hidden);
+  }
+  .cbdaw-cpu__fill {
+    height: var(--pct-100); width: var(--pct-0); background: var(--meter-ok, #6ee05a); transition: var(--tr-width);
+  }
+  .cbdaw-cpu__fill[data-band="warn"] { background: var(--warn, #ff7a1a); }
+  .cbdaw-cpu__fill[data-band="hot"] { background: var(--meter-hot, #ff3b30); }
+  .cbdaw-nocap { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); cursor: var(--cur-pointer); user-select: var(--usel-none); }
+  .cbdaw-nocap input { accent-color: var(--warn, #ff7a1a); }
+  .cbdaw-nocap[data-on="true"] { color: var(--warn, #ff7a1a); font-weight: var(--w-bold); }
+  .cbdaw-shell__unlock {
+    font: var(--font-inherit); font-weight: var(--w-bold); padding: var(--sp-3) var(--sp-6); color: var(--bg, #0a0d13);
+    background: var(--accent, #34e5b4); border: var(--sp-0); border-radius: var(--r-body); cursor: var(--cur-pointer);
+  }
+  .cbdaw-shell__unlock[hidden] { display: var(--disp-none); }
+
+  /* 2 · PAGE LAYOUT — `pt-` prefix, this file only. The instrument paints its own graph
+     inside .pt-patch__host under its own `ps-` classes; nothing here reaches into them.
+     Every value is a token off ui/tokens.css; colour fallbacks match that file. */
+
+  html, body { margin: var(--sp-0); padding: var(--sp-0); background: var(--bg, #0a0d13); }
+  body {
+    color: var(--text, #f2f6fc);
+    font-family: var(--font-ui);
+  }
+  .pt-page {
+    display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-6);
+    box-sizing: var(--box-border-box); padding: var(--sp-5) var(--sp-7) var(--sp-14); min-height: var(--vh-100);
+  }
+  .pt-page *, .pt-page *::before, .pt-page *::after { box-sizing: var(--box-border-box); }
+
+  /* The top bar is pinned; everything below scrolls. position:sticky makes the wrapper its
+     own stacking context, so the file menu's dropdown is capped at that level and the bar is
+     raised for that reason. */
+  .pt-sticky { position: var(--pos-sticky); z-index: var(--z-sticky); background: var(--bg, #0a0d13); }
+  .pt-top { top: var(--sp-0); padding-top: var(--sp-2); z-index: var(--z-popover); }
+
+  .pt-bar {
+    display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-8); flex-wrap: var(--flexwrap-wrap);
+    padding: var(--sp-4) var(--sp-6); background: var(--panel, #1b2332);
+    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-panel);
+  }
+  .pt-titles { flex: var(--flex-1-1-240); min-width: var(--sp-0); }
+  .pt-spacer { flex: var(--flex-0-1-auto); }
+  .pt-title { font-size: var(--fs-xl); font-weight: var(--w-bold); letter-spacing: var(--track-tight); margin: var(--sp-0); }
+  .pt-subtitle { font-size: var(--fs-md); line-height: var(--lh-base); color: var(--text-dim, #93a1b8); margin: var(--sp-0); }
+
+  /* The graph host. The instrument's root fills its host, so the host is what sets the size
+     of the canvas a student pans and zooms inside. */
+  .pt-patch__host { height: var(--sp-310); }
+  .pt-patch__host > * { width: var(--pct-100); }
+
+  .pt-keys__host > * { width: var(--pct-100); }
+
+  .pt-note { font-size: var(--fs-base); line-height: var(--lh-base); color: var(--text-dim, #93a1b8); }
+  .pt-note code { color: var(--accent, #34e5b4); font-family: var(--font-mono); }
+  .pt-steps {
+    margin: var(--sp-0); padding-left: var(--sp-9); font-size: var(--fs-base); line-height: var(--lh-loose);
+    color: var(--text-dim, #93a1b8);
+  }
+  .pt-steps b { color: var(--text, #f2f6fc); }
+
+  .pt-error {
+    padding: var(--sp-8); border: var(--bw) solid var(--meter-hot, #ff3b30); border-radius: var(--r-panel);
+    background: var(--panel, #1b2332); color: var(--text, #f2f6fc); white-space: var(--ws-prewrap);
+    font-family: var(--font-mono); font-size: var(--fs-md);
+  }
+
+  .cbdaw-boot {
+    margin: var(--sp-0); padding: var(--sp-12); font-family: var(--font-ui);
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+  }
+  .cbdaw-boot code { color: var(--accent, #34e5b4); }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="cbdaw-boot">
+    This tool is a Web Audio instrument and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+// ——— IMPORTS ————————————————————————————————————————————————————————————————
+import { TOOLS, createFileMenu, createCpuMeter } from '../src/ui/shell.js';
+
+import { ctx, unlock, createChannel, releaseChannel } from '../src/core/audio.js';
+import { input } from '../src/core/input.js';
+import Keyboard from '../src/surfaces/keyboard.js';
+import PatchSynth from '../src/instruments/patch-synth.js';
+
+// ——— SMALL SHARED HELPERS ———————————————————————————————————————————————————
+
+/** Holds every DOM listener this page attaches, so teardown drops all of them and returns
+ *  the count. */
+function listenerBag() {
+  const bag = [];
+  return {
+    add(target, type, fn, opts) {
+      target.addEventListener(type, fn, opts);
+      bag.push({ target, type, fn, opts });
+    },
+    get size() { return bag.length; },
+    dropAll() {
+      const n = bag.length;
+      for (const { target, type, fn, opts } of bag) target.removeEventListener(type, fn, opts);
+      bag.length = 0;
+      return n;
+    },
+  };
+}
+
+function el(tag, className, html) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (html != null) node.innerHTML = html;
+  return node;
+}
+
+function panel(title, note) {
+  const p = el('section', 'cbdaw-panel');
+  const head = el('div', 'cbdaw-panel__head');
+  head.appendChild(el('h2', 'cbdaw-panel__title', title));
+  if (note) head.appendChild(el('span', 'cbdaw-panel__note', note));
+  p.appendChild(head);
+  return { el: p, head };
+}
+
+// ——— THE PAGE ———————————————————————————————————————————————————————————————
+
+class PatchSynthPage {
+  constructor() {
+    this.root = null;
+    this.listeners = listenerBag();
+    this.busUnsubs = [];
+    this.channels = [];
+    this.synth = null;
+    this.keys = null;
+    this.menu = null;
+    this.cpu = null;
+    this.hosts = {};
+    this.mounted = false;
+  }
+
+  mount(host) {
+    const root = el('div', 'pt-page');
+    root.dataset.tool = 'patch-synth';
+    this.root = root;
+
+    // ——— 1 · audio: one channel for the instrument ——————————————————————————
+    // The instrument is handed (ctx, out). It never makes a context and never connects to
+    // ctx.destination; releaseChannel takes the channel back at teardown.
+    const channel = createChannel();
+    this.channels.push(channel);
+
+    this.synth = new PatchSynth(ctx, channel);
+
+    // ——— 2 · top bar ————————————————————————————————————————————————————
+    const top = el('header', 'pt-bar');
+    const topWrap = el('div', 'pt-sticky pt-top');
+    topWrap.appendChild(top);
+
+    // shell.js's TOOLS table still marks the Patch Synth row unavailable, so the menu is
+    // handed a copy with this page's own row flipped. shell.js is not edited.
+    const items = TOOLS.map((t) => (t.id === 'patch-synth' ? { ...t, available: true } : { ...t }));
+    this.menu = createFileMenu({
+      items,
+      currentId: 'patch-synth',
+      label: 'Tool',
+      onSelect: (item) => { if (item.href) window.location.href = item.href; },
+    });
+    top.appendChild(this.menu.el);
+
+    const titles = el('div', 'pt-titles');
+    titles.appendChild(el('h1', 'pt-title', 'Patch Synth'));
+    titles.appendChild(el('p', 'pt-subtitle',
+      'Parts on a bench and cables between them. Nothing is wired when you open it — the ' +
+      'sound is whatever you patch.'));
+    top.appendChild(titles);
+    top.appendChild(el('div', 'pt-spacer'));
+
+    // The meter reads one property off what it is handed: instrument.cpuWeight. It also
+    // carries this page's unlock button and the audio-state readout.
+    this.cpu = createCpuMeter({ instrument: this.synth });
+    top.appendChild(this.cpu.el);
+
+    root.appendChild(topWrap);
+
+    // ——— 3 · the graph ————————————————————————————————————————————————————
+    const patchPanel = panel(
+      'The patch',
+      'drag from an out dot to an in dot to run a cable — click a cable to pull it'
+    );
+    patchPanel.el.appendChild(el('ol', 'pt-steps',
+      '<li><b>Add parts.</b> Sources, Modulators and Processors are open; Math is last and ' +
+      'closed, and you never need it.</li>' +
+      '<li><b>Wire them.</b> Grey dots are audio, green are control. Audio cannot go into a ' +
+      'control input, and the refusal says so under the canvas.</li>' +
+      '<li><b>Reach <code>Out</code>.</b> Nothing is heard until a cable lands on the Out ' +
+      'node — it is the only thing wired to the speakers.</li>' +
+      '<li><b>Move the bench.</b> Drag the empty canvas to pan. Wheel, or pinch on a ' +
+      'touchscreen, to zoom. A full 24-node patch is reachable at every zoom.</li>'));
+    const patchHost = el('div', 'pt-patch__host');
+    patchPanel.el.appendChild(patchHost);
+    this.hosts.patch = patchHost;
+    root.appendChild(patchPanel.el);
+
+    root.appendChild(el('p', 'pt-note',
+      '<b>Works with the network off.</b> Every part is Web Audio — oscillators, noise, ' +
+      'filters and gains built at the moment you add them. This page fetches nothing. The ' +
+      'patch is monophonic: one note at a time, last note wins.'));
+
+    // ——— 4 · the keyboard ————————————————————————————————————————————————
+    const keysPanel = panel(
+      Keyboard.label,
+      'play it from the keys or the home row — every oscillator follows the note, every ' +
+      'envelope takes the gate'
+    );
+    const keysHost = el('div', 'pt-keys__host');
+    keysPanel.el.appendChild(keysHost);
+    this.hosts.keys = keysHost;
+    root.appendChild(keysPanel.el);
+
+    this.keys = new Keyboard(keysHost, input);
+
+    // ——— 5 · the live monitor ————————————————————————————————————————
+    this._wireLiveMonitoring();
+
+    host.appendChild(root);
+
+    // ——— 6 · mount the expanded views, now that the DOM is in the document ————
+    // mountExpanded, never mountCompact — the compact view is the DAW's.
+    this.synth.mountExpanded(this.hosts.patch);
+    this.keys.mountExpanded(this.hosts.keys);
+
+    // Async gate. Nothing on this page awaits it; only sound waits.
+    if (typeof this.synth.ready === 'function') {
+      this.synth.ready().catch((err) => console.error('[patch-synth.html] ready() failed:', err));
+    }
+
+    // Navigating away is the teardown a student performs. pagehide covers nav, reload, close.
+    this.listeners.add(window, 'pagehide', () => this.dispose());
+
+    this.mounted = true;
+    return this;
+  }
+
+  // ——— LIVE MONITORING ————————————————————————————————————————————————————
+  // The one path from the input bus to sound. Every surface — the on-screen keys, the home
+  // row, a MIDI keyboard — emits on the bus and plays nothing itself; this is what hears the
+  // bus and calls noteOn. Nothing else on this page may call noteOn from a gesture, or a note
+  // would double.
+  //
+  // noteOn is called with NO atTime, so a live note sounds at ctx.currentTime.
+
+  /** Wires the bus to the instrument. Held for teardown in busUnsubs. */
+  _wireLiveMonitoring() {
+    this.busUnsubs.push(
+      input.on('noteon', (e) => {
+        unlock();
+        this.synth.noteOn(e.note, e.velocity);
+      })
+    );
+    this.busUnsubs.push(
+      input.on('noteoff', (e) => {
+        this.synth.noteOff(e.note);
+      })
+    );
+    // A tab-away must not leave a note held on the bus. allNotesOff emits real note-off
+    // events, so nothing downstream needs to know why.
+    this.listeners.add(window, 'blur', () => input.allNotesOff());
+  }
+
+  // ——— TEARDOWN ————————————————————————————————————————————————————————————
+  // Order matters. Each step stops something that would otherwise reach into what the next
+  // step takes apart:
+  //   1 · the input bus      — stops new notes, then releases everything sounding
+  //   2 · the keyboard       — its own listeners and held keys
+  //   3 · the instrument     — every node, every cable, every listener
+  //   4 · the channel        — handed back to core/audio.js
+  //   5 · the shell's chrome — the CPU meter's rAF, the file menu's document listeners
+  //   6 · this page's listeners, by count
+  //
+  // NOT disposed: core/audio.js, core/input.js. Document-lifetime singletons — one
+  // AudioContext, one bus.
+
+  dispose() {
+    if (!this.mounted) return { alreadyDisposed: true };
+    const report = {};
+
+    for (const off of this.busUnsubs) off();
+    report.busUnsubs = this.busUnsubs.length;
+    this.busUnsubs = [];
+    report.notesReleased = input.allNotesOff();
+
+    if (this.keys) { report.keys = this.keys.dispose(); this.keys = null; }
+    if (this.synth) { report.synth = this.synth.dispose(); this.synth = null; }
+
+    for (const ch of this.channels) releaseChannel(ch);
+    report.channelsReleased = this.channels.length;
+    this.channels = [];
+
+    if (this.cpu) { report.cpu = this.cpu.dispose(); this.cpu = null; }
+    if (this.menu) { report.menu = this.menu.dispose(); this.menu = null; }
+
+    report.listenersDropped = this.listeners.dropAll();
+    this.root?.remove();
+    this.root = null;
+    this.mounted = false;
+    return report;
+  }
+}
+
+// ——— BOOT ———————————————————————————————————————————————————————————————————
+// An on-page error instead of a blank screen. `window.cbdawPatchSynth` is the handle for
+// calling dispose() and counting what came down.
+
+const page = new PatchSynthPage();
+try {
+  page.mount(document.body);
+} catch (err) {
+  const box = el('pre', 'pt-error');
+  box.textContent = `patch-synth.html failed to mount:\n\n${err && err.stack ? err.stack : err}`;
+  document.body.appendChild(box);
+  console.error('[patch-synth.html] mount failed:', err);
+}
+window.cbdawPatchSynth = page;
+</script>
+
+</body>
+</html>

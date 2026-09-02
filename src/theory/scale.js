@@ -71,8 +71,9 @@ export const PRESETS = Object.freeze({
 /** Extra scale names recognized for labeling only, never drawn in the picker. Ships empty. */
 export const EXTRA_NAMES = Object.freeze({});
 
-/** The label shown when `degrees` matches no known preset or extra name. */
-export const UNKNOWN_SCALE_NAME = 'scale unknown';
+/** Label prefix for `degrees` that matches no preset or extra name. `scaleName` appends the
+ *  origin the degrees were bent from. */
+export const UNKNOWN_SCALE_NAME = 'Faaaancy';
 
 /** A degree may move ±2 semitones from its major value and no further. */
 export const DEGREE_CLAMP = 2;
@@ -315,12 +316,18 @@ export function skipTriad(scale, i) {
   return [stackOffset(scale, i, 0), stackOffset(scale, i, 2), stackOffset(scale, i, 4)];
 }
 
+/** Quality from two measured intervals, in semitones above the root. Reads the same
+ *  `QUALITY` table as `degreeQuality`. → 'altered' for a pair the table does not name. */
+export function qualityOfIntervals(third, fifth) {
+  return QUALITY[third]?.[fifth - third] ?? 'altered';
+}
+
 /** → 'major' | 'minor' | 'diminished' | 'augmented' | 'altered'.
  *  Computed from `scale.degrees` alone; `scale.tonic` never appears.
  *  'altered' is the honest answer for a stack that is not a triad at all. */
 export function degreeQuality(scale, i) {
   const [a, b, c] = skipTriad(scale, i);
-  return QUALITY[b - a]?.[c - b] ?? 'altered';
+  return qualityOfIntervals(b - a, c - a);
 }
 
 /** → a CSS custom-property name, never a hex value. */
@@ -413,9 +420,9 @@ export function circlePositions(scale, octave) {
 // 8 · NAMING
 // -----------------------------------------------------------------------------------------
 
-/** Back-matches on `degrees` only, so it is key-independent: a student who bends C major
+/** Back-matches on `degrees` only, so it carries no tonal center: a student who bends C major
  *  into [0,2,3,5,7,9,10] by hand is told "Dorian", and so is a student who does it from F.
- *  `name` carries no key. Anything unrecognized reads `UNKNOWN_SCALE_NAME`. */
+ *  A no-match reads `Faaaancy <originName>` — the preset it was bent away from. */
 export function scaleName(scale) {
   const d = scale.degrees;
   for (const [name, p] of [...Object.entries(PRESETS), ...Object.entries(EXTRA_NAMES)]) {
@@ -423,7 +430,7 @@ export function scaleName(scale) {
     for (let i = 0; i < 7; i++) if (p[i] !== d[i]) { hit = false; break; }
     if (hit) return name;
   }
-  return UNKNOWN_SCALE_NAME;
+  return `${UNKNOWN_SCALE_NAME} ${scale.originName ?? 'Major'}`;
 }
 
 /** Reads `originName`, not `name` — `name` chases `degrees`, so the origin needs a field
@@ -457,13 +464,15 @@ export function alteredFrom(scale) {
  *  state, not part of the saved file. */
 export function createScale(tonic = 0, presetName = 'Major') {
   const degrees = [...(PRESETS[presetName] ?? MAJOR)];
+  // `scaleName` reads `originName` for its no-match label, so it is built before the call.
+  const originName = PRESETS[presetName] ? presetName : 'Major';
   return {
     tonic: mod(tonic, 12),
     degrees,
-    name: scaleName({ degrees }),
+    name: scaleName({ degrees, originName }),
     altered: [false, false, false, false, false, false, false],
     preset: PRESETS[presetName] ? presetName : 'Custom',
-    originName: PRESETS[presetName] ? presetName : 'Major',
+    originName,
   };
 }
 
@@ -493,20 +502,26 @@ export function setScalePreset(scale, name) {
 
 /** The +/- on the circle and the diatonic keys.
  *
- *  Two rejections, neither of which throws:
+ *  Three rejections, none of which throws:
  *   · index outside 0-6 — position 8 has no +/- of its own.
- *   · past DEGREE_CLAMP — ±2 semitones from the degree's major value. The move is clamped,
- *     not refused, so a held button stops instead of doing nothing visible. */
+ *   · past DEGREE_CLAMP — ±2 semitones from the degree's value in the scale's own origin
+ *     preset. The move is clamped, not refused, so a held button stops instead of doing
+ *     nothing visible.
+ *   · a pitch another degree already holds — the move is refused and the scale returned
+ *     unchanged, so no two degrees land on one note. */
 export function setScaleDegree(scale, i, n) {
   if (!Number.isInteger(i) || i < 0 || i > 6) return scale;
+  const origin = originDegrees(scale);
   const raw = scale.degrees[i] + n;
-  const lo = MAJOR[i] - DEGREE_CLAMP;
-  const hi = MAJOR[i] + DEGREE_CLAMP;
+  const lo = origin[i] - DEGREE_CLAMP;
+  const hi = origin[i] + DEGREE_CLAMP;
   const value = Math.min(hi, Math.max(lo, raw));
+  const pc = mod(value, 12);
+  if (scale.degrees.some((v, j) => j !== i && mod(v, 12) === pc)) return scale;
   const degrees = [...scale.degrees];
   degrees[i] = value;
   const altered = [...(scale.altered ?? alteredFrom(scale))];
-  altered[i] = value !== originDegrees(scale)[i];
+  altered[i] = value !== origin[i];
   return withScale(scale, { degrees, altered, preset: 'Custom' });
 }
 

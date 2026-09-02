@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chromebook DAW</title>
+
+<!--
+  /index.html — the DAW. P4/S2 `daw-shell`.
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/index.html
+
+  This file boots the page and mounts the shell. It owns no layout of its own — every
+  visual rule lives in `src/ui/daw-shell.js`'s injected stylesheet (§16.0b: one dial per
+  value, no fallback). CONTRACTS §16.11: this file, `src/ui/daw-shell.js`, and
+  `src/core/state.js` are `daw-shell`'s, and only its, to write.
+-->
+
+<link rel="stylesheet" href="./src/ui/tokens.css">
+<style>
+  html, body {
+    margin: var(--sp-0);
+    padding: var(--sp-0);
+    background: var(--bg);
+    height: var(--vh-100);
+    overflow: var(--ov-hidden);
+  }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p style="margin:var(--sp-12); padding:var(--sp-0); font-family:var(--font-ui); color:var(--text); background:var(--bg);">
+    The Chromebook DAW is a Web Audio application and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+  import { mountDawShell, wireDawShell } from './src/ui/daw-shell.js';
+  // skin tuning box — self-starting, mounts only when the URL hash contains `dev`
+  import './src/ui/devbox.js';
+
+  // The frame — named mount points.
+  const shell = mountDawShell(document.body);
+
+  // Header, transport, playing surface, mixer strips, graph, arrangement, automation.
+  window.cbdawDaw = wireDawShell(shell);
+</script>
+
+</body>
+</html>

@@ -1,36 +1,3 @@
-/* =======================================================================================
-   ui/tokens.css — the palette the whole app inherits.
-   CONTRACTS §9. Created by `scopes`, P1/S3. Read by every seat in every remaining phase.
-
-   ⚠ THE COLORS BELOW ARE PROVISIONAL AND AWAIT BRANDON'S CONFIRMATION. ⚠
-   Color carries teaching meaning in this app: CONTRACTS §4's color rule is how a student
-   avoids memorizing which numeral is minor — "Students never memorize which numeral is
-   minor; the color tells them." A seat does not get to decide that. This file is a
-   PROPOSAL, shipped so nothing downstream is blocked, flagged for Brandon to overrule.
-   Changing a value here is a one-line edit and nothing needs rebuilding — every surface
-   reads these variables, none hard-codes a color. See receipt-scopes.md → OPEN DECISIONS.
-
-   THE ONE RULE FOR EVERY OTHER SEAT: never write a color literal in a surface, an
-   instrument, a device, or a visual. Read a token. One palette, every surface, no drift
-   (§9). If you need a color that is not here, that is an escalation, not a hex code.
-
-   THE TEST THIS PALETTE IS BUILT AGAINST (§9): "Everything must read from ten feet away on
-   a projector in a lit room." That is a room test, not a contrast ratio, and it has NOT
-   been run — no projector exists in this build environment. What follows is therefore a
-   DESIGN CLAIM with measured numbers behind it, not a measured fact. The measurable parts
-   were computed and are recorded inline. The claim itself is Brandon's to confirm in a
-   classroom.
-
-   HOW THE ROOM TEST WAS DESIGNED FOR, given it could not be run:
-   - A projector in a lit room crushes blacks and washes out saturation. So the ground is a
-     dark blue-slate, not pure black — pure black plus ambient light reads as muddy grey and
-     takes every dark value down with it.
-   - Panels are separated from the ground by their --line border, NOT by fill brightness.
-     --bg to --panel is only 1.23:1 and a washed-out projector will eat that difference;
-     the border is what survives. Do not rely on the fill alone to delineate a panel.
-   - Teaching colors are chosen bright (L* 63-82) as well as saturated. Projector gamma eats
-     midtones; a "rich" dark teal that looks correct on a laptop disappears on a wall.
-   ======================================================================================= */
 
 :root {
   color-scheme: dark;
@@ -68,4 +35,503 @@
      43 ΔE from --accent and a meter never reads as a selection highlight. */
   --meter-ok: #6ee05a;   /* 9.4:1 on --panel */
   --meter-hot: #ff3b30;  /* 4.4:1 on --panel — a large fill, not text */
+
+  /* --- COLOR — literals with no palette role ----------------------------------------- */
+  --color-transparent: transparent;   /* background, border-left-color */
+  --color-current: currentColor;      /* stroke */
+  --key-border: #000;                 /* black-key border, not in palette */
+}
+
+/* =======================================================================================
+   THE NON-COLOUR AXES — shape, type, space, depth, motion.
+   Written by S1, per Builddocs/skinspecs/S1-token-vocabulary.md (RULED by Brandon
+   2026-08-25, rulings folded in 14:32 EDT). S1 ADDS ONLY — no call site is changed here.
+
+   THE ARCHITECTURE (S1 §0) — two rules, and they are load-bearing:
+
+   1. A ROOT KNOB IS AN ABSOLUTE UNIT — px or rem. Never em, never %. An `em` knob
+      re-introduces compounding through the back door: `em` resolves against the inherited
+      font-size, so nesting multiplies (12 → 11.004 → 10.0907 → 9.25314).
+
+   2. A DERIVED TOKEN IS `calc(var(--knob) * <unitless>)` AND LIVES IN THE `*` BLOCK.
+      Never a literal, never in `:root`. A custom property is substituted where it is
+      DECLARED — a derived token declared on `:root` resolves against `:root`'s knob once
+      and then inherits as a finished value, so `.expanded { --fs-root: 16px }` would do
+      nothing. Re-declaring on `*` makes every element resolve the derivation against the
+      knob IT inherits. Measured: rescales on a variant, does not compound when nested.
+      Measured cost of the `*` block: 3000 nodes, 4.2ms — identical to :root-only.
+
+   WHAT A SKIN SETS: the knobs below and the palette above. Nothing else. That is the
+   whole file an agent writes from a screenshot.
+   ======================================================================================= */
+
+:root {
+  /* --- THE FOUR DIALS ---------------------------------------------------------------- */
+  --fs-root: 12px;   /* type size.    10px = dense · 16px = projector */
+  --sp-unit: 2px;    /* density.      1.5px = tight · 4px = airy      */
+  --r-unit:  2px;    /* roundness.    0 = hard-edged · 4px = soft     */
+  --bw:      1px;    /* line weight.  2px = heavy chrome              */
+
+  /* --- FACES ------------------------------------------------------------------------- */
+  --font-ui:   system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-inherit: inherit;
+  --font-mono-compact: 13px/1.5 ui-monospace, monospace;   /* font shorthand, harmonyNEW.html */
+  --font-style-italic: italic;
+
+  /* --- MOTION (S1 §2/§6) -------------------------------------------------------------
+     CONTRACTS §9: "Standalone views may animate. DAW views stay still." With motion
+     tokenised, "stay still" is `--dur-fast: 0ms; --dur-med: 0ms` on the DAW root instead
+     of a rule every seat has to remember. Also hands prefers-reduced-motion a skin free. */
+  --dur-fast: 80ms;
+  --dur-med:  120ms;
+  --ease:     ease-out;
+  --ease-linear: linear;   /* meters and progress fills: constant-rate travel */
+
+  /* --- MOTION, atomic transition/animation shorthand — new axis ---------------------- */
+  --tr-width: width 90ms linear;
+  --tr-background: background 60ms linear;
+  --tr-bg-border: background 70ms ease-out, border-color 70ms ease-out;
+  --tr-shadow: box-shadow 150ms ease-out;
+  --tr-filter: filter 60ms linear;
+  --tr-opacity-stroke: opacity 90ms linear, stroke-width 90ms linear;
+  --anim-hit-flash: dsam-hit-flash 160ms ease-out;
+  --anim-miss-flash: dsam-miss-flash 220ms ease-out;
+  --anim-pulse: ws-pulse 1.1s ease-in-out infinite;
+
+  /* --- TRANSFORM — new axis, ws-pulse keyframe ---------------------------------------- */
+  --scale-pulse-rest: scale(0.96);
+  --scale-pulse-peak: scale(1.04);
+
+  /* --- SHAPE, the one that never scales (S1 §3) --------------------------------------- */
+  --r-pill: 999px;   /* a pill is a pill */
+
+  /* --- TYPE, the parts that are not sizes (S1 §4) -------------------------------------
+     --w-heavy is a real role, RULED D-6: the scale circle's roman-numeral ring is "meant
+     to shout". A skin that flattens 800 into 700 is flattening the curriculum. */
+  --w-normal: 400;
+  --w-med:    600;
+  --w-bold:   700;
+  --w-heavy:  800;
+
+  --track-tight: 0.01em;   /* shell title, beat title */
+  --track-title: 0.02em;   /* D-5: five tracking numbers, one role */
+  --track-mid:   0.04em;   /* boxed captions, tone-preset labels */
+  --track-label: 0.08em;
+  --tt-label: uppercase;   /* text-transform; always paired with --track-label */
+
+  --lh-none:  1;      /* numerals, tags, single-line labels — no leading */
+  --lh-tight: 1.15;
+  --lh-base:  1.4;
+  --lh-loose: 1.5;    /* prose: ledes, notes, rule lists */
+
+  /* --- RELATIVE UNITS (em/ch) — new axis, leaf values, do not compose from a dial ---- */
+  --sp-em-14: 1.4em;
+  --sp-em-16: 1.6em;
+  --sp-em-17: 1.7em;
+  --sp-em-21: 2.1em;
+  --sp-em-24: 2.4em;
+  --sp-em-32: 3.2em;
+  --sp-em-34: 3.4em;
+  --sp-em-35: 3.5em;
+  --sp-em-36: 3.6em;
+  --sp-em-38: 3.8em;
+  --sp-em-46: 4.6em;
+  --sp-em-62: 6.2em;
+  --sp-ch-4: 4ch;
+  --fs-em-62: 0.62em;
+  --fs-em-65: 0.65em;
+  --fs-em-70: 0.7em;
+  --fs-em-75: 0.75em;
+  --fs-em-85: 0.85em;
+
+  /* --- SVG STROKE (one dial, six weights) ---------------------------------------------
+     SVG stroke-width is unitless user space, not px, so it cannot read --bw. */
+  --stroke-w: 1;
+  --stroke-dash: 2.4 2;   /* stroke-dasharray, scale-circle.js */
+
+  /* --- DEPTH (S1 §6) — a flat skin sets both shadows to `none` and is done ------------- */
+  --shadow-raised: 0 12px 30px rgba(0, 0, 0, 0.55);        /* menus, popovers */
+  --shadow-lifted: 0 -14px 26px -12px rgba(0, 0, 0, 0.75); /* the drawer edge */
+  --ring-w: 2px;   /* inset focus ring thickness; colour still comes from the palette */
+  --ring-off: 1px;      /* outline-offset paired with --ring-w on most focus rings */
+  --ring-off-lg: 2px;   /* outline-offset on the one larger focus target, .cm-play */
+  --glow:   0 0 4px;                       /* composes with a colour token at the site */
+
+  /* --- STACKING — z-index, five roles measured across the surfaces -------------------- */
+  --z-popover:  40;   /* popover / open menu list */
+  --z-sticky:   30;   /* sticky header */
+  --z-raise-2:  2;    /* local keyboard-key stacking, upper */
+  --z-raise-1:  1;    /* local keyboard-key stacking, lower */
+  --z-behind:  -1;    /* behind, e.g. glow pulse */
+
+  --op-faint: 0.40;   /* absorbs 0.35 / 0.40 / 0.45 */
+  --op-dim:   0.55;   /* absorbs 0.50 / 0.55        */
+  --op-mid:   0.65;
+  --op-strong: 0.7;
+  --op-soft:  0.85;   /* absorbs 0.85 / 0.86 / 0.90 */
+  --op-full:  1;
+
+  /* --- FILTER — new axis -------------------------------------------------------------- */
+  --filter-brighten: brightness(1.25);
+
+  /* --- CANVAS FADE — alpha argument to the _fade(color, N) canvas helper (spectrum.js /
+     scope.js). Named by the role at each call site, not by value. */
+  --fade-faint:  0.22;   /* fill under curve */
+  --fade-half:   0.5;    /* silence-state trace */
+  --fade-mid:    0.55;   /* gridline */
+  --fade-strong: 0.7;    /* peak-hold */
+  --fade-label:  0.82;   /* overtone mark */
+  --fade-near:   0.9;    /* period readout label backdrop */
+
+  --canvas-lw: 1;   /* CanvasRenderingContext2D.lineWidth, unitless, matches --stroke-w's kind */
+
+  /* --- CANVAS, keyword-only (colors/lineWidth/fade already covered) — new axis ------- */
+  --canvas-textbaseline-top: top;
+  --canvas-textbaseline-bottom: bottom;
+  --canvas-textbaseline-middle: middle;
+  --canvas-textalign-left: left;
+  --canvas-textalign-right: right;
+  --canvas-textalign-center: center;
+  --canvas-round: round;   /* lineJoin, lineCap */
+
+  /* --- LAYOUT — new axis: display, position, flex, grid, overflow, sizing keywords --- */
+  --disp-flex: flex;
+  --disp-grid: grid;
+  --disp-block: block;
+  --disp-none: none;
+  --disp-inline-flex: inline-flex;
+  --pos-absolute: absolute;
+  --pos-relative: relative;
+  --pos-static: static;
+  --pos-sticky: sticky;
+  --flexdir-column: column;
+  --box-border-box: border-box;
+  --flexwrap-wrap: wrap;
+  --ov-hidden: hidden;
+  --ov-visible: visible;
+  --justify-center: center;
+  --justify-flex-end: flex-end;
+  --justify-space-between: space-between;
+  --justify-flex-start: flex-start;
+  --align-center: center;
+  --align-start: start;
+  --align-baseline: baseline;
+  --align-stretch: stretch;
+  --align-flex-end: flex-end;
+  --align-flex-start: flex-start;
+  --auto: auto;
+
+  --flex-1-1-0: 1 1 0;
+  --flex-1-1-auto: 1 1 auto;
+  --flex-1: 1;
+  --flex-0-0-auto: 0 0 auto;
+  --flex-0-1-auto: 0 1 auto;
+  --flex-1-1-240: 1 1 240px;
+  --flex-1-1-300: 1 1 300px;
+  --flex-1-1-320: 1 1 320px;
+
+  --grid-1fr: 1fr;
+  --grid-minmax-0-1fr: minmax(0, 1fr);
+  --grid-repeat4-1fr: repeat(4, 1fr);
+  --grid-135-1: minmax(0, 1.35fr) minmax(0, 1fr);
+  --grid-1-115: minmax(0, 1fr) minmax(0, 1.15fr);
+  --grid-1-1: minmax(0, 1fr) minmax(0, 1fr);
+  --grid-60-140: minmax(205px, 0.6fr) minmax(320px, 1.4fr);
+  --grid-90-70-140: minmax(300px, 0.9fr) minmax(240px, 0.7fr) minmax(340px, 1.4fr);
+  --grid-repeat4-minmax0: repeat(4, minmax(0, 1fr));
+  --grid-repeat4-minmax90: repeat(4, minmax(90px, 1fr));
+  --grid-repeat8-minmax0: repeat(8, minmax(0, 1fr));
+  --grid-autofit-260: repeat(auto-fit, minmax(260px, 1fr));
+
+  --aspect-square: 1 / 1;
+  --wc-left: left;   /* will-change */
+  --pct-100: 100%;
+  --pct-0: 0%;
+  --vh-100: 100vh;
+  --pct-62: 62%;
+  --dropdown-offset: calc(100% + 6px);
+
+  /* --- INTERACTION — new axis: cursor, pointer-events, touch-action, user-select ----- */
+  --cur-pointer: pointer;
+  --cur-not-allowed: not-allowed;
+  --cur-default: default;
+  --cur-grab: grab;
+  --cur-ew-resize: ew-resize;
+  --cur-grabbing: grabbing;
+  --cur-ns-resize: ns-resize;
+  --pe-none: none;
+  --pe-auto: auto;
+  --touch-none: none;
+  --touch-manipulation: manipulation;
+  --usel-none: none;
+
+  /* --- TEXT BEHAVIOR — new axis ------------------------------------------------------ */
+  --num-tabular: tabular-nums;
+  --ta-center: center;
+  --ta-right: right;
+  --ta-left: left;
+  --ws-nowrap: nowrap;
+  --ws-prewrap: pre-wrap;
+  --to-ellipsis: ellipsis;
+  --td-underline: underline;
+  --ls-none: none;
+  --content-empty: '';
+  --text-anchor-middle: middle;
+  --dominant-baseline-central: central;
+
+  /* --- LINE STYLE — new axis: border-style, border-left-style ----------------------- */
+  --line-dashed: dashed;
+  --line-solid: solid;
+  --line-dotted: dotted;
+  --line-double: double;
+  --line-groove: groove;
+
+  /* --- 0 / NONE — homeless props share one universal keyword token ------------------ */
+  --none: none;
+}
+
+/* ---------------------------------------------------------------------------------------
+   DERIVED TOKENS — `*`-scoped ON PURPOSE. See rule 2 above. Moving any declaration below
+   into `:root` freezes it against variant overrides and looks correct until someone opens
+   an expanded view. Do not "tidy" this block.
+   --------------------------------------------------------------------------------------- */
+* {
+  /* --- SHAPE — S1 §3, 134 sites → 7 tokens (--r-pill is the seventh, above) ------------ */
+  --r-cell:  calc(var(--r-unit) * 1);      /*  2px  grid cell, ruler cell, compact key  */
+  --r-sm:    calc(var(--r-unit) * 1.5);    /*  3px  stepper, degree +/-, roll note      */
+  --r-ctl:   calc(var(--r-unit) * 2);      /*  4px  THE control radius                  */
+  --r-body:  calc(var(--r-unit) * 3);      /*  6px  a device's own body                 */
+  --r-chip:  calc(var(--r-unit) * 4.5);    /*  9px  chord-tone chip                     */
+  --r-panel: calc(var(--r-unit) * 4);      /*  8px  outer chrome                        */
+  --r-xl:    calc(var(--r-unit) * 5);      /* 10px  expanded pad, expanded wave button  */
+  --r-lg:    calc(var(--r-unit) * 8);      /* 16px  expanded-variant chrome             */
+
+  /* --- TYPE SIZES — S1 §4. The 16/18/22/28/30/32px sizes are NOT steps: every one lives
+     inside a [data-variant="expanded"] block and becomes `--fs-root: 16px` on that block.
+     One line replaces six sizes. --fs-micro/--fs-tiny stay (D-4): the projector test makes
+     1px matter more at the bottom of the scale than anywhere else. -------------------- */
+  --fs-micro: calc(var(--fs-root) * 0.667);  /*  8px  compact ruler ticks    */
+  --fs-tiny:  calc(var(--fs-root) * 0.75);   /*  9px  compact row labels     */
+  --fs-xs:    calc(var(--fs-root) * 0.833);  /* 10px  small labels, pad keys */
+  --fs-sm:    calc(var(--fs-root) * 0.917);  /* 11px  labels                 */
+  --fs-base:  calc(var(--fs-root) * 1);      /* 12px  body, controls         */
+  --fs-md:    calc(var(--fs-root) * 1.083);  /* 13px  buttons                */
+  --fs-lg:    calc(var(--fs-root) * 1.25);   /* 15px  key labels             */
+  --fs-xl:    calc(var(--fs-root) * 1.667);  /* 20px  titles, readouts       */
+
+  /* Steps above and between the eight above. A module or an element that sets its own
+     --fs-root re-resolves all of these against it. --fs-half is the superscript step. */
+  --fs-half:    calc(var(--fs-root) * 0.5);    /* superscript on a display label */
+  --fs-numeral: calc(var(--fs-root) * 1.167);  /* 14px  degree numeral button    */
+  --fs-readout: calc(var(--fs-root) * 1.333);  /* 16px  scale-degree readout     */
+  --fs-chord:   calc(var(--fs-root) * 1.417);  /* 17px  chord root letter        */
+  --fs-2xl:     calc(var(--fs-root) * 1.5);    /* 18px  expanded ruler cell      */
+  --fs-3xl:     calc(var(--fs-root) * 1.833);  /* 22px  expanded beat cell       */
+
+  /* --- SPACE — S1 §5, 210 sites → 10 tokens. Padding COMPOSES from these rather than
+     getting its own vocabulary: `padding: 4px 9px` → `padding: var(--sp-2) var(--sp-4)`.
+     `margin` gets no tokens: it is 17×0 and two one-offs, and 0 stays 0. -------------- */
+  --sp-hair: calc(var(--sp-unit) * 0.5);   /*  1px  grid hairlines  */
+  --sp-1:    calc(var(--sp-unit) * 1);     /*  2px */
+  --sp-2:    calc(var(--sp-unit) * 2);     /*  4px */
+  --sp-3:    calc(var(--sp-unit) * 3);     /*  6px */
+  --sp-4:    calc(var(--sp-unit) * 4);     /*  8px */
+  --sp-5:    calc(var(--sp-unit) * 5);     /* 10px */
+  --sp-6:    calc(var(--sp-unit) * 6);     /* 12px */
+  --sp-7:    calc(var(--sp-unit) * 7);     /* 14px */
+  --sp-8:    calc(var(--sp-unit) * 8);     /* 16px */
+  --sp-12:   calc(var(--sp-unit) * 12);    /* 24px  expanded chrome */
+
+  /* Half steps and the large end. Padding shorthands compose from these, so no padding
+     component anywhere is a literal and --sp-unit moves all of them. */
+  --sp-1h:   calc(var(--sp-unit) * 1.5);   /*  3px */
+  --sp-2h:   calc(var(--sp-unit) * 2.5);   /*  5px */
+  --sp-3h:   calc(var(--sp-unit) * 3.5);   /*  7px */
+  --sp-4h:   calc(var(--sp-unit) * 4.5);   /*  9px */
+  --sp-5h:   calc(var(--sp-unit) * 5.5);   /* 11px */
+  --sp-9:    calc(var(--sp-unit) * 9);     /* 18px */
+  --sp-10:   calc(var(--sp-unit) * 10);    /* 20px */
+  --sp-11:   calc(var(--sp-unit) * 11);    /* 22px */
+  --sp-14:   calc(var(--sp-unit) * 14);    /* 28px */
+  --sp-16:   calc(var(--sp-unit) * 16);    /* 32px */
+  --sp-18:   calc(var(--sp-unit) * 18);    /* 36px */
+  --sp-20:   calc(var(--sp-unit) * 20);    /* 40px */
+  --sp-0:    0;
+  --sp-7h:   calc(var(--sp-unit) * 7.5);   /*  15px */
+  --sp-13:   calc(var(--sp-unit) * 13);    /*  26px */
+  --sp-15:   calc(var(--sp-unit) * 15);    /*  30px */
+  --sp-17:   calc(var(--sp-unit) * 17);    /*  34px */
+  --sp-23:   calc(var(--sp-unit) * 23);    /*  46px */
+  --sp-28:   calc(var(--sp-unit) * 28);    /*  56px */
+  --sp-30:   calc(var(--sp-unit) * 30);    /*  60px */
+  --sp-31:   calc(var(--sp-unit) * 31);    /*  62px */
+  --sp-33:   calc(var(--sp-unit) * 33);    /*  66px */
+  --sp-37:   calc(var(--sp-unit) * 37);    /*  74px */
+  --sp-39:   calc(var(--sp-unit) * 39);    /*  78px */
+  --sp-60:   calc(var(--sp-unit) * 60);    /* 120px */
+  --sp-65:   calc(var(--sp-unit) * 65);    /* 130px */
+  --sp-84:   calc(var(--sp-unit) * 84);    /* 168px */
+  --sp-95:   calc(var(--sp-unit) * 95);    /* 190px */
+  --sp-230:  calc(var(--sp-unit) * 230);   /* 460px */
+  --sp-310:  calc(var(--sp-unit) * 310);   /* 620px */
+
+  /* --- SVG STROKE WEIGHTS — S1 §3's border scale does not reach SVG user space -------- */
+  --stroke-hair:  calc(var(--stroke-w) * 0.6);   /* ring divider, well outline  */
+  --stroke-thin:  calc(var(--stroke-w) * 0.8);   /* +/- control circle, resting */
+  --stroke-med:   calc(var(--stroke-w) * 1.4);   /* moved-degree marker         */
+  --stroke-semi:  calc(var(--stroke-w) * 1.6);   /* note-on ring                */
+  --stroke-bold:  calc(var(--stroke-w) * 1.8);   /* +/- control, focus          */
+  --stroke-heavy: calc(var(--stroke-w) * 2);     /* zone focus, waveform glyph  */
+
+  /* --- LINE WEIGHT — extends --bw, no derived scale existed before this write -------- */
+  --bw-2: calc(var(--bw) * 2);   /* 2px */
+  --bw-3: calc(var(--bw) * 3);   /* 3px */
+  --bw-5: calc(var(--bw) * 5);   /* 5px */
+}
+
+/* =======================================================================================
+   P4 — THE DAW. Written by `spec-transport` (P4/S1), 2026-08-31, on Brandon's order:
+   every P4 surface is skinnable from this file on the first build, not on a second pass.
+   APPEND ONLY — nothing above this line was read back out or changed.
+
+   Scope: mixer strip · meter · gain-reduction display · the five devices · device pop-out ·
+   node graph · patch-synth cables · automation lane · arrangement · transport bar ·
+   project header.
+
+   Reuse first. A P4 surface uses --bg --panel --line --text --text-dim --accent --warn
+   --meter-ok --meter-hot --glow --shadow-raised --r-* --sp-* --fs-* --w-* --op-* --z-*
+   --bw-* --stroke-* --fade-* --dur-* --ease --tr-* wherever those already say it. What is
+   below is only what the existing vocabulary has no word for.
+
+   GEOMETRY IS NOT TOKENISED SEPARATELY, ON PURPOSE. Strip width, meter width, lane height,
+   node width and port size compose from --sp-* (e.g. strip = --sp-30, meter = --sp-4,
+   lane = --sp-14, node = --sp-60) so --sp-unit stays the one density dial for the DAW.
+   ======================================================================================= */
+
+:root {
+  /* --- P4 GROUND — two steps the three-step ground did not have -----------------------
+     --recess is anything cut INTO a panel: a fader groove, a meter track, a lane bed.
+     --raise is anything sitting ON one: a strip head, a device head, a button face. */
+  --recess: #131a26;
+  --raise:  #253046;
+
+  /* --- MIXER STRIP -------------------------------------------------------------------- */
+  --strip-head:   #253046;   /* the name plate at the top of a strip */
+  --strip-sel:    #34e5b4;   /* the selected strip's outline */
+  --fader-track:  #131a26;
+  --fader-fill:   #56708f;   /* the lit part of the groove, below the cap */
+  --fader-thumb:  #c8d4e6;   /* the cap. Bright: it is the thing a student grabs */
+  --pan-track:    #131a26;
+  --pan-thumb:    #c8d4e6;
+  --pan-center:   #56708f;   /* the centre detent mark */
+  --mute-on:      #ff7a1a;
+  --solo-on:      #ffd23f;   /* deliberately not --accent: solo and select are not the same */
+  --slot-face:    #131a26;   /* an insert slot's bed */
+  --slot-empty:   #3a485f;   /* the empty-slot mark */
+  --slot-route:   #93a1b8;   /* the read-only "→ Master" destination chip */
+
+  /* --- METER (vis/meter.js) — fills are --meter-ok / --meter-hot, already above -------- */
+  --meter-track:  #131a26;   /* the unlit channel */
+  --meter-peak:   #f2f6fc;   /* the held peak line */
+  --meter-clip:   #ff3b30;   /* the clip mark at 0 dBFS */
+  --meter-tick:   #3a485f;   /* dB scale rules */
+
+  /* --- GAIN REDUCTION (vis/gain-reduction.js) ----------------------------------------- */
+  --reduction-track: #131a26;
+  --reduction-fill:  #ff7a1a;   /* reduction travels DOWN from zero, so it is not a level */
+  --reduction-zero:  #93a1b8;   /* the 0 dB rule the fill hangs from */
+
+  /* --- DEVICES, all five --------------------------------------------------------------- */
+  --device-head:  #253046;
+  --knob-track:   #131a26;
+  --knob-fill:    #34e5b4;
+  --knob-pointer: #f2f6fc;
+  --bypass-on:    #6b7a92;   /* a bypassed device's chrome: present, desaturated */
+  --bypass-off:   #34e5b4;
+
+  /* --- EQ — three bands over one spectrum. Never a --deg-* hue (CONTRACTS §9). --------- */
+  --band-curve:  #f2f6fc;   /* the summed response line */
+  --band-fill:   #34e5b4;   /* under the curve, drawn at --fade-faint */
+  --band-handle: #f2f6fc;
+  --band-1:      #4aa8ff;
+  --band-2:      #b07cff;
+  --band-3:      #ff9ec4;
+
+  /* --- GATE ---------------------------------------------------------------------------- */
+  --gate-open:      #6ee05a;
+  --gate-closed:    #4a5568;
+  --gate-threshold: #ff7a1a;   /* the level the gate opens at, marked on its readout */
+
+  /* --- DEVICE POP-OUT ------------------------------------------------------------------ */
+  --popout-ground: #202a3c;
+  --scrim:         rgba(10, 13, 19, 0.72);
+
+  /* --- NODE GRAPH, and the patch synth's cables ---------------------------------------- */
+  --graph-ground:  #0d1119;
+  --graph-grid:    #1b2332;
+  --node-fill:     #1b2332;
+  --node-head:     #253046;
+  --node-border:   #3a485f;
+  --node-selected: #34e5b4;
+  --node-dragging: #56708f;
+  --node-dimmed:   #4a5568;   /* legal, silent: no path to master */
+  --port-in:       #93a1b8;
+  --port-out:      #f2f6fc;
+  --port-active:   #34e5b4;
+  --edge-audio:    #93a1b8;
+  --edge-control:  #34e5b4;   /* control cables read as a different KIND, not a highlight */
+  --edge-refused:  #ff7a1a;
+  --edge-hover:    #f2f6fc;
+  --cable-drag:    #f2f6fc;   /* the cable following the cursor, before it lands */
+  --math-group:    #6b7a92;   /* the patch synth's Math palette group: last, and muted */
+
+  /* --- AUTOMATION LANE ------------------------------------------------------------------ */
+  --lane-ground:   #131a26;
+  --lane-grid:     #1b2332;
+  --lane-curve:    #34e5b4;   /* gain and pan: interpolated */
+  --lane-point:    #f2f6fc;
+  --lane-point-on: #34e5b4;   /* the point under the cursor or being dragged */
+  --lane-step:     #93a1b8;   /* mute and solo: no interpolation, so no accent */
+
+  /* --- ARRANGEMENT ----------------------------------------------------------------------- */
+  --ruler-ground:    #131a26;
+  --ruler-tick-bar:  #93a1b8;
+  --ruler-tick-beat: #3a485f;
+  --lane-head:       #253046;
+  --lane-row:        #141b28;
+  --lane-row-alt:    #101620;
+  --clip-fill:       #2a4a6b;   /* a lane's note region */
+  --playhead-line:   #f2f6fc;
+  --loop-region:     #16463c;   /* a wash behind the bars, not a line */
+  --punch-region:    #4d1d24;
+  --arm-on:          #ff3b30;
+
+  /* --- TRANSPORT BAR AND PROJECT HEADER -------------------------------------------------- */
+  --transport-ground: #141b28;
+  --btn-face:         #253046;
+  --btn-active:       #34e5b4;
+  --play-on:          #6ee05a;
+  --rec-on:           #ff3b30;
+
+  /* --- STACKING — two roles between the five that existed --------------------------------- */
+  --z-scrim: 35;   /* over a sticky header, under a popover */
+  --z-drag:  45;   /* a dragged cable or node follows the cursor over everything */
+
+  /* --- MOTION — three shorthands P4 needs and P1 had no site for --------------------------- */
+  --tr-transform: transform 90ms ease-out;
+  --tr-stroke:    stroke 90ms linear;
+  --tr-color:     color 70ms linear;
+
+  /* --- ANGLE — new axis: a linear-gradient direction ---------------------------------------- */
+  --angle-vertical: 90deg;   /* gradient runs left to right, so the rule it draws is vertical */
+}
+
+/* --------------------------------------------------------------------------------------
+   P4 DERIVED — `*`-scoped, per rule 2 at the top of this file.
+   -------------------------------------------------------------------------------------- */
+* {
+  /* Canvas line weights. --canvas-lw is unitless user space and had no scale. */
+  --canvas-lw-2: calc(var(--canvas-lw) * 2);   /* meter fill edge, reduction bar */
+  --canvas-lw-3: calc(var(--canvas-lw) * 3);   /* the EQ response curve, the playhead */
 }

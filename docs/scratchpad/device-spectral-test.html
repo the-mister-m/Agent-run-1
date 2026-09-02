@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>device-spectral test harness</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--font-ui); padding: var(--sp-16); display: flex; flex-direction: column; gap: var(--sp-12); }
+  section { display: flex; flex-direction: column; gap: var(--sp-6); border: var(--bw) solid var(--line); border-radius: var(--r-panel); padding: var(--sp-8); }
+  button { background: var(--panel); color: var(--text); border: var(--bw) solid var(--line); border-radius: var(--r-ctl); padding: var(--sp-3) var(--sp-6); cursor: pointer; }
+  pre { background: var(--panel); color: var(--text-dim); padding: var(--sp-4); border-radius: var(--r-sm); white-space: pre-wrap; font-family: var(--font-mono); font-size: var(--fs-sm); }
+  .mount { width: 320px; }
+</style>
+</head>
+<body>
+  <h1>device-spectral — eq.js</h1>
+
+  <section>
+    <h2>Setup</h2>
+    <button id="start">1. start audio context + build device + mount</button>
+    <pre id="setup-log"></pre>
+  </section>
+
+  <section>
+    <h2>EQ — audible test</h2>
+    <p>Plays white noise through the EQ continuously. Move Band 1/2/3 Gain, Freq, Q and
+    listen for the band being shaped. Watch the curve draw over the live spectrum.</p>
+    <button id="noise-start">play noise</button>
+    <button id="noise-stop">stop noise</button>
+    <div id="eq-mount" class="mount"></div>
+  </section>
+
+  <section>
+    <h2>Bypass — audible + visual test</h2>
+    <p>Toggling Bypass in the mounted panel above should crossfade to the unprocessed
+    signal without a click, and the curve should dim.</p>
+  </section>
+
+  <section>
+    <h2>State round-trip</h2>
+    <button id="roundtrip">mutate params, round-trip through JSON, verify</button>
+    <pre id="roundtrip-log"></pre>
+  </section>
+
+  <section>
+    <h2>cpuWeight / estimatedWeight</h2>
+    <button id="weight">read weights</button>
+    <pre id="weight-log"></pre>
+  </section>
+
+  <section>
+    <h2>getAnalyser</h2>
+    <button id="analyser">check getAnalyser('spectrum') / getAnalyser('scope')</button>
+    <pre id="analyser-log"></pre>
+  </section>
+
+  <section>
+    <h2>Dispose</h2>
+    <button id="dispose">unmount + dispose, verify no thrown errors on double-dispose</button>
+    <pre id="dispose-log"></pre>
+  </section>
+
+<script type="module">
+import EQ from '../../src/devices/eq.js';
+
+let ctx, eq, noiseSrc, noiseGain;
+
+function log(id, obj) {
+  document.getElementById(id).textContent =
+    typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+}
+
+document.getElementById('start').addEventListener('click', () => {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.resume();
+
+  eq = new EQ(ctx);
+  eq.output.connect(ctx.destination);
+  eq.mountCompact(document.getElementById('eq-mount'));
+
+  log('setup-log', {
+    ok: true,
+    params: EQ.params.map((p) => p.path),
+    bypass: eq.bypass,
+  });
+});
+
+function makeNoiseBuffer() {
+  const len = ctx.sampleRate * 2;
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  return buf;
+}
+
+document.getElementById('noise-start').addEventListener('click', () => {
+  if (noiseSrc) return;
+  noiseSrc = ctx.createBufferSource();
+  noiseSrc.buffer = makeNoiseBuffer();
+  noiseSrc.loop = true;
+  noiseGain = ctx.createGain();
+  noiseGain.gain.value = 0.15;
+  noiseSrc.connect(noiseGain);
+  noiseGain.connect(eq.input);
+  noiseSrc.start();
+});
+
+document.getElementById('noise-stop').addEventListener('click', () => {
+  if (!noiseSrc) return;
+  noiseSrc.stop();
+  noiseSrc.disconnect();
+  noiseGain.disconnect();
+  noiseSrc = null;
+  noiseGain = null;
+});
+
+document.getElementById('roundtrip').addEventListener('click', () => {
+  eq.setParam('band0.gain', 6);
+  eq.setParam('band0.freq', 120);
+  eq.setParam('band0.q', 2);
+  eq.setParam('band1.gain', -8);
+  eq.setParam('band1.freq', 900);
+  eq.setParam('band2.q', 5);
+
+  const json = JSON.parse(JSON.stringify(eq.getState()));
+
+  const eq2 = new EQ(ctx);
+  eq2.setState(json);
+  const match = JSON.stringify(eq2.getState()) === JSON.stringify(json);
+  eq2.dispose();
+
+  log('roundtrip-log', { json, match });
+});
+
+document.getElementById('weight').addEventListener('click', () => {
+  log('weight-log', {
+    estimatedWeight: EQ.estimatedWeight,
+    cpuWeight: eq.cpuWeight,
+  });
+});
+
+document.getElementById('analyser').addEventListener('click', () => {
+  const spectrum = eq.getAnalyser('spectrum');
+  const scope = eq.getAnalyser('scope');
+  log('analyser-log', {
+    spectrumIsAnalyserNode: spectrum instanceof AnalyserNode,
+    scopeIsNull: scope === null,
+    readout: eq.readout,
+  });
+});
+
+document.getElementById('dispose').addEventListener('click', () => {
+  let threw = false;
+  try {
+    eq.dispose();
+    eq.dispose();
+  } catch (e) {
+    threw = true;
+  }
+  log('dispose-log', { threwOnDoubleDispose: threw });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!doctype html>
+<!--
+  arrangement-test.html — throwaway DONE-CHECK page for `arrangement` (P4/S3).
+  Lives in docs/scratchpad, LLM space. Not part of the shipped app. Deletable at any time.
+
+  Imports core/clock.js and src/ui/arrangement.js only. Mounts Arrangement into a fixed-size
+  host so the "no page-body horizontal scroll" claim can be checked against a Chromebook-size
+  viewport (1366x768 emulated, or resize the window).
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/docs/scratchpad/arrangement-test.html
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<title>arrangement DONE-CHECK</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--font-ui); padding: var(--sp-8); }
+  h1 { font-size: var(--fs-lg); }
+  .row { display: flex; gap: var(--sp-4); align-items: center; margin: var(--sp-4) 0; flex-wrap: wrap; }
+  button { font: inherit; padding: var(--sp-2) var(--sp-6); background: var(--panel); color: var(--text);
+           border: var(--bw) solid var(--line); border-radius: var(--r-ctl); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #host { width: 1200px; max-width: 100%; height: 480px; border: var(--bw) solid var(--line);
+          margin-top: var(--sp-6); }
+  #log { max-width: 1200px; height: 140px; overflow-y: auto; background: var(--panel);
+         border: var(--bw) solid var(--line); border-radius: var(--r-ctl); padding: var(--sp-4);
+         font-size: var(--fs-xs); font-family: var(--font-mono); color: var(--text-dim);
+         white-space: pre-wrap; margin-top: var(--sp-4); }
+</style>
+</head>
+<body>
+<h1>arrangement — DONE-CHECK page</h1>
+
+<div class="row">
+  <button id="btnPlay">clock.play()</button>
+  <button id="btnRecord">clock.record()</button>
+  <button id="btnStop">clock.stop()</button>
+  <button id="btnSeek">clock.seek(1,1,0)</button>
+  <button id="btnLoopOn">loop on, bars 1-5</button>
+  <button id="btnSongLen">songLengthBars = 16</button>
+  <button id="btnRebind">bindChannels(custom labels)</button>
+  <button id="btnLog">log lanes</button>
+</div>
+
+<div id="host"></div>
+<div id="log"></div>
+
+<script type="module">
+  import { clock } from '../../src/core/clock.js';
+  import Arrangement from '../../src/ui/arrangement.js';
+
+  const log = document.getElementById('log');
+  function say(msg) {
+    log.textContent += msg + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+
+  const arr = new Arrangement();
+  arr.mount(document.getElementById('host'));
+  say('mounted: ' + arr.lanes.map((l) => `${l.id}:${l.kind}`).join(', '));
+
+  document.getElementById('btnPlay').addEventListener('click', () => { clock.play(); say('clock.play()'); });
+  document.getElementById('btnRecord').addEventListener('click', () => { clock.record(); say('clock.record()'); });
+  document.getElementById('btnStop').addEventListener('click', () => { clock.stop(); say('clock.stop()'); });
+  document.getElementById('btnSeek').addEventListener('click', () => { clock.seek(1, 1, 0); say('clock.seek(1,1,0)'); });
+  document.getElementById('btnLoopOn').addEventListener('click', () => {
+    clock.loop = { on: true, startBar: 1, endBar: 5 };
+    say('clock.loop = {on:true, startBar:1, endBar:5}');
+  });
+  document.getElementById('btnSongLen').addEventListener('click', () => {
+    clock.songLengthBars = 16;
+    say('clock.songLengthBars = 16');
+  });
+  document.getElementById('btnRebind').addEventListener('click', () => {
+    arr.bindChannels([
+      { id: 'ch1', kind: 'pitched', label: 'Lead' },
+      { id: 'ch2', kind: 'pitched', label: 'Pad' },
+      { id: 'ch3', kind: 'pitched', label: 'Bass' },
+      { id: 'ch4', kind: 'pitched', label: 'Keys' },
+      { id: 'ch5', kind: 'drum', label: 'Kit' },
+      { id: 'ch6', kind: 'drum', label: 'Perc' },
+    ]);
+    say('bindChannels() with custom labels — lanes rebuilt');
+  });
+  document.getElementById('btnLog').addEventListener('click', () => {
+    say(arr.lanes.map((l) => `${l.id} ${l.kind} armed=${l.capture.armedLanes} punch=${JSON.stringify(l.capture.punch)}`).join('\n'));
+  });
+
+  say('click ARM on any lane, then clock.record() to arm-test capture routing. Drag the two teal handles on the ruler to test loop region. Resize the window to below 1024px wide and confirm the page body itself never gains a horizontal scrollbar (only #host does).');
+</script>
+</body>
+</html>

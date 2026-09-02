@@ -249,41 +249,41 @@ const STYLE_TEXT = `
 .cbdaw-roll {
   --roll-row-h: 18px;
   --roll-gutter: 62px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  box-sizing: border-box;
-  font-family: system-ui, -apple-system, sans-serif;
+  display: var(--disp-flex);
+  flex-direction: var(--flexdir-column);
+  gap: var(--sp-3);
+  width: var(--pct-100);
+  box-sizing: var(--box-border-box);
+  font-family: var(--font-ui);
   color: var(--text);
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px;
-  user-select: none;
-  -webkit-user-select: none;
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-body);
+  padding: var(--sp-4);
+  user-select: var(--usel-none);
+  -webkit-user-select: var(--usel-none);
 }
 .cbdaw-roll[data-variant="compact"] { --roll-row-h: 11px; --roll-gutter: 44px; }
 .cbdaw-roll[data-variant="expanded"] { --roll-row-h: 24px; --roll-gutter: 78px; }
 
 .cbdaw-roll__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: 12px;
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-6);
+  flex-wrap: var(--flexwrap-wrap);
+  font-size: var(--fs-base);
   color: var(--text-dim);
 }
-.cbdaw-roll[data-variant="compact"] .cbdaw-roll__toolbar { font-size: 10px; gap: 8px; }
+.cbdaw-roll[data-variant="compact"] .cbdaw-roll__toolbar { font-size: var(--fs-xs); gap: var(--sp-4); }
 .cbdaw-roll__toolbar button {
-  font: inherit;
-  font-weight: 600;
+  font: var(--font-inherit);
+  font-weight: var(--w-med);
   color: var(--text);
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 3px 8px;
-  cursor: pointer;
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-1h) var(--sp-4);
+  cursor: var(--cur-pointer);
 }
 .cbdaw-roll__toolbar button:hover { border-color: var(--accent); }
 .cbdaw-roll__toolbar button[aria-pressed="true"] {
@@ -292,112 +292,112 @@ const STYLE_TEXT = `
   border-color: var(--accent);
 }
 .cbdaw-roll__readout {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-variant-numeric: var(--num-tabular);
+  font-weight: var(--w-bold);
   color: var(--text);
-  min-width: 4ch;
+  min-width: var(--sp-ch-4);
 }
 
 .cbdaw-roll__body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: var(--disp-flex);
+  flex-direction: var(--flexdir-column);
+  gap: var(--sp-1);
   background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 4px;
-  overflow: hidden;
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-2);
+  overflow: var(--ov-hidden);
 }
 
 /* Every stripe below is one row: a gutter cell of fixed width and a field that fills the
    rest. The ruler uses the identical two-part shape, which is what keeps a note's percentage
    position and a ruler cell's flex position on the same vertical line without pixel math. */
-.cbdaw-roll__stripe { display: flex; align-items: stretch; }
+.cbdaw-roll__stripe { display: var(--disp-flex); align-items: var(--align-stretch); }
 .cbdaw-roll__gutter {
-  flex: 0 0 auto;
+  flex: var(--flex-0-0-auto);
   width: var(--roll-gutter);
   min-width: var(--roll-gutter);
-  padding-right: 4px;
-  box-sizing: border-box;
+  padding-right: var(--sp-2);
+  box-sizing: var(--box-border-box);
 }
-.cbdaw-roll__field { flex: 1 1 auto; position: relative; }
+.cbdaw-roll__field { flex: var(--flex-1-1-auto); position: var(--pos-relative); }
 
 /* ---- the ruler: §13.3's labels, drawn by beat group so triplets and 16ths land on the
    same beat boundaries — §13.2, "not two grid implementations." ---- */
-.cbdaw-roll__ruler { display: flex; gap: 1px; }
+.cbdaw-roll__ruler { display: var(--disp-flex); gap: var(--sp-hair); }
 .cbdaw-roll__bar {
-  flex: 1 1 0;
-  display: flex;
-  gap: 1px;
+  flex: var(--flex-1-1-0);
+  display: var(--disp-flex);
+  gap: var(--sp-hair);
   border-left: 2px solid var(--line);
-  padding-left: 1px;
+  padding-left: var(--sp-hair);
 }
-.cbdaw-roll__bar:first-child { border-left: none; padding-left: 0; }
+.cbdaw-roll__bar:first-child { border-left: var(--none); padding-left: var(--sp-0); }
 .cbdaw-roll__beat {
-  flex: 1 1 0;
-  display: flex;
-  gap: 1px;
-  border-left: 1px solid var(--line);
-  padding-left: 1px;
+  flex: var(--flex-1-1-0);
+  display: var(--disp-flex);
+  gap: var(--sp-hair);
+  border-left: var(--bw) solid var(--line);
+  padding-left: var(--sp-hair);
 }
-.cbdaw-roll__beat:first-child { border-left: none; padding-left: 0; }
+.cbdaw-roll__beat:first-child { border-left: var(--none); padding-left: var(--sp-0); }
 .cbdaw-roll__ruler-cell {
-  flex: 1 1 0;
-  text-align: center;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  flex: var(--flex-1-1-0);
+  text-align: var(--ta-center);
+  font-size: var(--fs-sm);
+  font-variant-numeric: var(--num-tabular);
   color: var(--text-dim);
-  padding: 2px 0;
-  border-radius: 2px;
+  padding: var(--sp-1) 0;
+  border-radius: var(--r-cell);
 }
-.cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell { font-size: 8px; padding: 1px 0; }
-.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell { font-size: 18px; padding: 4px 0; }
-.cbdaw-roll__ruler-cell[data-beat="true"] { color: var(--text); font-weight: 700; }
-.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: 22px; }
+.cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell { font-size: var(--fs-micro); padding: var(--sp-hair) 0; }
+.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell { font-size: 18px; padding: var(--sp-2) 0; }
+.cbdaw-roll__ruler-cell[data-beat="true"] { color: var(--text); font-weight: var(--w-bold); }
+.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
 /* SEAT QUESTION 4 — "note length must relate to the ruler." While a note is drawn or
    resized, the ruler cells it covers light up. The length is read in the counting labels the
    student already says out loud. */
 .cbdaw-roll__ruler-cell[data-span="true"] {
   color: var(--bg);
   background: var(--accent);
-  font-weight: 700;
+  font-weight: var(--w-bold);
 }
 
 /* ---- the pitch rows ---- */
-.cbdaw-roll__rows { position: relative; }
+.cbdaw-roll__rows { position: var(--pos-relative); }
 .cbdaw-roll__row {
-  display: flex;
-  align-items: stretch;
+  display: var(--disp-flex);
+  align-items: var(--align-stretch);
   height: var(--roll-row-h);
-  box-sizing: border-box;
+  box-sizing: var(--box-border-box);
 }
 .cbdaw-roll__row-label {
-  flex: 0 0 auto;
+  flex: var(--flex-0-0-auto);
   width: var(--roll-gutter);
   min-width: var(--roll-gutter);
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  box-sizing: var(--box-border-box);
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  justify-content: var(--justify-flex-end);
   gap: 3px;
-  padding-right: 5px;
-  font-size: 10px;
-  line-height: 1;
+  padding-right: var(--sp-2h);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-none);
   color: var(--text-dim);
-  overflow: hidden;
-  white-space: nowrap;
+  overflow: var(--ov-hidden);
+  white-space: var(--ws-nowrap);
 }
-.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__row-label { font-size: 15px; }
-.cbdaw-roll__row[data-inkey="true"] .cbdaw-roll__row-label { color: var(--text); font-weight: 600; }
+.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__row-label { font-size: var(--fs-lg); }
+.cbdaw-roll__row[data-inkey="true"] .cbdaw-roll__row-label { color: var(--text); font-weight: var(--w-med); }
 
 /* THE SHADING. --row-deg is whatever token theory/scale.js named for this degree. */
 .cbdaw-roll__row-cell {
-  flex: 1 1 auto;
-  border-top: 1px solid var(--line);
-  border-left-width: 3px;
-  border-left-style: solid;
-  border-left-color: transparent;
-  box-sizing: border-box;
+  flex: var(--flex-1-1-auto);
+  border-top: var(--bw) solid var(--line);
+  border-left-width: var(--bw-3);
+  border-left-style: var(--line-solid);
+  border-left-color: var(--color-transparent);
+  box-sizing: var(--box-border-box);
 }
 .cbdaw-roll__row[data-inkey="true"] .cbdaw-roll__row-cell {
   background: color-mix(in srgb, var(--row-deg) 17%, var(--panel));
@@ -411,30 +411,30 @@ const STYLE_TEXT = `
   background: color-mix(in srgb, var(--row-deg) 30%, var(--panel));
 }
 /* The non-color cue tokens.css asked P3 for. Border STYLE, not hue, not a glyph. */
-.cbdaw-roll__row[data-quality="major"] .cbdaw-roll__row-cell { border-left-style: solid; }
-.cbdaw-roll__row[data-quality="minor"] .cbdaw-roll__row-cell { border-left-style: dashed; }
-.cbdaw-roll__row[data-quality="diminished"] .cbdaw-roll__row-cell { border-left-style: dotted; }
-.cbdaw-roll__row[data-quality="augmented"] .cbdaw-roll__row-cell { border-left-style: double; border-left-width: 5px; }
-.cbdaw-roll__row[data-quality="altered"] .cbdaw-roll__row-cell { border-left-style: groove; border-left-width: 5px; }
+.cbdaw-roll__row[data-quality="major"] .cbdaw-roll__row-cell { border-left-style: var(--line-solid); }
+.cbdaw-roll__row[data-quality="minor"] .cbdaw-roll__row-cell { border-left-style: var(--line-dashed); }
+.cbdaw-roll__row[data-quality="diminished"] .cbdaw-roll__row-cell { border-left-style: var(--line-dotted); }
+.cbdaw-roll__row[data-quality="augmented"] .cbdaw-roll__row-cell { border-left-style: var(--line-double); border-left-width: var(--bw-5); }
+.cbdaw-roll__row[data-quality="altered"] .cbdaw-roll__row-cell { border-left-style: var(--line-groove); border-left-width: var(--bw-5); }
 /* §4's 'altered' — "the student moved this degree" is a DIFFERENT fact from the quality,
    and tokens.css is explicit that no token may be overloaded. It gets its own mark. */
-.cbdaw-roll__row[data-altered="true"] .cbdaw-roll__row-label { text-decoration: underline; }
+.cbdaw-roll__row[data-altered="true"] .cbdaw-roll__row-label { text-decoration: var(--td-underline); }
 
 /* ---- the note layer, one absolutely positioned box per §7 note ---- */
 .cbdaw-roll__notes {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+  position: var(--pos-absolute);
+  inset: var(--sp-0);
+  pointer-events: var(--pe-none);
 }
 .cbdaw-roll__note {
-  position: absolute;
-  box-sizing: border-box;
-  pointer-events: auto;
-  border: 1px solid var(--bg);
-  border-radius: 3px;
-  overflow: hidden;
-  cursor: grab;
-  touch-action: none;
+  position: var(--pos-absolute);
+  box-sizing: var(--box-border-box);
+  pointer-events: var(--pe-auto);
+  border: var(--bw) solid var(--bg);
+  border-radius: var(--r-sm);
+  overflow: var(--ov-hidden);
+  cursor: var(--cur-grab);
+  touch-action: var(--touch-none);
   background: color-mix(in srgb, var(--note-deg) 40%, var(--panel));
 }
 .cbdaw-roll__note[data-inkey="false"] { background: color-mix(in srgb, var(--text-dim) 40%, var(--panel)); }
@@ -442,12 +442,12 @@ const STYLE_TEXT = `
 /* SEAT QUESTION 5 — velocity is the fill height, exactly as step-grid.js draws it, so one
    gesture vocabulary covers both machines. */
 .cbdaw-roll__note-fill {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: var(--pos-absolute);
+  left: var(--sp-0);
+  right: var(--sp-0);
+  bottom: var(--sp-0);
   background: var(--note-deg);
-  opacity: 0.9;
+  opacity: var(--op-soft);
 }
 .cbdaw-roll__note[data-inkey="false"] .cbdaw-roll__note-fill { background: var(--text-dim); }
 /* §13.5's off-grid mark, the same [data-off-grid] convention step-grid.js already ships:
@@ -455,58 +455,58 @@ const STYLE_TEXT = `
 .cbdaw-roll__note[data-off-grid="true"] { box-shadow: inset 0 0 0 2px var(--warn); }
 /* the length handle */
 .cbdaw-roll__note-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  right: var(--sp-0);
   width: ${RESIZE_ZONE_PX}px;
-  cursor: ew-resize;
+  cursor: var(--cur-ew-resize);
   background: color-mix(in srgb, var(--text) 25%, transparent);
 }
 
 /* ---- gridlines ---- */
-.cbdaw-roll__lines { position: absolute; inset: 0; pointer-events: none; }
+.cbdaw-roll__lines { position: var(--pos-absolute); inset: var(--sp-0); pointer-events: var(--pe-none); }
 .cbdaw-roll__line {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  width: var(--sp-hair);
   background: color-mix(in srgb, var(--line) 55%, transparent);
 }
 .cbdaw-roll__line[data-beat="true"] { background: var(--line); }
-.cbdaw-roll__line[data-bar="true"] { background: var(--text-dim); width: 2px; }
+.cbdaw-roll__line[data-bar="true"] { background: var(--text-dim); width: var(--sp-1); }
 
 /* ---- SEAT QUESTION 5's second half: the velocity lane ---- */
 .cbdaw-roll__vel { height: calc(var(--roll-row-h) * 2.5); }
 .cbdaw-roll__vel .cbdaw-roll__field {
   background: var(--panel);
-  border-top: 1px solid var(--line);
+  border-top: var(--bw) solid var(--line);
 }
 .cbdaw-roll__vel-bar {
-  position: absolute;
-  bottom: 0;
-  width: 5px;
+  position: var(--pos-absolute);
+  bottom: var(--sp-0);
+  width: var(--sp-2h);
   margin-left: -2px;
   background: var(--accent);
-  border-radius: 2px 2px 0 0;
-  cursor: ns-resize;
-  touch-action: none;
+  border-radius: var(--r-cell) var(--r-cell) 0 0;
+  cursor: var(--cur-ns-resize);
+  touch-action: var(--touch-none);
 }
 .cbdaw-roll__vel-bar[data-selected="true"] { background: var(--text); }
 
 /* ---- the playhead: a VISUAL, driven by rAF, that schedules nothing (§3, §10) ---- */
 .cbdaw-roll__playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  width: var(--sp-1);
   background: var(--accent);
   box-shadow: 0 0 4px var(--accent);
-  pointer-events: none;
-  will-change: left;
+  pointer-events: var(--pe-none);
+  will-change: var(--wc-left);
 }
 /* §9: "Standalone views may animate. DAW views stay still." */
-.cbdaw-roll[data-variant="compact"] .cbdaw-roll__playhead { box-shadow: none; }
+.cbdaw-roll[data-variant="compact"] .cbdaw-roll__playhead { box-shadow: var(--none); }
 `;
 
 function acquireStyle() {
@@ -1053,7 +1053,7 @@ export default class PianoRoll {
     rowsStripe.className = 'cbdaw-roll__stripe';
     const rowsGutterAndRows = document.createElement('div');
     rowsGutterAndRows.className = 'cbdaw-roll__rows';
-    rowsGutterAndRows.style.flex = '1 1 auto';
+    rowsGutterAndRows.style.flex = 'var(--flex-1-1-auto)';
     rowsStripe.appendChild(rowsGutterAndRows);
     body.appendChild(rowsStripe);
 
@@ -1063,7 +1063,7 @@ export default class PianoRoll {
     notes.className = 'cbdaw-roll__notes';
     const playhead = document.createElement('div');
     playhead.className = 'cbdaw-roll__playhead';
-    playhead.style.left = '0%';
+    playhead.style.left = 'var(--pct-0)';
 
     // --- velocity lane
     const velStripe = document.createElement('div');
@@ -1073,7 +1073,7 @@ export default class PianoRoll {
     body.appendChild(velStripe);
     const velPlayhead = document.createElement('div');
     velPlayhead.className = 'cbdaw-roll__playhead';
-    velPlayhead.style.left = '0%';
+    velPlayhead.style.left = 'var(--pct-0)';
     velStripe.querySelector('.cbdaw-roll__field').appendChild(velPlayhead);
 
     root.appendChild(body);

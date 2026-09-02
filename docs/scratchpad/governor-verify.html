@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>governor verify — throwaway harness, P4/S5</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: monospace; padding: 16px; }
+  #log { white-space: pre-wrap; font-size: 12px; }
+  #mount { border: 1px solid var(--line); padding: 8px; margin-bottom: 12px; display: inline-block; }
+</style>
+</head>
+<body>
+<div id="mount"></div>
+<pre id="log"></pre>
+<script type="module">
+import { ctx, governor, voicePool } from '../../src/core/audio.js';
+import Graph, { CAP_NODES, CAP_INSERTS, CAP_SENDS } from '../../src/mixer/graph.js';
+import { createGovernorMeter, restoreNoCap } from '../../src/ui/cpu-meter.js';
+
+const logEl = document.getElementById('log');
+const lines = [];
+const results = {};
+function log(msg) {
+  lines.push(msg);
+  logEl.textContent = lines.join('\n');
+  console.log(msg);
+}
+function assert(name, cond) {
+  results[name] = !!cond;
+  log(`${cond ? 'PASS' : 'FAIL'} — ${name}`);
+}
+
+// clean slate: this run's own persisted noCap should not leak in
+try { localStorage.removeItem('cbdaw.governor.noCap'); } catch (err) {}
+
+const graph = new Graph(ctx);
+const meter = createGovernorMeter({ graph });
+document.getElementById('mount').appendChild(meter.el);
+
+const dataVoices = () => meter.el.querySelector('[data-voices]').textContent;
+const dataCpuValue = () => meter.el.querySelector('[data-cpu-value]').textContent;
+const dataCpuBand = () => meter.el.querySelector('[data-cpu-fill]').dataset.band;
+const nocapInput = () => meter.el.querySelector('[data-nocap]');
+const stat = (name) => meter.el.querySelector(`[data-stat="${name}"] [data-stat-value]`).textContent;
+const statHot = (name) => meter.el.querySelector(`[data-stat="${name}"]`).dataset.hot;
+const refusalEl = () => meter.el.querySelector('[data-refusal]');
+
+// ---- Q1/Q7 — restoreNoCap runs before mount, default OFF on a clean store ----
+assert('noCap defaults false on a clean store', governor.noCap === false);
+
+// ---- Q1 — voices tracked at 1, 8, 16, 32 ----
+const fakeVoices = [];
+function pushVoices(to) {
+  while (fakeVoices.length < to) {
+    const v = { cpuWeight: 10, state: 'sustaining' };
+    voicePool.register(v, 'harness', ctx.currentTime);
+    fakeVoices.push(v);
+  }
+}
+await new Promise((r) => requestAnimationFrame(r));
+for (const n of [1, 8, 16, 32]) {
+  pushVoices(n);
+  await new Promise((r) => requestAnimationFrame(r));
+  assert(`voices reads ${n} at voicePool.count===${n}`, dataVoices() === String(n) && voicePool.count === n);
+}
+
+// ---- Q1/Q6 — load tracks a reported scheduler pass, and the meter costs ~nothing ----
+governor.reportSchedulerPass(0, 100);
+await new Promise((r) => requestAnimationFrame(r));
+assert('load reads 0.00 with no injected load', dataCpuValue() === '0.00');
+
+// §8: smoothed over 20 passes — saturate that window before reading the band.
+for (let i = 0; i < 25; i++) governor.reportSchedulerPass(95, 100);
+await new Promise((r) => requestAnimationFrame(r));
+assert('load crosses the hot band (>=0.90) and the fill reads hot', Number(dataCpuValue()) >= 0.9 && dataCpuBand() === 'hot');
+
+// release the fake voices — addInsert()'s own governor.request() call refuses everything
+// once voicePool.count reaches 32, and the graph-cap tests below need real headroom.
+for (const v of fakeVoices) voicePool.release(v);
+fakeVoices.length = 0;
+await new Promise((r) => requestAnimationFrame(r));
+assert('voices back to 0 after releasing the fakes', voicePool.count === 0);
+
+// ---- meter's own added cost — 200 addInsert/removeNode round trips, bound vs unbound ----
+function timeRoundTrips(n) {
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) {
+    const id = graph.addInsert('ch1', 'gate');
+    if (typeof id === 'string') graph.removeNode(id);
+  }
+  return performance.now() - t0;
+}
+const N = 200;
+const withMeter = timeRoundTrips(N);
+meter.unbindGraph();
+const withoutMeter = timeRoundTrips(N);
+meter.bindGraph(graph);
+const addedMs = Math.max(0, withMeter - withoutMeter);
+const perOpUs = (addedMs / N) * 1000;
+log(`meter cost: ${N} addInsert/removeNode round trips — with meter ${withMeter.toFixed(2)}ms, without ${withoutMeter.toFixed(2)}ms, added ${addedMs.toFixed(2)}ms total, ${perOpUs.toFixed(1)}µs/change-event`);
+results.meterCostPerChangeEventUs = perOpUs;
+assert('meter cost per change event stays under 500µs', perOpUs < 500);
+
+// reset graph back to empty channels for the cap tests below
+for (const n of graph.nodes) if (n.type === 'insert') graph.removeNode(n.id);
+
+// ---- Q2 — breakdown shows what is consuming the budget ----
+for (let i = 0; i < CAP_INSERTS; i++) graph.addInsert('ch1', 'gate');
+await new Promise((r) => requestAnimationFrame(r));
+assert(`ch1 filled to its own insert cap shows in the breakdown (${CAP_INSERTS}/${CAP_INSERTS})`, stat('inserts') === `${CAP_INSERTS}/${CAP_INSERTS}`);
+assert('inserts stat reads hot at its own cap', statHot('inserts') === 'true');
+
+// ---- Q5 — a refusal at the cap is visible, with a reason ----
+const refusedInsert = graph.addInsert('ch1', 'gate');
+await new Promise((r) => requestAnimationFrame(r));
+assert('a 5th insert on ch1 is refused (not an id)', refusedInsert === false);
+assert('the refusal reason is visible in the meter', refusalEl().dataset.visible === 'true' && refusalEl().textContent.length > 0);
+log(`refusal reason shown: "${refusalEl().textContent}"`);
+
+// fill remaining channels to CAP_NODES total (24 = 6 * 4)
+for (let ch = 2; ch <= 6; ch++) {
+  for (let i = 0; i < CAP_INSERTS; i++) graph.addInsert(`ch${ch}`, 'gate');
+}
+await new Promise((r) => requestAnimationFrame(r));
+assert(`graph nodes read ${CAP_NODES}/${CAP_NODES}`, stat('nodes') === `${CAP_NODES}/${CAP_NODES}`);
+assert('nodes stat reads hot at CAP_NODES', statHot('nodes') === 'true');
+
+// ---- Q3/Q4 — flip noCap, same refusal now goes through, meter still reads and can still go hot ----
+nocapInput().checked = true;
+nocapInput().dispatchEvent(new Event('change'));
+await new Promise((r) => requestAnimationFrame(r));
+assert('noCap is on after the checkbox flips', governor.noCap === true);
+
+const liftedInsert = graph.addInsert('ch1', 'gate');
+await new Promise((r) => requestAnimationFrame(r));
+assert('the same request that was refused now succeeds with noCap on', typeof liftedInsert === 'string');
+assert('nodes stat is no longer capped once noCap is on', stat('nodes').endsWith('/∞'));
+assert('nodes stat is not painted hot once noCap is on', statHot('nodes') === 'false');
+
+for (let i = 0; i < 25; i++) governor.reportSchedulerPass(95, 100);
+await new Promise((r) => requestAnimationFrame(r));
+assert('CPU load still reads hot with noCap on — nothing about noCap silences the load meter', dataCpuBand() === 'hot');
+
+// ---- Q7 — noCap persistence across a reload ----
+assert('noCap persisted to localStorage on toggle', localStorage.getItem('cbdaw.governor.noCap') === '1');
+governor.noCap = false; // simulate a fresh module load reading the store back
+restoreNoCap();
+assert('restoreNoCap() reads the persisted value back after a simulated reload', governor.noCap === true);
+try { localStorage.removeItem('cbdaw.governor.noCap'); } catch (err) {}
+
+document.body.dataset.readyForShot = 'true';
+await new Promise((r) => setTimeout(r, 2000));
+
+// ---- Q8 — clean disposal ----
+const framesBefore = meter.frameCount;
+await new Promise((r) => requestAnimationFrame(r));
+const dropped = meter.dispose();
+const framesAfterDispose1 = meter.frameCount;
+await new Promise((r) => requestAnimationFrame(r));
+const framesAfterDispose2 = meter.frameCount;
+assert('dispose() stops the rAF loop — frame count does not advance after teardown', framesAfterDispose1 === framesAfterDispose2 && framesAfterDispose1 > 0);
+assert('dispose() drops its listeners and removes its root', !document.getElementById('mount').contains(meter.el));
+log(`dispose() report: ${JSON.stringify(dropped)}`);
+
+document.body.dataset.done = 'true';
+window.__RESULTS__ = results;
+log('DONE');
+</script>
+</body>
+</html>
