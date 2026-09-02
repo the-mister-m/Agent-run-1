@@ -5,6 +5,13 @@ Rules: GLOBAL-RULES.md. Append-only. Work done and decisions made.
 
 ## SESSION INDEX
 (one line per session, newest first: date · name · 5–10 word summary)
+- 2026-09-02 · session agent, unlimited tracks + Phase D · six jobs run, SPEC §7 rewritten with seven Brandon rulings, §10 added, six agent judgment calls flagged, nothing browser-verified, [review](docs/reports/2026-09-01-session-review-unlimited-tracks.md)
+- 2026-09-01 · unlimited-tracks job 6/6, Phase D region editor · double-click opens PianoRoll/StepGrid, close writes back, `regions.js` notes made opaque, [receipt](docs/reports/receipt-region-editor.md)
+- 2026-09-01 · unlimited-tracks job 4/6, integration · add/assign/remove wired end to end in `wireDawShell()`, +TRACK and per-lane × controls, ledger rows 32-34 closed, [receipt](docs/reports/receipt-unlimited-tracks-integration.md)
+- 2026-09-01 · unlimited-tracks job 5/6, style refcount + dev-splash · style refcount ported 3/3 (wave-synth/drum-synth/drum-sampler), dev-splash.html CHANNEL_IDS+createStrips fixed, [receipt](docs/reports/receipt-style-refcount-devsplash-fix.md)
+- 2026-09-01 · unlimited-tracks job 3/6, timeline · CHANNEL_IDS deleted both sides, lanes read tracks.js, lane head name+instrument controls, [receipt](docs/reports/receipt-unlimited-tracks-timeline.md)
+- 2026-09-01 · unlimited-tracks job 2/6, mixer live list · strip/graph/automation read a live track list, CAP_NODES now counts insert devices, teardown ledger (35 rows, 4 gaps named), [receipt](docs/reports/receipt-mixer-live-list.md)
+- 2026-09-01 · unlimited-tracks job 1/6, tracks store · `core/tracks.js` built on the regions.js idiom, kind derived from instrumentType, tracks born empty, [receipt](docs/reports/receipt-tracks-store.md)
 - 2026-09-01 · Closer, arrange rebuild close · timestamps grepped, INDEX/CLAUDE/TODO/MEMORY/worklog updated, [receipt](docs/reports/2026-09-01-closer-arrange-rebuild.md)
 - 2026-09-01 · arrange rebuild · double-ruler defect found by grep, phases A-C + cycle strip shipped, phase D unspecced, [receipt](docs/reports/receipt-arrange-rebuild.md)
 - 2026-09-01 · Closer, devsplash close · claims checked against file state, CLAUDE.md map + MEMORY warm start updated, [receipt](docs/reports/2026-09-01-closer-devsplash-close.md)
@@ -1683,3 +1690,41 @@ lines, `tools/patch-synth.html` new, one line appended to `src/ui/tokens.css`.
   [src/core/regions.js](src/core/regions.js) ·
   [src/ui/arrangement.js](src/ui/arrangement.js) ·
   [docs/scratchpad/regions-smoke.mjs](docs/scratchpad/regions-smoke.mjs)
+
+## 2026-09-01 — `tracks` (unlimited-tracks job 1 of 6) — `src/core/tracks.js` built
+
+- **New file only.** `createTrackStore()`, built on `regions.js`'s idiom: factory, closed
+  event list (`add`/`remove`/`update`/`change`), `on()` returns an unsubscribe, frozen
+  records, `dispose()` returns `{listenersDropped, tracksHeld}`. Module singleton
+  `tracks` + default export.
+- Record: `{id, name, instrumentType, instrument, kind, color}`. `kind` derived from
+  `instrumentType` via one lookup table (`INSTRUMENT_KIND`), never accepted from a
+  caller. `add()` always born empty — no instrument/instrumentType args accepted.
+  `setInstrumentType`/`setInstrument` are separate calls; store never constructs or
+  disposes an instrument.
+  `reorder(id, toIndex)` — list order held separately from the id map.
+- Six instrument types found by `ls src/instruments/` (spec named only two): pitched —
+  `wave-synth`, `overtone-synth`, `chord-module`, `patch-synth`; drum — `drum-synth`,
+  `drum-sampler`. Judgment call, not spec text.
+- No `serialize()`/`load()` — `instrument` holds a live object, not JSON-safe; spec's
+  ruled sections never asked for persistence.
+- Smoke-tested inline (add/remove/reorder/type-swap/freeze/closed-list), not saved as a
+  script. Receipt: [docs/reports/receipt-tracks-store.md](docs/reports/receipt-tracks-store.md)
+
+## 2026-09-01 — `mixer` (unlimited-tracks job 2 of 6) — rack and graph take a live list
+
+- `createStrips(ctx, specs)` fallback is `[]`, not six. Rack gained `add`/`remove`/`rename`;
+  `strips` is the same object for its life so `bindStrips()` is called once. `Strip.label`
+  became a getter/setter that repaints the mounted head.
+- `graph._seedDefault(channels)` seeds master first, then one node per id — zero ids legal.
+  New `addChannel`/`removeChannel`/`_dropInsert`/`refresh`. `removeNode` refactored onto
+  `_dropInsert`.
+- `CAP_NODES` re-read as a device cap, not a total-node cap: at 24 tracks the old check
+  silently refused every insert. My call, flagged for the Closer.
+- `createAutomationRack()` added — the only release path for a removed track's lanes.
+- Teardown ledger delivered in the receipt: 35 rows, 4 with no release path in my files
+  (regions, instrument instance, per-lane `Capture`, the `stylesInjected` guards).
+- No browser run — `node --check` only. `tools/dev-splash.html` breaks on the empty rack.
+- LINKS: [receipt-mixer-live-list.md](docs/reports/receipt-mixer-live-list.md) ·
+  [src/mixer/strip.js](src/mixer/strip.js) · [src/mixer/graph.js](src/mixer/graph.js) ·
+  [src/mixer/automation.js](src/mixer/automation.js)

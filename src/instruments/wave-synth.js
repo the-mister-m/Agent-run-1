@@ -376,13 +376,11 @@ class Voice {
 // value there changes. Same pattern `vis/spectrum.js`, `vis/scope.js` and `ui/shell.js`
 // already use.
 
-let stylesInjected = false;
+let styleRefs = 0;
 
-function ensureStylesInjected() {
-  if (stylesInjected || document.getElementById('wave-synth-styles')) {
-    stylesInjected = true;
-    return;
-  }
+function acquireStyle() {
+  styleRefs++;
+  if (document.getElementById('wave-synth-styles')) return;
   const style = document.createElement('style');
   style.id = 'wave-synth-styles';
   style.textContent = `
@@ -417,7 +415,11 @@ function ensureStylesInjected() {
 @keyframes ws-pulse { 0%, 100% { opacity: var(--op-faint); transform: var(--scale-pulse-rest); } 50% { opacity: var(--op-soft); transform: var(--scale-pulse-peak); } }
 `;
   document.head.appendChild(style);
-  stylesInjected = true;
+}
+
+function releaseStyle() {
+  styleRefs = Math.max(0, styleRefs - 1);
+  if (styleRefs === 0) document.getElementById('wave-synth-styles')?.remove();
 }
 
 // ---------------------------------------------------------------------------------------
@@ -668,13 +670,13 @@ export default class WaveSynth {
 
   // ---- mounting (seat question 5) ----
   mountCompact(el) {
-    ensureStylesInjected();
+    acquireStyle();
     this._mounts.compact = el;
     this._paint('compact');
   }
 
   mountExpanded(el) {
-    ensureStylesInjected();
+    acquireStyle();
     this._mounts.expanded = el;
     this._paint('expanded');
   }
@@ -685,7 +687,10 @@ export default class WaveSynth {
       listenersDropped += this._domListenersByMount[which].length;
       this._clearMountListeners(which);
       const el = this._mounts[which];
-      if (el) el.innerHTML = '';
+      if (el) {
+        el.innerHTML = '';
+        releaseStyle();
+      }
       this._mounts[which] = null;
     }
     return listenersDropped;

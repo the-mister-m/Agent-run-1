@@ -210,7 +210,7 @@ export default class Strip {
   ) {
     this.ctx = ctx;
     this.id = id;
-    this.label = label ?? id;
+    this._label = label ?? id;
     this.isMaster = !!isMaster;
     this._onSlotPopout = onSlotPopout;
     this._onMuteSolo = _onMuteSolo;
@@ -262,6 +262,19 @@ export default class Strip {
     this._stripMute.connect(this._meterTap);
     this._meterTap.disconnect();
     this._meterTap.connect(masterGain);
+  }
+
+  get label() {
+    return this._label;
+  }
+
+  // the strip's name and the graph node's name are the same string, read from here
+  set label(v) {
+    this._label = v ?? this.id;
+    if (this._mounted) {
+      const el = this.wrap?.querySelector('.cbdaw-strip__label');
+      if (el) el.textContent = this._label;
+    }
   }
 
   get input() {
@@ -324,7 +337,7 @@ export default class Strip {
     return this._meterTap;
   }
 
-  // audible: computed by createStrips() across all six, or standalone (mute only) here
+  // audible: computed by createStrips() across the live strips, or standalone (mute only) here
   _applyAudible(audible) {
     if (this.isMaster) return;
     this._stripMute.gain.setTargetAtTime(audible ? 1 : 0, this.ctx.currentTime, RAMP_S);
@@ -669,14 +682,13 @@ export default class Strip {
   }
 }
 
-// six channel strips + master, mute/solo resolved across the six
+// a live rack: master plus one channel strip per spec, mute/solo resolved across the live set.
+// no specs is an empty rack, not six — channel strips are added and removed on demand.
 export function createStrips(ctx, specs) {
-  const list =
-    Array.isArray(specs) && specs.length
-      ? specs
-      : [1, 2, 3, 4, 5, 6].map((n) => ({ id: `ch${n}`, label: `Channel ${n}` }));
+  const list = Array.isArray(specs) ? specs : [];
 
   const channelStrips = [];
+  // the same object for the rack's life — mixer/graph.js binds it once and reads through it
   const strips = {};
 
   function recomputeAudible() {
@@ -687,19 +699,54 @@ export function createStrips(ctx, specs) {
     }
   }
 
-  for (const spec of list) {
+  function addStrip(spec) {
+    if (!spec || !spec.id || spec.id === 'master') return null;
+    if (strips[spec.id]) return strips[spec.id];
     const strip = new Strip(ctx, { ...spec, isMaster: false, _onMuteSolo: recomputeAudible });
     channelStrips.push(strip);
     strips[strip.id] = strip;
+    recomputeAudible();
+    return strip;
   }
+
+  for (const spec of list) addStrip(spec);
   strips.master = new Strip(ctx, { id: 'master', label: 'Master', isMaster: true });
   recomputeAudible();
 
   return {
     strips,
+
+    get channels() {
+      return channelStrips.slice();
+    },
+
+    add: addStrip,
+
+    /** Unmounts, disconnects and releases the strip's channel, then drops it from the rack.
+     *  Call after the graph has dropped the matching channel node. */
+    remove(id) {
+      const strip = strips[id];
+      if (!strip || strip.isMaster) return false;
+      const i = channelStrips.indexOf(strip);
+      if (i !== -1) channelStrips.splice(i, 1);
+      delete strips[id];
+      strip.dispose();
+      recomputeAudible();
+      return true;
+    },
+
+    rename(id, label) {
+      const strip = strips[id];
+      if (!strip) return false;
+      strip.label = label;
+      return true;
+    },
+
     dispose() {
       for (const s of channelStrips) s.dispose();
-      strips.master.dispose();
+      channelStrips.length = 0;
+      strips.master?.dispose();
+      for (const key of Object.keys(strips)) delete strips[key];
     },
   };
 }

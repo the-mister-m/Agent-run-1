@@ -1,25 +1,23 @@
 import { clock as sharedClock, ticksPerBar, ticksPerBeat } from '../core/clock.js';
-import { CHANNEL_IDS } from './daw-shell.js';
-import { stepLabel } from '../surfaces/step-grid.js';
+import { tracks as sharedTracks } from '../core/tracks.js';
+import StepGrid, { stepLabel } from '../surfaces/step-grid.js';
+import PianoRoll from '../surfaces/piano-roll.js';
 import { regions as sharedRegions } from '../core/regions.js';
 import Capture from '../core/capture.js';
 
 const STYLE_ID = 'cbdaw-arrangement-style';
 let styleRefs = 0;
 
-// id -> {kind, label}
-const DEFAULT_META = {
-  ch1: { kind: 'pitched', label: 'Wave Synth' },
-  ch2: { kind: 'pitched', label: 'Overtone Synth' },
-  ch3: { kind: 'pitched', label: 'Chord Module' },
-  ch4: { kind: 'pitched', label: 'Patch Synth' },
-  ch5: { kind: 'drum', label: 'Drum Synth' },
-  ch6: { kind: 'drum', label: 'Drum Sampler' },
-};
-
-function defaultChannels() {
-  return CHANNEL_IDS.map((id) => ({ id, ...DEFAULT_META[id] }));
-}
+// instrumentType -> display label, for the lane head's instrument dropdown
+const INSTRUMENT_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'wave-synth', label: 'Wave Synth' },
+  { value: 'overtone-synth', label: 'Overtone Synth' },
+  { value: 'chord-module', label: 'Chord Module' },
+  { value: 'patch-synth', label: 'Patch Synth' },
+  { value: 'drum-synth', label: 'Drum Synth' },
+  { value: 'drum-sampler', label: 'Drum Sampler' },
+];
 
 function clampBar(n, max) {
   const v = Math.round(Number(n));
@@ -209,11 +207,28 @@ const STYLE_TEXT = `
   gap: var(--sp-1);
 }
 
-.cbdaw-arr__lane-label {
+.cbdaw-arr__lane-name {
+  font: var(--font-inherit);
   font-size: var(--fs-xs);
   color: var(--text);
-  white-space: var(--ws-nowrap);
-  overflow: var(--ov-hidden);
+  background: var(--btn-face);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-2);
+  width: var(--pct-100);
+  box-sizing: var(--box-border-box);
+}
+
+.cbdaw-arr__lane-instrument {
+  font: var(--font-inherit);
+  font-size: var(--fs-micro);
+  color: var(--text);
+  background: var(--btn-face);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1);
+  width: var(--pct-100);
+  box-sizing: var(--box-border-box);
 }
 
 .cbdaw-arr__lane-row {
@@ -365,24 +380,36 @@ export default class Arrangement {
   static id = 'arrangement';
   static label = 'Arrangement';
 
-  constructor(el = null, clock = sharedClock, regions = sharedRegions) {
+  constructor(el = null, clock = sharedClock, regions = sharedRegions, tracks = sharedTracks) {
     this._clock = clock;
     this._regions = regions;
+    this._tracks = tracks;
     this.defaultTarget = el;
     this.mounted = false;
 
-    this._channels = defaultChannels();
+    this._channels = [];
     this._lanes = new Map();
     this._selectedId = null;
     this._unsubRegions = null;
+    this._unsubTracksAdd = null;
+    this._unsubTracksRemove = null;
+    this._unsubTracksUpdate = null;
     this._blockDrag = null;
     this._loopDrag = null;
     this._listeners = { select: new Set(), open: new Set() };
+    // The one open region editor, or null. { regionId, laneId, kind, surface, host }.
+    this._editor = null;
+    this._unsubOpen = null;
+    this._unsubRegionRemove = null;
+
+    // (id, instrumentType|null) -> the page's assignment flow. Unset, the dropdown writes
+    // the store field only and no instance is built.
+    this.onAssignInstrument = null;
 
     this.el = null;
     this.nodes = {
       scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null,
-      toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null,
+      toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null, addTrack: null,
     };
 
     this._zoom = 1;
@@ -398,15 +425,22 @@ export default class Arrangement {
   }
 
   bindChannels(channels) {
-    this._channels = Array.isArray(channels) && channels.length
-      ? channels.map((c) => ({ id: c.id, kind: c.kind === 'drum' ? 'drum' : 'pitched', label: c.label || c.id }))
-      : defaultChannels();
+    this._channels = Array.isArray(channels)
+      ? channels.map((c) => ({ id: c.id, kind: c.kind ?? null, label: c.label || c.id }))
+      : [];
     if (this.mounted) this._rebuildLanes();
     return this;
   }
 
+  /** Drops a manual bindChannels() override and returns to following the track store. */
   unbindChannels() {
-    this._channels = defaultChannels();
+    this._syncChannelsFromStore();
+    return this;
+  }
+
+  /** channels array, mirroring the track store's current list. */
+  _syncChannelsFromStore() {
+    this._channels = this._tracks.all.map((t) => ({ id: t.id, kind: t.kind, label: t.name || t.id }));
     if (this.mounted) this._rebuildLanes();
     return this;
   }
@@ -443,6 +477,7 @@ export default class Arrangement {
 
     acquireStyle();
     this._build(target);
+    this._channels = this._tracks.all.map((t) => ({ id: t.id, kind: t.kind, label: t.name || t.id }));
     this._rebuildLanes();
     this._layoutOverlay();
 
@@ -450,6 +485,21 @@ export default class Arrangement {
     this._unsubRegions = this._regions.on('change', () => {
       if (this._blockDrag) { this._renderDuringDrag(); return; }
       this._renderAllRegions();
+    });
+
+    // Track add/remove/rename/instrument-change — handled per-lane, not a full rebuild,
+    // so an unrelated lane's Capture and punch/arm state survive.
+    this._unsubTracksAdd = this._tracks.on('add', (t) => this._onTrackAdd(t));
+    this._unsubTracksRemove = this._tracks.on('remove', (t) => this._onTrackRemove(t));
+    this._unsubTracksUpdate = this._tracks.on('update', (t) => this._onTrackUpdate(t));
+
+    // The entry point: a region's dblclick already emits 'open' (§10.3). This is the
+    // only listener.
+    this._unsubOpen = this.on('open', (region) => this._openRegion(region));
+    // A region removed anywhere (Delete key, a drag collision) closes its open editor
+    // without writing back — there is nothing left to write into.
+    this._unsubRegionRemove = this._regions.on('remove', (r) => {
+      if (this._editor?.regionId === r.id) this._closeEditor({ writeBack: false });
     });
 
     this._rafHandle = requestAnimationFrame(this._rafLoop);
@@ -487,8 +537,19 @@ export default class Arrangement {
     this._scrubRelease?.(); // drop window listeners if unmounted mid-scrub
     this._blockDrag?.();
     this._loopDrag?.();
+    this._closeEditor();
+    this._unsubOpen?.();
+    this._unsubOpen = null;
+    this._unsubRegionRemove?.();
+    this._unsubRegionRemove = null;
     this._unsubRegions?.();
     this._unsubRegions = null;
+    this._unsubTracksAdd?.();
+    this._unsubTracksRemove?.();
+    this._unsubTracksUpdate?.();
+    this._unsubTracksAdd = null;
+    this._unsubTracksRemove = null;
+    this._unsubTracksUpdate = null;
     this._selectedId = null;
     this._detachDom();
     this._teardownLanes();
@@ -496,7 +557,7 @@ export default class Arrangement {
     this.el = null;
     this.nodes = {
       scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null,
-      toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null,
+      toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null, addTrack: null,
     };
     this.mounted = false;
     releaseStyle();
@@ -530,7 +591,13 @@ export default class Arrangement {
     zoomIn.className = 'cbdaw-arr__btn';
     zoomIn.textContent = '+';
     zoomIn.title = 'Zoom in';
-    toolbar.append(zoomOut, zoomReadout, zoomIn);
+    // the only way to make the first track — a new project boots with none
+    const addTrack = document.createElement('button');
+    addTrack.type = 'button';
+    addTrack.className = 'cbdaw-arr__btn';
+    addTrack.textContent = '+ TRACK';
+    addTrack.title = 'Add track';
+    toolbar.append(zoomOut, zoomReadout, zoomIn, addTrack);
     root.appendChild(toolbar);
 
     const scroll = document.createElement('div');
@@ -576,12 +643,13 @@ export default class Arrangement {
     this.el = root;
     this.nodes = {
       scroll, grid, corner, ruler, overlay, loopToggle, toolbar, zoomOut, zoomIn, zoomReadout,
-      header, loopRow, loopSpan,
+      addTrack, header, loopRow, loopSpan,
     };
     target.appendChild(root);
 
     this._addDom(zoomOut, 'click', () => this._applyZoom(this._zoom / ZOOM_STEP));
     this._addDom(zoomIn, 'click', () => this._applyZoom(this._zoom * ZOOM_STEP));
+    this._addDom(addTrack, 'click', () => this._tracks.add());
 
     // Ctrl/Cmd + wheel zooms about the pointer; plain wheel stays ordinary scrolling.
     this._addDom(scroll, 'wheel', (e) => {
@@ -678,18 +746,84 @@ export default class Arrangement {
       lane.capture.dispose();
       lane.head.remove();
       lane.body.remove();
+      lane.wash?.remove();
     }
     this._lanes.clear();
+  }
+
+  /** One new lane, without disturbing any other lane's Capture, arm or punch state. */
+  _onTrackAdd(t) {
+    if (!this.mounted) return;
+    const ch = { id: t.id, kind: t.kind, label: t.name || t.id };
+    this._channels.push(ch);
+    this._buildLane(ch);
+    this._renderLaneRegions(this._lanes.get(t.id));
+    this._layoutOverlay();
+  }
+
+  /** Drops one lane's DOM, Capture and wash. Other lanes are untouched. */
+  _onTrackRemove(t) {
+    if (!this.mounted) return;
+    const lane = this._lanes.get(t.id);
+    if (!lane) return;
+    if (this._editor?.laneId === t.id) this._closeEditor();
+    lane.capture.dispose();
+    lane.head.remove();
+    lane.body.remove();
+    lane.wash.remove();
+    this._lanes.delete(t.id);
+    this._channels = this._channels.filter((c) => c.id !== t.id);
+    // the selection is gone if it was on this lane, or if its region was already cleared
+    const sel = this._selectedId ? this._regions.get(this._selectedId) : null;
+    if (this._selectedId && (!sel || sel.laneId === t.id)) this._select(null);
+    this._layoutOverlay();
+  }
+
+  /** Name/instrumentType/kind changed on a live track — updates the one lane in place. */
+  _onTrackUpdate(t) {
+    if (!this.mounted) return;
+    const lane = this._lanes.get(t.id);
+    if (!lane) return;
+    lane.kind = t.kind;
+    lane.label = t.name || t.id;
+    if (lane.nameInput && document.activeElement !== lane.nameInput) lane.nameInput.value = lane.label;
+    if (lane.instrumentSelect && document.activeElement !== lane.instrumentSelect) {
+      lane.instrumentSelect.value = t.instrumentType || '';
+    }
+    const idx = this._channels.findIndex((c) => c.id === t.id);
+    if (idx !== -1) this._channels[idx] = { id: t.id, kind: t.kind, label: lane.label };
   }
 
   _buildLane(ch) {
     const head = document.createElement('div');
     head.className = 'cbdaw-arr__lane-head';
 
-    const label = document.createElement('div');
-    label.className = 'cbdaw-arr__lane-label';
-    label.textContent = ch.label;
-    head.appendChild(label);
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'cbdaw-arr__lane-name';
+    nameInput.value = ch.label;
+    head.appendChild(nameInput);
+
+    const instrumentSelect = document.createElement('select');
+    instrumentSelect.className = 'cbdaw-arr__lane-instrument';
+    for (const opt of INSTRUMENT_OPTIONS) {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      instrumentSelect.appendChild(o);
+    }
+    instrumentSelect.value = this._tracks.get(ch.id)?.instrumentType || '';
+    head.appendChild(instrumentSelect);
+
+    this._addDom(nameInput, 'change', () => {
+      this._tracks.update(ch.id, { name: nameInput.value });
+    });
+
+    this._addDom(instrumentSelect, 'change', () => {
+      const type = instrumentSelect.value || null;
+      if (typeof this.onAssignInstrument === 'function') this.onAssignInstrument(ch.id, type);
+      else this._tracks.setInstrumentType(ch.id, type);
+    });
 
     const armRow = document.createElement('div');
     armRow.className = 'cbdaw-arr__lane-row';
@@ -703,8 +837,16 @@ export default class Arrangement {
     punchBtn.className = 'cbdaw-arr__btn';
     punchBtn.textContent = 'PUNCH';
     punchBtn.dataset.punch = 'false';
-    armRow.append(armBtn, punchBtn);
+    // drops the track record; every listener releases its own half of the track
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'cbdaw-arr__btn';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove track';
+    armRow.append(armBtn, punchBtn, removeBtn);
     head.appendChild(armRow);
+
+    this._addDom(removeBtn, 'click', () => this._tracks.remove(ch.id));
 
     const punchRow = document.createElement('div');
     punchRow.className = 'cbdaw-arr__lane-row';
@@ -738,7 +880,7 @@ export default class Arrangement {
     this.nodes.grid.appendChild(head);
     this.nodes.grid.appendChild(body);
 
-    const kind = ch.kind === 'drum' ? 'drum' : 'pitched';
+    const kind = ch.kind === 'drum' || ch.kind === 'pitched' ? ch.kind : null;
 
     const punchState = { on: false, startBar: 1, endBar: 2 };
     const songLength = () => Math.max(1, this._clock.songLengthBars);
@@ -750,7 +892,7 @@ export default class Arrangement {
 
     const lane = {
       id: ch.id, kind, label: ch.label, capture, head, body, instrument: null,
-      armBtn, punchBtn, startReadout, endReadout, punch: punchState,
+      nameInput, instrumentSelect, armBtn, punchBtn, startReadout, endReadout, punch: punchState,
     };
     this._lanes.set(ch.id, lane);
 
@@ -1022,26 +1164,69 @@ export default class Arrangement {
     window.addEventListener('pointerup', onUp);
   }
 
-  /** Where a take's notes land. Provisional: the region under the playhead on that lane,
-   *  or a new one covering the punch range if the lane has none there. */
+  /** Where a take's notes land now that the editor owns writeback (§10.4): only into the
+   *  region already open in the editor for this lane. No playhead guess, no invented
+   *  region — a lane with no editor open drops the take. Destination rule beyond this is
+   *  open (§10.6), not decided here. */
   _commitToRegion(lane, report) {
     const notes = report?.notes || [];
     if (!notes.length) return;
+    if (!this._editor || this._editor.laneId !== lane.id) return;
+    this._regions.addNotes(this._editor.regionId, notes);
+  }
 
-    const tpBar = ticksPerBar(this._clock.timeSignature);
-    const bar = Math.max(1, Math.floor(this._clock.positionTicks / tpBar) + 1);
-    const existing = this._regions.at(lane.id, bar);
+  /** Opens a region editor (§10.3). A kindless track opens nothing. Only one editor is
+   *  open at a time — opening a second closes the first, writing it back first. */
+  _openRegion(region) {
+    if (!region) return;
+    const track = this._tracks.get(region.laneId);
+    const kind = track?.kind;
+    if (kind !== 'pitched' && kind !== 'drum') return;
 
-    if (existing) {
-      if (report.kind === 'requantize') this._regions.setNotes(existing.id, notes);
-      else this._regions.addNotes(existing.id, notes);
-      return;
+    this._closeEditor();
+
+    const host = document.createElement('div');
+    host.style.position = 'fixed';
+    host.style.inset = '10%';
+    host.style.background = '#fff';
+    host.style.zIndex = '9999';
+    host.style.overflow = 'auto';
+    host.style.border = '1px solid #000';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'cbdaw-arr__btn';
+    closeBtn.textContent = 'CLOSE';
+    host.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    host.appendChild(body);
+    document.body.appendChild(host);
+
+    const surface = kind === 'pitched' ? new PianoRoll() : new StepGrid();
+    if (kind === 'pitched') surface.setNotes(region.notes);
+    else surface.setPattern(region.notes);
+    surface.mount(body);
+
+    this._editor = { regionId: region.id, laneId: region.laneId, kind, surface, host };
+    // Not tracked via _addDom: this button dies with `host` on every close, so it must
+    // not accumulate in the arrangement's own DOM-listener list.
+    closeBtn.addEventListener('click', () => this._closeEditor());
+  }
+
+  /** Closes the open editor (§10.4): read the surface, write it back, dispose the surface,
+   *  drop the host. `writeBack: false` skips the write — used when the region itself is
+   *  already gone. */
+  _closeEditor({ writeBack = true } = {}) {
+    const ed = this._editor;
+    if (!ed) return;
+    this._editor = null;
+    if (writeBack) {
+      const payload = ed.kind === 'pitched' ? ed.surface.getNotes() : ed.surface.getPattern();
+      this._regions.setNotes(ed.regionId, payload);
     }
-
-    const p = lane.punch;
-    const start = p.on ? p.startBar : bar;
-    const length = p.on ? Math.max(1, p.endBar - p.startBar) : 1;
-    this._regions.add({ laneId: lane.id, startBar: start, lengthBars: length, name: lane.label, notes });
+    ed.surface.dispose();
+    ed.host.remove();
   }
 
   on(event, fn) {

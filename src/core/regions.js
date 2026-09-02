@@ -46,6 +46,15 @@ function clampInt(n, min, fallback) {
   return Math.max(min, v);
 }
 
+/** `notes` is opaque — a piano roll's note array or a step grid's pattern object, stored
+ *  and handed back as given. A shallow copy so a caller's own array/object can't drift the
+ *  stored region after the fact. */
+function copyNotes(notes) {
+  if (Array.isArray(notes)) return [...notes];
+  if (notes && typeof notes === 'object') return { ...notes };
+  return [];
+}
+
 /** Half-open span, in bars: a region occupies [startBar, startBar + lengthBars). */
 function endBar(r) {
   return r.startBar + r.lengthBars;
@@ -74,7 +83,7 @@ export function createRegionStore() {
   }
 
   function freeze(r) {
-    return Object.freeze({ ...r, notes: Object.freeze([...r.notes]) });
+    return Object.freeze({ ...r, notes: Object.freeze(copyNotes(r.notes)) });
   }
 
   /** Every region on a lane except `exceptId`, ordered by start. */
@@ -179,7 +188,7 @@ export function createRegionStore() {
         name,
         color,
         muted: Boolean(muted),
-        notes: Array.isArray(notes) ? [...notes] : [],
+        notes: copyNotes(notes),
       }, 'add');
     },
 
@@ -254,16 +263,18 @@ export function createRegionStore() {
     setNotes(id, notes) {
       const r = regions.get(id);
       if (!r) return null;
-      return commit({ ...r, notes: Array.isArray(notes) ? [...notes] : [] }, 'update');
+      return commit({ ...r, notes: copyNotes(notes) }, 'update');
     },
 
-    /** Append to a region's payload. */
+    /** Append to a region's payload. Array-append only — a region whose notes are a
+     *  pattern object (a step grid's save) has nothing appendable and is left alone. */
     addNotes(id, notes) {
       const r = regions.get(id);
       if (!r) return null;
       const add = Array.isArray(notes) ? notes : [];
       if (!add.length) return r;
-      return commit({ ...r, notes: [...r.notes, ...add] }, 'update');
+      const base = Array.isArray(r.notes) ? r.notes : [];
+      return commit({ ...r, notes: [...base, ...add] }, 'update');
     },
 
     /** Non-geometry fields only — `name`, `color`, `muted`. Placement goes through
@@ -290,14 +301,14 @@ export function createRegionStore() {
         name: r.name,
         color: r.color,
         muted: r.muted,
-        notes: [...r.notes],
+        notes: r.notes,
       });
     },
 
     // ——— persistence ——————————————————————————————————————————————————————————————————
     /** Plain JSON, safe to stringify. */
     serialize() {
-      return this.all.map((r) => ({ ...r, notes: [...r.notes] }));
+      return this.all.map((r) => ({ ...r, notes: copyNotes(r.notes) }));
     },
 
     /** Replaces everything. Ids are kept so a saved project reopens with the same handles.
@@ -316,7 +327,7 @@ export function createRegionStore() {
           name: raw.name ?? null,
           color: raw.color ?? null,
           muted: Boolean(raw.muted),
-          notes: Array.isArray(raw.notes) ? [...raw.notes] : [],
+          notes: copyNotes(raw.notes),
         }));
       }
       emit('change', { event: 'load', region: null });

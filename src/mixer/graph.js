@@ -12,7 +12,7 @@ const DEVICE_ORDER = ['gate', 'compressor', 'eq', 'reverb', 'delay'];
 
 const CAP_INSERTS = 4; // devices per channel
 const CAP_SENDS = 2; // outgoing channel edges past the first
-const CAP_NODES = 24; // nodes in the mixer graph
+const CAP_NODES = 24; // insert nodes in the mixer graph; channel and master nodes are not counted
 const OUT_PORTS = 1 + CAP_SENDS; // main path plus the capped sends
 const MASTER_ID = 'master';
 const MASTER_LABEL = 'Master';
@@ -259,7 +259,7 @@ function releaseStyle() {
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export default class Graph {
-  constructor(ctx, { strips = null, onDevicePopout = null } = {}) {
+  constructor(ctx, { strips = null, channels = null, onDevicePopout = null } = {}) {
     this.ctx = ctx;
     this._strips = null;
     this._onDevicePopout = onDevicePopout;
@@ -285,7 +285,7 @@ export default class Graph {
     this._dragCable = null;
     this._dragNode = null;
 
-    this._seedDefault();
+    this._seedDefault(channels);
     if (strips) this.bindStrips(strips);
   }
 
@@ -344,15 +344,11 @@ export default class Graph {
     return this._reason;
   }
 
-  // six channel nodes plus master, each channel on port 0 to master
-  _seedDefault() {
+  // master, plus one channel node per live track id, each on port 0 to master.
+  // an empty list is legal: a new project seeds master alone.
+  _seedDefault(channels) {
     this._nodes.clear();
     this._edges = [];
-    for (let i = 1; i <= 6; i++) {
-      const id = `ch${i}`;
-      this._nodes.set(id, { id, type: 'channel', ref: id, x: LAY.x, y: LAY.y + (i - 1) * LAY.rowStep });
-      this._edges.push({ from: id, fromPort: 0, to: MASTER_ID, toPort: 0 });
-    }
     this._nodes.set(MASTER_ID, {
       id: MASTER_ID,
       type: 'master',
@@ -360,6 +356,68 @@ export default class Graph {
       x: LAY.masterX,
       y: LAY.masterY,
     });
+    const ids = Array.isArray(channels) ? channels : [];
+    for (const entry of ids) {
+      const id = typeof entry === 'string' ? entry : entry?.id;
+      if (id) this.addChannel(id);
+    }
+  }
+
+  // one channel node, wired to master. The node belongs to the track and outlives any
+  // instrument swap on it.
+  addChannel(id) {
+    if (!id || id === MASTER_ID) return false;
+    if (this._nodes.has(id)) return false;
+    // one row below the last channel, then stepped past anything already parked there —
+    // the row index grows with the list, so it does not stall at the walk limit
+    let rows = 0;
+    for (const n of this._nodes.values()) if (n.type === 'channel') rows++;
+    const spot = this._freeSpot(LAY.x, LAY.y + rows * LAY.rowStep);
+    this._nodes.set(id, { id, type: 'channel', ref: id, x: spot.x, y: spot.y });
+    this._edges.push({ from: id, fromPort: 0, to: MASTER_ID, toPort: 0 });
+    if (this._strips) this._commit();
+    return true;
+  }
+
+  // the channel node, every insert hanging off it, every device those inserts hold, and
+  // every edge touching any of them. Nothing is healed across the gap — the chain goes too.
+  removeChannel(id) {
+    const n = this._node(id);
+    if (!n || n.type !== 'channel') return false;
+    const doomed = new Set([id, ...this._insertsOfChannel(id)]);
+    for (const insertId of doomed) {
+      if (insertId !== id) this._dropInsert(insertId);
+    }
+    this._edges = this._edges.filter((e) => !doomed.has(e.from) && !doomed.has(e.to));
+    this._nodes.delete(id);
+    if (this._selected === id) this._selected = null;
+    this._clearReason();
+    this._commit();
+    return true;
+  }
+
+  // node, device and type registry for one insert. Edges are the caller's to filter.
+  _dropInsert(id) {
+    const device = this._devices.get(id);
+    this._nodes.delete(id);
+    this._devices.delete(id);
+    this._types.delete(id);
+    if (this._selected === id) this._selected = null;
+    if (device) {
+      try {
+        device.output.disconnect();
+      } catch {
+        // already detached
+      }
+      device.dispose();
+    }
+  }
+
+  // labels live on the strips; redraw after a rename there
+  refresh() {
+    this._pushRouting();
+    this._render();
+    return this;
   }
 
   _node(id) {
@@ -504,8 +562,8 @@ export default class Graph {
     if (!chNode || chNode.type !== 'channel') return this._refuse('Pick a channel first.');
     const Ctor = DEVICE_TYPES[type];
     if (!Ctor) return this._refuse(`No device called "${type}".`);
-    if (this._nodes.size >= CAP_NODES && !governor.noCap) {
-      return this._refuse(`Graph is full — ${CAP_NODES} nodes.`, channelId);
+    if (this._devices.size >= CAP_NODES && !governor.noCap) {
+      return this._refuse(`Graph is full — ${CAP_NODES} devices.`, channelId);
     }
     if (this._insertsOfChannel(channelId).length >= CAP_INSERTS && !governor.noCap) {
       return this._refuse(`${this._label(channelId)} is full — ${CAP_INSERTS} inserts.`, channelId);
@@ -610,29 +668,16 @@ export default class Graph {
     if (!n) return false;
     if (n.type !== 'insert') return this._refuse('Channels and Master stay.', id);
 
-    const device = this._devices.get(id);
     const incoming = this._inEdges(id)[0] ?? null;
     const forward = this._edgeAt(id, 0);
 
     this._edges = this._edges.filter((e) => e.from !== id && e.to !== id);
-    this._nodes.delete(id);
-    this._devices.delete(id);
-    this._types.delete(id);
-    if (this._selected === id) this._selected = null;
+    this._dropInsert(id);
 
     // the port-0 path closes over the gap so the chain below it keeps its route
     if (incoming && forward && incoming.fromPort === 0) {
       const heals = !this._edgeAt(incoming.from, 0);
       if (heals) this._edges.push({ from: incoming.from, fromPort: 0, to: forward.to, toPort: 0 });
-    }
-
-    if (device) {
-      try {
-        device.output.disconnect();
-      } catch {
-        // already detached
-      }
-      device.dispose();
     }
 
     this._clearReason();

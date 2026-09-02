@@ -546,12 +546,10 @@ class Voice {
 // <style> tag is not an AudioNode or a listener, so it is not part of dispose()'s "zero
 // leaked nodes/listeners" count (seat question 7).
 // ---------------------------------------------------------------------------------------
-let stylesInjected = false;
-function ensureStylesInjected() {
-  if (stylesInjected || document.getElementById('drum-synth-styles')) {
-    stylesInjected = true;
-    return;
-  }
+let styleRefs = 0;
+function acquireStyle() {
+  styleRefs++;
+  if (document.getElementById('drum-synth-styles')) return;
   const style = document.createElement('style');
   style.id = 'drum-synth-styles';
   style.textContent = `
@@ -593,7 +591,11 @@ function ensureStylesInjected() {
 .dsyn-meter { color: var(--text-dim, #93a1b8); font-size: var(--fs-em-75); font-variant-numeric: var(--num-tabular); }
 `;
   document.head.appendChild(style);
-  stylesInjected = true;
+}
+
+function releaseStyle() {
+  styleRefs = Math.max(0, styleRefs - 1);
+  if (styleRefs === 0) document.getElementById('drum-synth-styles')?.remove();
 }
 
 // ---------------------------------------------------------------------------------------
@@ -839,13 +841,13 @@ export default class DrumSynth {
 
   // ---- mounting (seat question 6) ----
   mountCompact(el) {
-    ensureStylesInjected();
+    acquireStyle();
     this._mounts.compact = el;
     this._paint('compact');
   }
 
   mountExpanded(el) {
-    ensureStylesInjected();
+    acquireStyle();
     this._mounts.expanded = el;
     this._paint('expanded');
   }
@@ -859,7 +861,10 @@ export default class DrumSynth {
       listenersDropped += this._domListenersByMount[which].length;
       this._clearMountListeners(which);
       const el = this._mounts[which];
-      if (el) el.innerHTML = '';
+      if (el) {
+        el.innerHTML = '';
+        releaseStyle();
+      }
       this._mounts[which] = null;
       this._pieceRefs[which] = [];
     }

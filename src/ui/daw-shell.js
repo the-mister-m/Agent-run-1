@@ -9,10 +9,18 @@
 import { ctx, unlock } from '../core/audio.js';
 import { clock } from '../core/clock.js';
 import { state } from '../core/state.js';
+import { tracks } from '../core/tracks.js';
+import { regions } from '../core/regions.js';
 import Arrangement from './arrangement.js';
 import { createStrips } from '../mixer/strip.js';
 import Graph from '../mixer/graph.js';
-import { createChannelAutomation } from '../mixer/automation.js';
+import { createAutomationRack } from '../mixer/automation.js';
+import WaveSynth from '../instruments/wave-synth.js';
+import OvertoneSynth from '../instruments/overtone-synth.js';
+import ChordModule from '../instruments/chord-module.js';
+import PatchSynth from '../instruments/patch-synth.js';
+import DrumSynth from '../instruments/drum-synth.js';
+import DrumSampler from '../instruments/drum-sampler.js';
 import {
   createScaleControl,
   createCpuMeter,
@@ -25,8 +33,15 @@ import {
 const STYLE_ID = 'cbdaw-daw-shell-style';
 let styleRefs = 0;
 
-/** The channel ids, §16.1: "Six fixed channels, ch1…ch6, plus one master." */
-export const CHANNEL_IDS = ['ch1', 'ch2', 'ch3', 'ch4', 'ch5', 'ch6'];
+/** instrumentType -> constructor. Every one is `constructor(ctx, out)` + `dispose()`. */
+const INSTRUMENTS = {
+  'wave-synth': WaveSynth,
+  'overtone-synth': OvertoneSynth,
+  'chord-module': ChordModule,
+  'patch-synth': PatchSynth,
+  'drum-synth': DrumSynth,
+  'drum-sampler': DrumSampler,
+};
 
 /** The named mount points every S3/S4/S5 seat reads by `data-mount`. */
 export const MOUNTS = {
@@ -281,7 +296,7 @@ function stripMarkup(id, isMaster) {
 
 /**
  * → `{ root, header, transport, arrangement, nodeGraph, automationLanes, devicePopout,
- *      strips: {ch1..ch6, master}, unmount() }`.
+ *      mixer, strips: {…live track ids, master}, unmount() }`.
  *
  * Builds the DAW frame into `host` and appends it. Every element named here is an empty
  * mount point — this function instantiates no instrument, no device, no surface, and binds
@@ -304,7 +319,7 @@ export function mountDawShell(host = document.body) {
         <div class="cbdaw-daw-shell__pane cbdaw-daw-shell__automation" data-mount="${MOUNTS.automationLanes}"></div>
       </div>
       <div class="cbdaw-daw-shell__mixer" data-mount="mixer">
-        ${CHANNEL_IDS.map((id) => stripMarkup(id, false)).join('')}
+        ${tracks.all.map((t) => stripMarkup(t.id, false)).join('')}
         ${stripMarkup('master', true)}
       </div>
     </div>
@@ -316,7 +331,7 @@ export function mountDawShell(host = document.body) {
   host.appendChild(root);
 
   const strips = {};
-  for (const id of [...CHANNEL_IDS, 'master']) {
+  for (const id of [...tracks.all.map((t) => t.id), 'master']) {
     strips[id] = root.querySelector(`[data-mount="${MOUNTS.strip(id)}"]`);
   }
 
@@ -329,6 +344,8 @@ export function mountDawShell(host = document.body) {
     nodeGraph: root.querySelector(`[data-mount="${MOUNTS.nodeGraph}"]`),
     automationLanes: root.querySelector(`[data-mount="${MOUNTS.automationLanes}"]`),
     devicePopout: root.querySelector(`[data-mount="${MOUNTS.devicePopout}"]`),
+    /** the strip rail itself — strip slots are inserted into it as tracks are added */
+    mixer: root.querySelector('[data-mount="mixer"]'),
     strips,
     /** Removes the frame from the DOM and releases the stylesheet ref. */
     unmount() {
@@ -356,35 +373,50 @@ function listenerBag() {
   };
 }
 
-/** File menu over channel strips. Selecting one hides the rest; selecting it again shows all. */
+/** File menu over channel strips. Selecting one hides the rest; selecting it again shows all.
+ *  The menu's item list is fixed at construction, so a track change rebuilds it in place. */
 function buildIsolateControl(strips) {
-  const ids = [...CHANNEL_IDS, 'master'];
+  const host = document.createElement('div');
   let isolated = null;
+  let menu = null;
 
   function apply() {
-    for (const id of ids) {
-      const s = strips[id];
-      if (s) s.hidden = isolated !== null && id !== isolated;
+    for (const [id, el] of Object.entries(strips)) {
+      if (el) el.hidden = isolated !== null && id !== isolated;
     }
   }
 
-  const menu = createFileMenu({
-    items: ids.map((id) => ({ id, label: id, available: true, phase: 'ch' })),
-    currentId: null,
-    label: 'Isolate',
-    onSelect(item) {
-      isolated = isolated === item.id ? null : item.id;
-      menu.setCurrent(isolated);
-      apply();
-    },
-  });
+  function build() {
+    const ids = [...tracks.all.map((t) => t.id), 'master'];
+    if (isolated !== null && !ids.includes(isolated)) isolated = null;
+    menu?.dispose();
+    host.replaceChildren();
+    menu = createFileMenu({
+      items: ids.map((id) => ({ id, label: tracks.get(id)?.name || id, available: true, phase: 'ch' })),
+      currentId: null,
+      label: 'Isolate',
+      onSelect(item) {
+        isolated = isolated === item.id ? null : item.id;
+        menu.setCurrent(isolated);
+        apply();
+      },
+    });
+    menu.setCurrent(isolated);
+    host.appendChild(menu.el);
+    apply();
+  }
+
+  build();
+  const offTracks = tracks.on('change', build);
 
   return {
-    el: menu.el,
+    el: host,
     dispose() {
-      menu.dispose();
+      offTracks();
+      menu?.dispose();
       isolated = null;
       apply();
+      host.remove();
     },
   };
 }
@@ -604,8 +636,10 @@ export function mountPlayingSurface(el, { kind = 'pitch' } = {}) {
 }
 
 /** Wires every mountDawShell() mount point: header, transport, playing surface, mixer
- *  strips, routing graph, arrangement, automation lanes. Mounts no instrument. */
-export function wireDawShell(handle, { instrumentCtor = null, channelId = 'ch1' } = {}) {
+ *  strips, routing graph, arrangement, automation lanes — and holds the track lifecycle:
+ *  add, instrument assignment, remove. A track's channel, strip and graph node belong to
+ *  the track and survive an instrument swap; only the instance is torn down and rebuilt. */
+export function wireDawShell(handle) {
   const header = mountProjectHeader(handle.header, {
     strips: handle.strips,
     instrument: null,
@@ -613,28 +647,107 @@ export function wireDawShell(handle, { instrumentCtor = null, channelId = 'ch1' 
   const transport = mountTransportBar(handle.transport);
   const surface = mountPlayingSurface(handle.playingSurface);
 
-  // six channel strips plus master, one per strip slot
-  const mixer = createStrips(ctx);
+  // master plus one strip per live track — boot is zero tracks, so master alone
+  const mixer = createStrips(ctx, tracks.all.map((t) => ({ id: t.id, label: t.name || t.id })));
   for (const [id, el] of Object.entries(handle.strips)) {
     mixer.strips[id]?.mountCompact(el);
   }
 
-  // routing graph, bound to the live strips at construction
-  const graph = new Graph(ctx, { strips: mixer.strips });
+  // routing graph. `mixer.strips` is one object for the rack's life: bound here, never again
+  const graph = new Graph(ctx, {
+    strips: mixer.strips,
+    channels: tracks.all.map((t) => t.id),
+  });
   graph.mountCompact(handle.nodeGraph);
+
+  const automationRack = createAutomationRack();
 
   const arrangement = new Arrangement(handle.arrangement);
   arrangement.mount();
 
-  // one gain lane per strip, stacked in the automation pane
-  const automation = {};
-  for (const id of Object.keys(handle.strips)) {
-    const strip = mixer.strips[id];
-    if (!strip) continue;
-    const channel = createChannelAutomation(strip);
-    channel.lane('strip.gain').mountCompact(handle.automationLanes);
-    automation[id] = channel;
+  /** track id -> live instrument instance. The store holds the same reference; this is what
+   *  a swap and a removal read to dispose. */
+  const instruments = new Map();
+
+  /** One strip slot in the mixer rail, ahead of master. */
+  function addStripSlot(id) {
+    const el = document.createElement('div');
+    el.className = 'cbdaw-daw-shell__strip';
+    el.dataset.mount = MOUNTS.strip(id);
+    el.dataset.channel = id;
+    handle.mixer.insertBefore(el, handle.strips.master || null);
+    handle.strips[id] = el;
+    return el;
   }
+
+  /** One gain lane in the automation pane, keyed in the rack by the same id. */
+  function mountAutomation(id) {
+    const strip = mixer.strips[id];
+    if (!strip) return;
+    automationRack.add(id, strip).lane('strip.gain').mountCompact(handle.automationLanes);
+  }
+
+  mountAutomation('master');
+  for (const t of tracks.all) mountAutomation(t.id);
+
+  /** Releases the track's instrument instance. The channel, strip and graph node stay. */
+  function disposeInstrument(id) {
+    const instance = instruments.get(id);
+    if (!instance) return false;
+    instruments.delete(id);
+    arrangement.bindLaneInstrument(id, null);
+    instance.dispose();
+    return true;
+  }
+
+  /** The assignment flow: dispose old, construct new, write the type, write the instance. */
+  function assignInstrument(id, type) {
+    disposeInstrument(id);
+    const Ctor = type ? INSTRUMENTS[type] : null;
+    const strip = mixer.strips[id];
+    let instance = null;
+    if (Ctor && strip) {
+      instance = new Ctor(ctx, strip.input);
+      instruments.set(id, instance);
+    }
+    tracks.setInstrumentType(id, Ctor ? type : null);
+    tracks.setInstrument(id, instance);
+    arrangement.bindLaneInstrument(id, instance);
+    return instance;
+  }
+  arrangement.onAssignInstrument = assignInstrument;
+
+  // strip -> graph node -> automation. The track is born empty; no instrument is built here.
+  function onTrackAdd(t) {
+    const slot = addStripSlot(t.id);
+    mixer.add({ id: t.id, label: t.name || t.id })?.mountCompact(slot);
+    graph.addChannel(t.id);
+    mountAutomation(t.id);
+  }
+
+  // the add flow backwards: regions, instrument, graph node, automation lanes, strip, slot
+  function onTrackRemove(t) {
+    regions.clear(t.id);
+    disposeInstrument(t.id);
+    graph.removeChannel(t.id);
+    automationRack.remove(t.id);
+    mixer.remove(t.id);
+    handle.strips[t.id]?.remove();
+    delete handle.strips[t.id];
+  }
+
+  // rename only — one field, read by the strip head and the graph node
+  function onTrackUpdate(t) {
+    const label = t.name || t.id;
+    const strip = mixer.strips[t.id];
+    if (!strip || strip.label === label) return;
+    mixer.rename(t.id, label);
+    graph.refresh();
+  }
+
+  const offAdd = tracks.on('add', onTrackAdd);
+  const offRemove = tracks.on('remove', onTrackRemove);
+  const offUpdate = tracks.on('update', onTrackUpdate);
 
   return {
     header,
@@ -643,9 +756,18 @@ export function wireDawShell(handle, { instrumentCtor = null, channelId = 'ch1' 
     mixer,
     graph,
     arrangement,
-    automation,
+    automationRack,
+    instruments,
+    addTrack: () => tracks.add(),
+    assignInstrument,
+    removeTrack: (id) => tracks.remove(id),
     dispose() {
-      for (const channel of Object.values(automation)) channel.dispose();
+      offAdd();
+      offRemove();
+      offUpdate();
+      arrangement.onAssignInstrument = null;
+      for (const id of [...instruments.keys()]) disposeInstrument(id);
+      automationRack.dispose();
       arrangement.dispose();
       graph.dispose();
       mixer.dispose();

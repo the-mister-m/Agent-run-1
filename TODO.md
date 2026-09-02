@@ -25,23 +25,44 @@ the port-0/sends tap split, **CLOSED 2026-08-31** by `strip-tap-fix` — two sma
 items left, both Brandon's), one new from 2026-09-01 (`arrange rebuild` — phase D
 unspecced).
 
-## NEW — 2026-09-01 — `arrange rebuild`, phase D unspecced
+## NEW — 2026-09-02 — unlimited tracks + Phase D, Brandon's desk
 
-Phases A-C built (zoom/scroll/playhead, the region store, lanes drawing regions) plus a
-cycle strip Brandon asked for mid-session. Phases D and E were handed to a sonnet; E grew
-into [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md). Full detail:
-[receipt-arrange-rebuild.md](docs/reports/receipt-arrange-rebuild.md).
+Six-job run shipped phase E (unlimited named tracks, instrument instances) and phase D
+(region editor). Full detail: [session review](docs/reports/2026-09-01-session-review-unlimited-tracks.md),
+six job receipts linked from it.
 
-- **Phase D — the region editor — is unspecced.** `Arrangement.on('open', region)` fires
-  on double-click and nothing listens yet; that is D's entry point. `_commitToRegion()` in
-  [arrangement.js](src/ui/arrangement.js) is PROVISIONAL and D replaces it. Needs
-  `piano-roll.js`, `step-grid.js` and `capture.js` read in full before it can be spec'd
-  (~110k tokens).
-- **Three open questions in [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md)
-  §7 are Brandon's:** track limit, two instances of one instrument sharing a view, whether
-  a new project opens empty.
-- **Whether clicking the cycle strip should also arm LOOP** — currently it does not, the
-  button still owns that. Session agent's call, flagged.
+- **Recording destination, unruled — the one that matters.** Job 6 removed
+  `_commitToRegion()`'s playhead-guessing on Brandon's ruling; nothing in the spec replaced
+  it. Job 6's call: a live take now lands ONLY in the region whose editor is currently open,
+  and is DROPPED otherwise. This is a behavior change, not a refactor.
+  [receipt-region-editor.md](docs/reports/receipt-region-editor.md) §LIVE RECORDING.
+- **SPEC-region-editor.md disposition.** Pre-existing, untracked before this session. Job 6
+  read it and built to §10 of [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md)
+  instead — decide whether the older spec is superseded or kept.
+- **UI matrix: instrument hosts, editor placement, lane-head look.** Deferred there on
+  purpose this run — instrument DOM is measured (`constructor(ctx,out)`/`mountCompact`/
+  `mountExpanded`/`dispose()` on all six) but never mounted; the region editor's host is a
+  bare fixed-position `<div>`, plainest thing that works, placement is the matrix's call
+  (SPEC §7.4). Job 4's per-lane `×` remove button is a stopgap trigger, also the matrix's
+  to keep or replace.
+- **First browser run of the whole thing.** Six jobs, `node --check` only, nothing
+  browser-verified. No browser driver installed in this environment.
+- **Three smaller agent judgment calls worth a look, none blocking:** Job 1's
+  `INSTRUMENT_KIND` table mapped `chord-module`/`patch-synth` → pitched and `drum-sampler` →
+  drum off `ls src/instruments/`, not spec text (receipt-tracks-store.md). Job 2's
+  `CAP_NODES` now counts insert devices instead of total nodes — the old check silently
+  locked out inserts around 24 tracks (receipt-mixer-live-list.md). Job 5 gave
+  `drum-sampler`'s style tag an id so its refcount fix could remove it — it had none
+  (receipt-style-refcount-devsplash-fix.md).
+
+## CLOSED 2026-09-02 — `arrange rebuild`, phase D unspecced
+
+Phase D shipped this session (region editor, job 6/6) and phase E's three §7 questions were
+all ruled by Brandon — see the 2026-09-02 heading above. What's left from this thread moved
+there: the recording-destination call and the SPEC-region-editor.md disposition.
+
+- **Whether clicking the cycle strip should also arm LOOP** — still open, not touched this
+  session. Currently it does not, the button still owns that. Session agent's call, flagged.
 
 ## NEW — 2026-08-31 — P4/S3 `arrangement`, global vs. per-lane arm/punch split
 

@@ -1,4 +1,4 @@
-Updated 2026-09-01 — Closer, arrange rebuild close
+Updated 2026-09-02 — Closer, unlimited tracks + Phase D close
 
 # MEMORY — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
@@ -149,193 +149,48 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
   (`src/core/regions.js`), plus a Logic-style cycle strip Brandon asked for mid-session.
   Phases D and E handed to a sonnet; E grew into
   [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md), D stayed unspecced.
+- 09-02 ("unlimited tracks + Phase D", 01:56–02:44 UTC): six-job run shipped both. Brandon
+  ruled seven things into SPEC §7/§10.5: no track cap at all, two instances of one
+  instrument can be open together, boot is empty (six lanes gone, not replaced), editor
+  placement is the UI matrix's call not the spec's, track kind can change (name input +
+  instrument dropdown in the lane head), add-track makes an empty track (instrument
+  assigned after), deleting a track deletes its regions. New store
+  [src/core/tracks.js](src/core/tracks.js) (job 1) mirrors `regions.js`'s idiom — tracks
+  born empty, `kind` derived from `instrumentType` never set directly. Mixer/graph/
+  automation (job 2) read that store live, no more hardcoded six;
+  `CAP_NODES` redefined to count insert devices, not total nodes (old check silently
+  locked out inserts around 24 tracks — job 2's call, unruled). Timeline + integration
+  (jobs 3, 4) wired lane add/assign/remove end to end through `wireDawShell()`, closing a
+  32-row teardown ledger down to 2 gaps (job 4 alone, `stylesInjected` guards). Phase D
+  (job 6): double-click a region opens PianoRoll/StepGrid, close writes back on five
+  routes, `_commitToRegion()`'s playhead-guessing removed per Brandon's ruling with nothing
+  named to replace it — job 6 made live takes land only in the open editor, dropped
+  otherwise, unruled. Also found and fixed: `regions.js` coerced non-array `notes` to `[]`
+  at six sites, silently erasing every drum-region save since the arrange rebuild. Nothing
+  browser-verified — `node --check` only, no browser driver in this environment.
   See the current warm start.
 
-## WARM START — 2026-08-25 — Harmony/contracts drift: 3 fixed, 3 owed to P4
-- Situation: Brandon asked what in `tools/harmony.html` did not line up with CONTRACTS.md.
-  Six divergences found. He ordered three fixed now and the rest carried into P4's contract
-  work. He explicitly declined the sixth (§4's "owns its own scale" wording vs the
-  `core/state.js` singleton) — **do not re-raise it.**
-- Last state: three fixes applied to [src/ui/shell.js](src/ui/shell.js), none to
-  `harmony.html`. (1) `TOOLS` harmony row flipped `available: true`, so Harmony is reachable
-  from every other page's Tool menu instead of only by URL. (2) `createScaleControl()` no
-  longer holds its own private `{tonic, degrees, name}` — it takes the §4 store (defaults to
-  `core/state.js`'s `state`), writes through `setScaleTonic`, redraws on `store.on('scale')`,
-  and spells the tonic with `theory/scale.js`'s `spellingOf` instead of P1's
-  `PLACEHOLDER_LETTERS`. Returned shape `{el, scale, on, dispose}` is unchanged; `ToolShell`
-  needed no edit. (3) `registerSurface()` is now actually called for `diatonic-keys` and
-  `scale-circle`, so the surface switcher offers three surfaces instead of one everywhere.
-- Next move — **P4's build contracts must absorb two items §1–§15 never named:**
-  1. **The three bind methods.** `chord-module.js` ships `bindState(store)`,
-     `bindTargets(rows)` and `bindInput(bus)`, and its own header admits §2 does not name
-     them (§10 forbids inventing an interface). `piano-roll.js` and `scale-circle.js` set
-     the same pattern with `bindState`. P4 hoists the scale through `bindState`, so P4's
-     section has to write all three into the contract before it builds against them.
-  2. **Surfaces carry mount methods §12.1 does not have.** §12.1's Surface is
-     `constructor(el, input)` · `mount(el)` · `unmount()` · `dispose()`. All three P3
-     surfaces also ship `mountCompact()` / `mountExpanded()`, and `ScaleCircle` takes a
-     **third** constructor argument (the §4 store, defaulted). Runtime is fine; the contract
-     is behind the code. Widen §12.1 or record the exception.
-- Also noted, not acted on: `tools/harmony copy.html` is a stray duplicate of
-  `tools/harmony.html` sitting in the tools folder. Brandon has not ruled on it.
-- Links: [tools/harmony.html](tools/harmony.html) · [src/ui/shell.js](src/ui/shell.js) ·
-  [CONTRACTS.md](Builddocs/CONTRACTS.md) §2 · §4 · §10 · §12.1 · §15
-
-## WARM START — 2026-08-31 — Skin sweep: tokenization done except devbox.js, 22 sites left on rulings
-- Situation: Brandon ruled every literal in the app tokenizes except
-  `src/ui/devbox.js`, voiding every prior seat's escalation reasoning and widening the
-  job from a substitution pass to full tokenization. Eleven seats ran this close.
-- Last state: 844 raw CSS sites → **22** (17 distinct declarations), 823 substitutions
-  applied via `sweep.py --apply`, idempotent, arithmetic closed at every step.
-  `tokens.css` 113 → 262 tokens. `token-map.json` 393 entries, **347 tokened** (331
-  `safe_for_script`), 46 escalations — the review's own "380 tokened" was a miscount,
-  corrected here from a direct count of the file. Canvas (73 sites) and `_fade()`
-  (8 sites) unchanged, out of scope — not CSS.
-- Next move: Brandon's four rulings (min-width 260px ×2, inset -8px, margin-left -2px)
-  and sixteen escalation sites (font-size 16/18px, gap 3/7/22px, padding 20px,
-  stroke-width 0.6-2) — both lists in [TODO.md](TODO.md). Then the canvas
-  `getComputedStyle` wiring in `src/vis/` (73+8 sites, not substitution), and the
-  dial-alignment pass — 262 tokens are flat literals, not scales driven by a dial;
-  Brandon wants to see what the dials currently do before this is scoped.
-- Durable: the seam-scoping lesson from this session (assertions in scripts, not
-  instructions in prompts) — [sweep-progress.md](docs/scratchpad/sweep-progress.md).
-- Links: [session review](docs/reports/2026-08-31-session-agent-review-skin-sweep.md) ·
-  [closer receipt](docs/reports/2026-08-31-closer-skin-tooling-close.md) ·
-  [tokens.css](src/ui/tokens.css) · [token-map.json](Builddocs/skinspecs/token-map.json) ·
-  [sweep.py](Builddocs/skinspecs/sweep.py)
-
-## WARM START — 2026-08-31 — Scale builder shipped, comp builder independent, page unclicked
-- Situation: Brandon asked how hard a scale generator would be to bolt on after the fact; it
-  became a build across `scale.js` + `harmonyNEW.html`, ruled over several passes.
-- Last state: no-match scale reads `Faaaancy <originName>` (`EXTRA_NAMES` empty — D-1,
-  Brandon's alone); `setScaleDegree` fences ±2 off the chosen mode via `originDegrees()`, not
-  Major, and refuses a pitch class another degree already holds. Scale circle panel is gone,
-  folded into a new **Scale builder** panel (`createOwnScaleStore`, 7 degree rows, no `+/-`
-  on degree 1, Harmonic/Melodic Minor excluded from `MODE_NAMES`). Comp Builder's tonal
-  center defaults independent (unchecked), toggles to follow the project's; Engine panel is
-  now a dropdown behind a Show/Hide collapse. Checked directly against source — **nothing
-  run, no browser.**
-- Next move: open `harmonyNEW.html` in a real browser and click through. Then Brandon's own:
-  name `EXTRA_NAMES` (D-1); the comp builder's engine grid inherits `hm-targets` CSS written
-  for a full-width panel, unverified in its new home.
-- Links: [receipt](docs/reports/2026-08-31-goto-scale-builder-comp-independence.md) ·
-  [scale.js](src/theory/scale.js) · [harmonyNEW.html](tools/harmonyNEW.html) ·
-  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
-
-## WARM START — 2026-08-31 — Beat tool rework: home-row Drum Synth, nothing clicked
-- Situation: Record, the Play panel, and the Drum Sampler are gone from `tools/beat.html`;
-  its purpose folded into `drum-synth.js`'s new presets/sample pickers (display-only). Grid
-  binds `DrumSynth` directly; live monitor is the sole bus-to-sound path.
-- Last state: eight slots renamed — index 0-7 is kick, snare, closed hat, open hat, efx1,
-  drum1, drum2, ride, and that index order is now load-bearing: `KEY_LAYOUTS` and the
-  per-slot sample-choice lists both key off it, so reordering/renaming a slot means updating
-  both in sync. Pads render in home-row order with a switch-hands toggle (off by default);
-  both layouts keep kick and closed hat under the index fingers. Pads and keys emit on
-  `core/input.js`'s bus rather than calling `noteOn` — any host that mounts `DrumSynth`
-  without wiring that bus to `noteOn` gets silent pads; `beat.html` wires it correctly and is
-  the only page mounting it today. Both files parse, module graph resolves — **no browser
-  click-through.**
-- Next move: open `tools/beat.html` in a real browser and click through — nothing this
-  session was seen on screen. `src` and `tools` are held clear for the skin sweep in the
-  meantime.
-- Links: [receipt](docs/reports/2026-08-31-goto-beat-tool-rework.md) ·
-  [tools/beat.html](tools/beat.html) · [src/instruments/drum-synth.js](src/instruments/drum-synth.js) ·
-  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
-
-## WARM START — 2026-08-31 — Synth voice normalization built, chord distortion still there
-- Situation: the design seat's spec was built. `core/audio.js` §4a scales each synth
-  channel's gain by its live voice count, `gain(n) = n ** -exponent`. A channel opts in by
-  passing an instrument id to `createChannel()`; passing nothing holds gain 1, which is how
-  drums and the metronome stay out with no exception clause. `shell.js:983` and
-  `harmonyNEW.html:442-443` pass ids. **DEV BAR WANTED:** `audio.js:200`'s `normState` —
-  mode, exponent, responseMs — belongs in the dev bar as controls.
-- Last state: Brandon reported distortion on a slammed chord, "less than a second but
-  audible." Diagnosed as clipping, not lag — `register()` runs after `trigger()` per §11.2,
-  so a chord sounds unducked before the ramp starts. Fixed the race: `register` now takes
-  the voice's own start timestamp and a duck is written with `setValueAtTime` on that exact
-  sample; recovery keeps the time constant. **Did not solve it.** Brandon retested: "still
-  not great, still there."
-- Next move: run the diagnostic first — set `mode: 'off'` at `audio.js:200` and slam the
-  same chord. Still distorts means it is the original clip; clean means the instant duck is
-  a discontinuity and the click is mine. Then pick from three: exponent 1.0 (a slammed chord
-  starts every oscillator in phase, so peaks add coherently at `n`, not `√n`, and 0.6
-  under-corrects), random voice start phase, or a limiter on `masterGain`. The project has
-  no limiter anywhere — normalization handles average level and was never going to catch a
-  transient peak.
-- Also true: Chord Module never calls `voicePool.register`, so it has no channel and no
-  normalization — the design's "routed notes normalize on the target" note is moot, not
-  merely acceptable. `tools/harmony.html` is deleted; the page is `harmonyNEW.html` with two
-  synth channels, not three.
-- Links: [receipt](docs/reports/2026-08-31-goto-synth-voice-normalization-build.md) ·
-  [design](docs/reports/2026-08-31-synth-voice-normalization-design.md) ·
-  [src/core/audio.js](src/core/audio.js) · [tools/harmonyNEW.html](tools/harmonyNEW.html) ·
-  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
-
-## WARM START — 2026-09-01 — P4/S6 half run: panes wired, phase done-check FAILS on dead instrument mount
-- Situation: Brandon opened `index.html`, found four panes black. His diagnosis, grep-
-  confirmed: a missing integration pass, not a bug. Session became that pass + its verify.
-- Last state: `wireDawShell()` extended (+41 lines) to mount strips/graph/arrangement/
-  automation — all four render, `verify-daw-wiring` 7/7 PASS. `test-p4` then ran headed
-  against the live app: Q5-Q8 PASS with real numbers (32-voice cap, 4-insert cap, reverb's
-  6-point IR table exact, fader-grab rule, zero leaks/20 cycles). **Q1/Q3 FAIL** —
-  `instrumentCtor` is accepted, never read; no UI path loads any instrument onto any
-  channel, a `shell-cleanup` regression. Same shape: `cpu-meter.js` (governor's breakdown
-  meter) and device pop-outs, both built, neither wired. `redpen-p4` has not run.
-- Durable: every P4 seat's lane was a file; no seat's lane was assembly. Lane isolation
-  bought zero collisions and cost all integration — three built-but-uncalled files came
-  out of it. Worth weighing before the next multi-seat build is scoped file-by-file again.
-- Next move: Brandon rules the instrument gap (restore a demo vs. build a picker) and
-  whether `devbox.js` moves into `shell.js`; then `redpen-p4`. Three AWAITING-BRANDON
-  audible checks are live now in the open browser tab (test-report.md).
-- Links: [test-report.md](Builddocs/P4-the-daw/S6-verify/test-report.md) ·
-  [session review](docs/reports/2026-09-01-session-review-daw-integration.md) ·
-  [closer receipt](docs/reports/2026-09-01-closer-daw-integration.md) ·
-  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
-
-## WARM START — 2026-09-01 — devsplash: SPEC.md fully built, two items for Brandon
-- Situation: `Builddocs/specs/devsplash/SPEC.md` tasked one page that mounts every built DAW
-  piece alone (a catalog) and lets pieces be assembled into candidate screen layouts (the
-  Matrix). Two spans ran it in series against one shared rig.
-- Last state: `tools/dev-splash.html` is spec-complete — §11 items 1-10 all done, §12
-  done-check all true. Tab 1: 37 rail rows across 7 groups, all mount clean. Tab 2 (Matrix):
-  split/merge/drag/swap, per-slot channel picker, persists to
-  `localStorage['cbdaw-devsplash:layout']` on every change, "1×1"/"2×2"/"DAW-ish" presets,
-  [copy JSON]. Zero page/console errors across a 37×2 leak pass (closer trusts this — headed-
-  browser claim, not re-run). Zero `src/` edits — verified directly: `daw-shell.js` still
-  carries `mountProjectHeader`/`mountTransportBar`/`mountPlayingSurface` at lines 393/468/590,
-  `git status` on `src/` unchanged from session start.
-- Next move: two open items sit with Brandon, neither blocks anything — (1) the note bus
-  dispatches keyboard notes to `rig.instruments.ch1` only, a Matrix piece on another channel
-  won't play from the keyboard; (2) `showPiece` still logs `console.error` when Brandon
-  deliberately picks a refused pair (e.g. scope+Wave Synth) — one-line change to `console.warn`
-  if he wants those screenshots console-silent. `docs/scratchpad/devsplash-probe*.png` are a
-  dead-end probe, safe to delete, left in place — not the closer's call.
-- Links: [SPEC.md](Builddocs/specs/devsplash/SPEC.md) ·
-  [receipt-span-1.md](Builddocs/specs/devsplash/receipt-span-1.md) ·
-  [receipt-span-2.md](Builddocs/specs/devsplash/receipt-span-2.md) ·
-  [tools/dev-splash.html](tools/dev-splash.html) ·
-  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
-
-## WARM START — 2026-09-01 — arrange rebuild: phases A-C done, D unspecced, E spec'd
-- Situation: arrange window's lanes drew regions now, not editors — the double-ruler
-  defect (arrange ruler vs. the surface's own `MAX_BARS = 8`) is gone. `regions.js` is the
-  store: `notes` is deliberately OPAQUE (never read inside), so it holds piano-roll notes
-  and step-grid steps under the same code; regions own their `notes[]` directly rather than
-  aliasing a pattern object, and the store takes no clock import — song length is the
-  caller's rule to enforce, not the store's.
-- Last state: `_commitToRegion()` in [arrangement.js](src/ui/arrangement.js) is
-  PROVISIONAL, phase D's replacement target. `Arrangement.on('open', region)` fires on
-  double-click and nothing listens yet — D's entry point. `bindChannels()` exists, works
-  with any-length lists, and is unused by `daw-shell` — that's why six lanes still show
-  (phase E). [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) was sized by
-  grep, not guess: MEDIUM, not a rewrite. Clicking the cycle strip does not arm LOOP
-  (the button still owns that) — session agent's call, flagged for Brandon.
-- Next move: Phase D needs `piano-roll.js`, `step-grid.js` and `capture.js` read in full
-  (~110k tokens) before it can be spec'd. Three questions in the spec's §7 are Brandon's:
-  track limit, two instances of one instrument sharing a view, whether a new project opens
-  empty.
-- Links: [receipt-arrange-rebuild.md](docs/reports/receipt-arrange-rebuild.md) ·
+## WARM START — 2026-09-02 — unlimited tracks + Phase D shipped, nothing browser-verified
+- Situation: phases D and E are both built and wired. Boot is zero tracks; `+ TRACK` in the
+  arrangement toolbar makes the first one, a per-lane `×` removes it (job 4's stopgap
+  trigger, spec named no other). A track's instrument constructs and makes sound but has no
+  DOM host anywhere — deliberately deferred to the UI matrix work, along with editor
+  placement and lane-head look. The region editor mounts as a bare fixed-position `<div>`
+  for the same reason.
+- Last state: nothing in this six-job run has run in a real browser — `node --check` only,
+  no driver installed here. The top open call, unruled: a live take now lands only in the
+  region whose editor is open and is dropped otherwise (`_commitToRegion` in
+  [arrangement.js](src/ui/arrangement.js), job 6). [SPEC-region-editor.md](docs/specs/SPEC-region-editor.md)
+  is pre-existing and superseded by §10 of
+  [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) per job 6's build, not
+  formally dispositioned. P4/S6's `instrumentCtor` FAIL is root-caused fixed by job 4 but
+  not re-run to confirm.
+- Next move: first browser run of the whole thing, then the recording-destination ruling,
+  then the UI matrix (instrument hosts, editor placement, lane-head look) — all on
+  Brandon's desk, see [TODO.md](TODO.md)'s 2026-09-02 heading.
+- Links: [session review](docs/reports/2026-09-01-session-review-unlimited-tracks.md) ·
   [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) ·
-  [src/core/regions.js](src/core/regions.js) ·
+  [src/core/tracks.js](src/core/tracks.js) ·
   [src/ui/arrangement.js](src/ui/arrangement.js) ·
+  [src/ui/daw-shell.js](src/ui/daw-shell.js) ·
   [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)

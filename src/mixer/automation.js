@@ -569,4 +569,61 @@ export function createChannelAutomation(strip) {
   };
 }
 
+// the live set of channel automations, one per track, keyed by the track's channel id.
+// `remove` is the only place a track's lanes are released — a dropped track that skips it
+// leaves its clock subscription and its pending writes alive.
+export function createAutomationRack() {
+  const racks = new Map();
+  return {
+    get ids() {
+      return [...racks.keys()];
+    },
+
+    of(id) {
+      return racks.get(id) ?? null;
+    },
+
+    add(id, strip) {
+      const existing = racks.get(id);
+      if (existing) return existing;
+      const rack = createChannelAutomation(strip);
+      racks.set(id, rack);
+      return rack;
+    },
+
+    remove(id) {
+      const rack = racks.get(id);
+      if (!rack) return false;
+      rack.dispose();
+      racks.delete(id);
+      return true;
+    },
+
+    rebind() {
+      for (const r of racks.values()) r.rebind();
+    },
+
+    // { channelId: [lane state, …] } — channels with no written points are omitted
+    getState() {
+      const out = {};
+      for (const [id, r] of racks) {
+        const s = r.getState();
+        if (s.length) out[id] = s;
+      }
+      return out;
+    },
+
+    setState(byChannel) {
+      for (const [id, entries] of Object.entries(byChannel ?? {})) {
+        racks.get(id)?.setState(entries);
+      }
+    },
+
+    dispose() {
+      for (const r of racks.values()) r.dispose();
+      racks.clear();
+    },
+  };
+}
+
 export default AutomationLane;

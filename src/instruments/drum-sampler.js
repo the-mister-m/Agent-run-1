@@ -513,13 +513,13 @@ export default class DrumSampler {
 
   // ---- mounting (seat question 8) ----
   mountCompact(el) {
-    ensureStylesInjected();
+    acquireStyle();
     this._mounts.compact = el;
     this._paint('compact');
   }
 
   mountExpanded(el) {
-    ensureStylesInjected();
+    acquireStyle();
     this._mounts.expanded = el;
     this._paint('expanded');
   }
@@ -530,7 +530,10 @@ export default class DrumSampler {
       listenersDropped += this._domListenersByMount[which].length;
       this._clearMountListeners(which);
       const el = this._mounts[which];
-      if (el) el.innerHTML = '';
+      if (el) {
+        el.innerHTML = '';
+        releaseStyle();
+      }
       this._mounts[which] = null;
     }
     return listenersDropped;
@@ -711,11 +714,12 @@ export default class DrumSampler {
 // loaded yet when this module runs standalone (matching wave-synth.js's own fix, D-7).
 // ---------------------------------------------------------------------------------------
 
-let stylesInjected = false;
-function ensureStylesInjected() {
-  if (stylesInjected) return;
-  stylesInjected = true;
+let styleRefs = 0;
+function acquireStyle() {
+  styleRefs++;
+  if (document.getElementById('drum-sampler-styles')) return;
   const style = document.createElement('style');
+  style.id = 'drum-sampler-styles';
   style.textContent = `
 .dsam-root { box-sizing: var(--box-border-box); font-family: var(--font-ui); color: var(--text, #f2f6fc); background: var(--panel, #1b2332); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-body); position: var(--pos-relative); }
 .dsam-root * { box-sizing: var(--box-border-box); }
@@ -742,4 +746,9 @@ function ensureStylesInjected() {
 .dsam-pad.dsam-miss { animation: var(--anim-miss-flash); }
 `;
   document.head.appendChild(style);
+}
+
+function releaseStyle() {
+  styleRefs = Math.max(0, styleRefs - 1);
+  if (styleRefs === 0) document.getElementById('drum-sampler-styles')?.remove();
 }
