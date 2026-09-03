@@ -10,8 +10,9 @@ const STYLE_TEXT = `
 .cbdaw-strip {
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
+  flex: var(--flex-0-0-auto);
   height: var(--pct-100);
-  width: var(--pct-100);
+  width: var(--sp-30);
   box-sizing: var(--box-border-box);
   font-family: var(--font-ui);
   color: var(--text);
@@ -26,6 +27,17 @@ const STYLE_TEXT = `
   overflow: var(--ov-hidden);
   white-space: var(--ws-nowrap);
   text-overflow: var(--to-ellipsis);
+}
+.cbdaw-strip__instrument {
+  width: var(--pct-100);
+  min-width: var(--sp-0);
+  background: var(--bg);
+  color: var(--text);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  font: inherit;
+  font-size: var(--fs-micro);
+  padding: var(--sp-0) var(--sp-1);
 }
 .cbdaw-strip__ms {
   display: var(--disp-flex);
@@ -206,7 +218,10 @@ const EMPTY_SLOT_VIEW = { slot: 0, deviceId: null, label: null, to: null };
 export default class Strip {
   constructor(
     ctx,
-    { id, label, instrumentId = null, isMaster = false, onSlotPopout = null, _onMuteSolo = null } = {}
+    {
+      id, label, instrumentId = null, isMaster = false, onSlotPopout = null, _onMuteSolo = null,
+      instrumentOptions = null, onAssignInstrument = null, instrumentType = null,
+    } = {}
   ) {
     this.ctx = ctx;
     this.id = id;
@@ -214,6 +229,11 @@ export default class Strip {
     this.isMaster = !!isMaster;
     this._onSlotPopout = onSlotPopout;
     this._onMuteSolo = _onMuteSolo;
+
+    // instrument picker. Null options: no picker is built and the head is unchanged.
+    this.instrumentOptions = instrumentOptions;
+    this.onAssignInstrument = onAssignInstrument;
+    this._instrumentType = instrumentType;
 
     this._mute = false;
     this._solo = false;
@@ -240,12 +260,31 @@ export default class Strip {
       this._wireChain();
     }
 
-    this.el = null;
-    this._mounted = false;
-    this._meter = null;
-    this._slotMeters = [];
-    this._nodes = {};
-    this._cleanup = [];
+    // one entry per place this strip is on screen
+    this._views = [];
+  }
+
+  // { el, wrap, nodes, meter, slotMeters, cleanup } for every live mount
+  get views() {
+    return this._views.slice();
+  }
+
+  // the view whose container is el, or null
+  viewFor(el) {
+    return this._views.find((v) => v.el === el) ?? null;
+  }
+
+  // first view — the fallback for callers that hold no element
+  get el() {
+    return this._views[0]?.el ?? null;
+  }
+
+  get wrap() {
+    return this._views[0]?.wrap ?? null;
+  }
+
+  get _mounted() {
+    return this._views.length > 0;
   }
 
   // channelIn -> stripGain -> stripPan -> stripMute -> meterTap -> masterGain (default)
@@ -271,9 +310,21 @@ export default class Strip {
   // the strip's name and the graph node's name are the same string, read from here
   set label(v) {
     this._label = v ?? this.id;
-    if (this._mounted) {
-      const el = this.wrap?.querySelector('.cbdaw-strip__label');
+    for (const view of this._views) {
+      const el = view.wrap?.querySelector('.cbdaw-strip__label');
       if (el) el.textContent = this._label;
+    }
+  }
+
+  get instrumentType() {
+    return this._instrumentType;
+  }
+
+  // the picker's value, mirrored into every mounted view
+  set instrumentType(v) {
+    this._instrumentType = v || null;
+    for (const view of this._views) {
+      if (view.nodes.instrument) view.nodes.instrument.value = this._instrumentType || '';
     }
   }
 
@@ -396,10 +447,11 @@ export default class Strip {
   }
 
   mountCompact(el) {
-    if (this._mounted) this.unmount();
     if (!el) throw new TypeError('Strip.mountCompact: needs a container element');
+    if (this.viewFor(el)) this.unmount(el);
     acquireStyle();
-    this.el = el;
+
+    const view = { el, wrap: null, nodes: {}, meter: null, slotMeters: [], cleanup: [] };
 
     const root = document.createElement('div');
     root.className = 'cbdaw-strip';
@@ -408,6 +460,27 @@ export default class Strip {
     labelEl.className = 'cbdaw-strip__label';
     labelEl.textContent = this.label;
     root.appendChild(labelEl);
+
+    // instrument picker, under the name. Absent on master and when no options were given.
+    if (!this.isMaster && this.instrumentOptions) {
+      const instrumentSelect = document.createElement('select');
+      instrumentSelect.className = 'cbdaw-strip__instrument';
+      instrumentSelect.title = 'Instrument';
+      for (const opt of this.instrumentOptions) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        instrumentSelect.appendChild(o);
+      }
+      instrumentSelect.value = this._instrumentType || '';
+      this._addListener(view, instrumentSelect, 'change', () => {
+        const type = instrumentSelect.value || null;
+        this._instrumentType = type;
+        if (typeof this.onAssignInstrument === 'function') this.onAssignInstrument(this.id, type);
+      });
+      root.appendChild(instrumentSelect);
+      view.nodes.instrument = instrumentSelect;
+    }
 
     let muteBtn = null;
     let soloBtn = null;
@@ -419,7 +492,7 @@ export default class Strip {
       muteBtn.type = 'button';
       muteBtn.textContent = 'M';
       muteBtn.setAttribute('aria-pressed', String(this._mute));
-      this._addListener(muteBtn, 'click', () => {
+      this._addListener(view, muteBtn, 'click', () => {
         this.mute = !this._mute;
       });
       soloBtn = document.createElement('button');
@@ -427,7 +500,7 @@ export default class Strip {
       soloBtn.type = 'button';
       soloBtn.textContent = 'S';
       soloBtn.setAttribute('aria-pressed', String(this._solo));
-      this._addListener(soloBtn, 'click', () => {
+      this._addListener(view, soloBtn, 'click', () => {
         this.solo = !this._solo;
       });
       ms.appendChild(muteBtn);
@@ -443,9 +516,9 @@ export default class Strip {
       pan.appendChild(panCenter);
       pan.appendChild(panThumb);
       root.appendChild(pan);
-      this._nodes.pan = pan;
-      this._nodes.panThumb = panThumb;
-      this._wirePanDrag(pan);
+      view.nodes.pan = pan;
+      view.nodes.panThumb = panThumb;
+      this._wirePanDrag(view, pan);
     }
 
     const fm = document.createElement('div');
@@ -463,10 +536,10 @@ export default class Strip {
     fm.appendChild(fader);
     fm.appendChild(meterHost);
     root.appendChild(fm);
-    this._nodes.fader = fader;
-    this._nodes.faderFill = faderFill;
-    this._nodes.faderThumb = faderThumb;
-    this._wireFaderDrag(fader);
+    view.nodes.fader = fader;
+    view.nodes.faderFill = faderFill;
+    view.nodes.faderThumb = faderThumb;
+    this._wireFaderDrag(view, fader);
 
     const slots = document.createElement('div');
     slots.className = 'cbdaw-strip__slots';
@@ -490,45 +563,50 @@ export default class Strip {
         body.appendChild(slotRoute);
         slot.appendChild(slotMeter);
         slot.appendChild(body);
-        this._addListener(slot, 'click', () => this._onSlotClick(i));
+        this._addListener(view, slot, 'click', () => this._onSlotClick(i));
         slots.appendChild(slot);
       }
     }
     root.appendChild(slots);
-    this._nodes.slots = slots;
+    view.nodes.slots = slots;
 
     const out = document.createElement('div');
     out.className = 'cbdaw-strip__out';
     root.appendChild(out);
-    this._nodes.out = out;
+    view.nodes.out = out;
 
     el.appendChild(root);
-    this.wrap = root;
-    this._mounted = true;
+    view.wrap = root;
+    this._views.push(view);
 
-    this._meter = new Meter(this._meterTap, { orientation: 'vertical' });
-    this._meter.mount(meterHost);
+    view.meter = new Meter(this._meterTap, { orientation: 'vertical' });
+    view.meter.mount(meterHost);
 
-    this._refreshMs();
-    this._refreshFader();
-    this._refreshPan();
-    this._renderSlots();
-    this._renderOut();
+    this._refreshMsView(view);
+    this._refreshFaderView(view);
+    this._refreshPanView(view);
+    this._renderSlotsView(view);
+    this._renderOutView(view);
+    return view;
   }
 
-  unmount() {
-    for (const off of this._cleanup) off();
-    this._cleanup = [];
-    if (this._meter) this._meter.dispose();
-    this._meter = null;
-    for (const m of this._slotMeters) m?.dispose();
-    this._slotMeters = [];
-    if (this.wrap && this.wrap.parentNode) this.wrap.parentNode.removeChild(this.wrap);
-    this.wrap = null;
-    this._nodes = {};
-    if (this._mounted) releaseStyle();
-    this._mounted = false;
-    this.el = null;
+  // el names one view; no el tears down every view
+  unmount(el = null) {
+    const targets = el ? this._views.filter((v) => v.el === el) : this._views.slice();
+    for (const view of targets) {
+      for (const off of view.cleanup) off();
+      view.cleanup = [];
+      view.meter?.dispose();
+      view.meter = null;
+      for (const m of view.slotMeters) m?.dispose();
+      view.slotMeters = [];
+      if (view.wrap && view.wrap.parentNode) view.wrap.parentNode.removeChild(view.wrap);
+      view.wrap = null;
+      view.nodes = {};
+      const i = this._views.indexOf(view);
+      if (i !== -1) this._views.splice(i, 1);
+      releaseStyle();
+    }
   }
 
   dispose() {
@@ -544,14 +622,18 @@ export default class Strip {
     }
   }
 
-  _addListener(target, type, fn, opts) {
+  _addListener(view, target, type, fn, opts) {
     target.addEventListener(type, fn, opts);
-    this._cleanup.push(() => target.removeEventListener(type, fn, opts));
+    view.cleanup.push(() => target.removeEventListener(type, fn, opts));
   }
 
   _refreshMs() {
-    if (this.isMaster || !this._mounted) return;
-    const ms = this.wrap.querySelector('.cbdaw-strip__ms');
+    for (const view of this._views) this._refreshMsView(view);
+  }
+
+  _refreshMsView(view) {
+    if (this.isMaster || !view.wrap) return;
+    const ms = view.wrap.querySelector('.cbdaw-strip__ms');
     if (!ms) return;
     const [muteBtn, soloBtn] = ms.children;
     muteBtn.setAttribute('aria-pressed', String(this._mute));
@@ -559,19 +641,27 @@ export default class Strip {
   }
 
   _refreshFader() {
-    if (!this._mounted) return;
+    for (const view of this._views) this._refreshFaderView(view);
+  }
+
+  _refreshFaderView(view) {
+    if (!view.nodes.faderFill) return;
     const frac = clamp(this.gain / GAIN_MAX, 0, 1);
-    this._nodes.faderFill.style.height = `${frac * 100}%`;
-    this._nodes.faderThumb.style.bottom = `calc(${frac * 100}% - var(--sp-1))`;
+    view.nodes.faderFill.style.height = `${frac * 100}%`;
+    view.nodes.faderThumb.style.bottom = `calc(${frac * 100}% - var(--sp-1))`;
   }
 
   _refreshPan() {
-    if (this.isMaster || !this._mounted) return;
-    const frac = clamp((this.pan - PAN_MIN) / (PAN_MAX - PAN_MIN), 0, 1);
-    this._nodes.panThumb.style.left = `calc(${frac * 100}% - var(--sp-1))`;
+    for (const view of this._views) this._refreshPanView(view);
   }
 
-  _wireFaderDrag(fader) {
+  _refreshPanView(view) {
+    if (this.isMaster || !view.nodes.panThumb) return;
+    const frac = clamp((this.pan - PAN_MIN) / (PAN_MAX - PAN_MIN), 0, 1);
+    view.nodes.panThumb.style.left = `calc(${frac * 100}% - var(--sp-1))`;
+  }
+
+  _wireFaderDrag(view, fader) {
     let dragging = false;
     const setFromClientY = (clientY) => {
       const rect = fader.getBoundingClientRect();
@@ -579,7 +669,7 @@ export default class Strip {
       this.gain = frac * GAIN_MAX;
       this._refreshFader();
     };
-    this._addListener(fader, 'pointerdown', (e) => {
+    this._addListener(view, fader, 'pointerdown', (e) => {
       dragging = true;
       try {
         fader.setPointerCapture(e.pointerId);
@@ -588,17 +678,17 @@ export default class Strip {
       }
       setFromClientY(e.clientY);
     });
-    this._addListener(fader, 'pointermove', (e) => {
+    this._addListener(view, fader, 'pointermove', (e) => {
       if (dragging) setFromClientY(e.clientY);
     });
     const end = () => {
       dragging = false;
     };
-    this._addListener(fader, 'pointerup', end);
-    this._addListener(fader, 'pointercancel', end);
+    this._addListener(view, fader, 'pointerup', end);
+    this._addListener(view, fader, 'pointercancel', end);
   }
 
-  _wirePanDrag(pan) {
+  _wirePanDrag(view, pan) {
     let dragging = false;
     const setFromClientX = (clientX) => {
       const rect = pan.getBoundingClientRect();
@@ -606,7 +696,7 @@ export default class Strip {
       this.pan = PAN_MIN + frac * (PAN_MAX - PAN_MIN);
       this._refreshPan();
     };
-    this._addListener(pan, 'pointerdown', (e) => {
+    this._addListener(view, pan, 'pointerdown', (e) => {
       dragging = true;
       try {
         pan.setPointerCapture(e.pointerId);
@@ -615,14 +705,14 @@ export default class Strip {
       }
       setFromClientX(e.clientX);
     });
-    this._addListener(pan, 'pointermove', (e) => {
+    this._addListener(view, pan, 'pointermove', (e) => {
       if (dragging) setFromClientX(e.clientX);
     });
     const end = () => {
       dragging = false;
     };
-    this._addListener(pan, 'pointerup', end);
-    this._addListener(pan, 'pointercancel', end);
+    this._addListener(view, pan, 'pointerup', end);
+    this._addListener(view, pan, 'pointercancel', end);
   }
 
   _onSlotClick(index) {
@@ -632,11 +722,15 @@ export default class Strip {
   }
 
   _renderSlots() {
-    if (this.isMaster || !this._mounted) return;
-    for (const m of this._slotMeters) m?.dispose();
-    this._slotMeters = [];
+    for (const view of this._views) this._renderSlotsView(view);
+  }
 
-    const slotEls = this._nodes.slots.children;
+  _renderSlotsView(view) {
+    if (this.isMaster || !view.nodes.slots) return;
+    for (const m of view.slotMeters) m?.dispose();
+    view.slotMeters = [];
+
+    const slotEls = view.nodes.slots.children;
     for (let i = 0; i < SLOT_COUNT; i++) {
       const slotEl = slotEls[i];
       const device = this._devices[i];
@@ -659,7 +753,7 @@ export default class Strip {
         if (analyser) {
           const m = new Meter(analyser, { orientation: 'vertical' });
           m.mount(meterHost);
-          this._slotMeters[i] = m;
+          view.slotMeters[i] = m;
         } else if (device.readout && typeof device.readout === 'object') {
           const entries = Object.entries(device.readout);
           if (entries.length) {
@@ -676,9 +770,13 @@ export default class Strip {
   }
 
   _renderOut() {
-    if (!this._mounted) return;
+    for (const view of this._views) this._renderOutView(view);
+  }
+
+  _renderOutView(view) {
+    if (!view.nodes.out) return;
     const out = this._routing.out.length ? this._routing.out : ['Master'];
-    this._nodes.out.textContent = out.map((o) => `→ ${o}`).join('  ');
+    view.nodes.out.textContent = out.map((o) => `→ ${o}`).join('  ');
   }
 }
 

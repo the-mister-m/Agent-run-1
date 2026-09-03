@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chromebook Load Test</title>
+<style>
+:root {
+  --bg:        #0d0f12;
+  --panel:     #14181d;
+  --panel-2:   #1b2027;
+  --line:      #2a323b;
+  --ink:       #d6dde5;
+  --ink-dim:   #7c8894;
+  --ink-face:  #4d5966;
+  --hot:       #ff6b3d;
+  --ok:        #4ec9a8;
+  --warn:      #e8c547;
+  --bad:       #ff4d4d;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 12px/1.45 var(--mono);
+  padding: 10px;
+}
+
+/* ── frame ───────────────────────────────────────────────────────── */
+
+.frame {
+  max-width: 1180px;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.titlebar h1 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.titlebar .sub {
+  color: var(--ink-face);
+  letter-spacing: .04em;
+  font-size: 10px;
+}
+
+section {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+}
+section:last-child { border-bottom: 0; }
+
+.sec-label {
+  color: var(--ink-dim);
+  letter-spacing: .18em;
+  font-size: 10px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+/* ── meters ──────────────────────────────────────────────────────── */
+
+.meters {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.meter {
+  background: var(--panel-2);
+  padding: 7px 8px 6px;
+  min-width: 0;
+}
+.meter .name {
+  color: var(--ink-face);
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.meter .val {
+  font-size: 16px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.meter .val small { font-size: 10px; color: var(--ink-dim); }
+.meter canvas { display: block; width: 100%; height: 16px; margin-top: 3px; }
+.v-ok   { color: var(--ok); }
+.v-warn { color: var(--warn); }
+.v-bad  { color: var(--bad); }
+.v-off  { color: var(--ink-face); }
+
+.meter-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 7px;
+}
+
+/* ── buttons + inputs ────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  cursor: pointer;
+  letter-spacing: .06em;
+}
+button:hover { border-color: var(--ink-face); }
+button.on { background: var(--hot); border-color: var(--hot); color: #12070300; color: #180a04; font-weight: 600; }
+button.danger { color: var(--bad); border-color: #4a2222; }
+button.danger:hover { background: var(--bad); color: #180404; border-color: var(--bad); }
+button.big { padding: 5px 16px; }
+
+input[type=number] {
+  font: inherit;
+  color: var(--ink);
+  background: #0a0c0f;
+  border: 1px solid var(--line);
+  padding: 3px 4px;
+  width: 66px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+input[type=number]:focus { outline: 1px solid var(--hot); }
+
+/* ── control rows ────────────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.row + .row { border-top: 1px dotted #202830; }
+.row .lead {
+  width: 92px;
+  flex: none;
+  color: var(--ink);
+  letter-spacing: .1em;
+  font-size: 11px;
+}
+.field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.hint {
+  color: var(--ink-face);
+  font-size: 10px;
+  margin-left: auto;
+  letter-spacing: .04em;
+}
+
+/* ── source row (collapsible) ────────────────────────────────────── */
+
+.src-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.src-head:hover .sec-label { color: var(--ink); }
+#srcBody[hidden] { display: none; }
+
+.roll-wrap { overflow-x: auto; padding: 6px 0 2px; }
+.roll {
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 9px;
+}
+.roll td, .roll th { padding: 0; }
+.roll th.pitch {
+  width: 34px;
+  text-align: right;
+  padding-right: 6px;
+  color: var(--ink-face);
+  font-weight: 400;
+  font-size: 9px;
+}
+.roll th.pitch.black { color: #39434e; }
+.roll td.cell {
+  width: 15px;
+  height: 15px;
+  border: 1px solid #1a2028;
+  background: #0f1216;
+  cursor: pointer;
+}
+.roll tr.black td.cell { background: #0b0e11; }
+.roll td.cell.beat  { border-left-color: #313b46; }
+.roll td.cell.bar   { border-left: 1px solid #4a5663; }
+.roll td.cell.on    { background: var(--hot); border-color: #ff9166; }
+.roll td.cell.play  { box-shadow: inset 0 0 0 1px var(--ok); }
+.roll .barnum { color: var(--ink-face); font-size: 9px; text-align: left; font-weight: 400; }
+
+.transport { display: flex; align-items: center; gap: 10px; padding-top: 8px; flex-wrap: wrap; }
+
+.kbd { display: flex; gap: 2px; padding-top: 10px; }
+.key {
+  width: 34px; height: 52px;
+  border: 1px solid var(--line);
+  background: #e6ebf0;
+  color: #2a323b;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 4px;
+  font-size: 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.key.blk { background: #1b2027; color: var(--ink-dim); border-color: #333d48; }
+.key.down { background: var(--hot); color: #180a04; border-color: var(--hot); }
+.key .note { font-size: 8px; opacity: .55; }
+
+/* ── render area ─────────────────────────────────────────────────── */
+
+#renderArea {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 26px;
+  align-items: flex-start;
+}
+#renderArea canvas { background: #08090b; border: 1px solid var(--line); display: block; }
+.vu {
+  width: 12px; height: 60px;
+  background: #08090b;
+  border: 1px solid var(--line);
+  position: relative;
+}
+.vu i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--ok); display: block; }
+
+#chromeArea { display: flex; flex-wrap: wrap; gap: 3px; min-height: 0; }
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--hot);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#churnArea { font-size: 9px; color: var(--ink-face); word-break: break-all; max-height: 34px; overflow: hidden; }
+
+.note-line {
+  color: var(--ink-face);
+  font-size: 10px;
+  letter-spacing: .04em;
+  padding-top: 6px;
+}
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <div class="titlebar">
+    <h1>Chromebook Load Test</h1>
+    <span class="sub" id="ctxInfo">audio idle</span>
+    <button class="danger" id="panic">PANIC</button>
+  </div>
+
+  <!-- ── METERS ────────────────────────────────────────────────── -->
+  <section>
+    <div class="meters" id="meterBar">
+      <div class="meter"><div class="name">Drift jumps</div><div class="val v-off" id="m_drop">0</div><canvas data-spark="drop"></canvas></div>
+      <div class="meter"><div class="name">Drift</div><div class="val v-off" id="m_drift">0.0<small> ms</small></div><canvas data-spark="drift"></canvas></div>
+      <div class="meter"><div class="name">Out latency</div><div class="val v-off" id="m_lat">—</div><canvas data-spark="lat"></canvas></div>
+      <div class="meter"><div class="name">Audio load</div><div class="val v-off" id="m_cap">n/a</div><canvas data-spark="cap"></canvas></div>
+      <div class="meter"><div class="name">FPS</div><div class="val v-off" id="m_fps">—</div><canvas data-spark="fps"></canvas></div>
+      <div class="meter"><div class="name">Long tasks</div><div class="val v-off" id="m_lt">0</div><canvas data-spark="lt"></canvas></div>
+      <div class="meter"><div class="name">JS heap</div><div class="val v-off" id="m_heap">n/a</div><canvas data-spark="heap"></canvas></div>
+      <div class="meter"><div class="name">Live nodes</div><div class="val v-off" id="m_nodes">0</div><canvas data-spark="nodes"></canvas></div>
+    </div>
+    <div class="meter-actions">
+      <span class="hint" id="capNote"></span>
+      <button id="resetMeters">reset meters</button>
+    </div>
+  </section>
+
+  <!-- ── SOURCE ────────────────────────────────────────────────── -->
+  <section>
+    <div class="src-head" id="srcHead">
+      <div class="sec-label">&#9660; Source — piano roll + keyboard</div>
+      <span class="hint" id="srcToggleLabel">collapse</span>
+    </div>
+
+    <div id="srcBody">
+      <div class="roll-wrap">
+        <table class="roll" id="roll"></table>
+      </div>
+
+      <div class="transport">
+        <button class="big" id="play">&#9654; PLAY</button>
+        <button class="big" id="stop">&#9632; STOP</button>
+        <span class="field">BPM <input type="number" id="bpm" value="110" min="40" max="240" step="1"></span>
+        <span class="field">GATE <input type="number" id="gate" value="0.35" min="0.05" max="4" step="0.05"></span>
+        <button id="clear">clear</button>
+        <button id="seed">seed pattern</button>
+        <span class="hint">4 bars &middot; 16ths &middot; loops</span>
+      </div>
+
+      <div class="kbd" id="kbd"></div>
+      <div class="note-line">QWERTY row plays live over the loop. Keys A W S E D F T G Y H U J &rarr; C through B.</div>
+    </div>
+  </section>
+
+  <!-- ── VOICES ────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-label">Voices</div>
+    <div class="row">
+      <span class="lead">PER NOTE</span>
+      <span class="field">osc <input type="number" id="vCount" value="3" min="1" max="64" step="1"></span>
+      <span class="field">detune <input type="number" id="vDetune" value="7" min="0" max="100" step="1"></span>
+      <span class="field">wave
+        <button class="wave on" data-wave="sine">SINE</button>
+        <button class="wave" data-wave="sawtooth">SAW</button>
+        <button class="wave" data-wave="square">SQUARE</button>
+        <button class="wave" data-wave="triangle">TRI</button>
+      </span>
+      <span class="hint">sine is a lookup; saw/square/tri are band-limited per note</span>
+    </div>
+  </section>
+
+  <!-- ── EFFECTS ───────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-label">Effects — in series on the strip</div>
+
+    <div class="row">
+      <span class="lead">COMP</span>
+      <span class="field">count <input type="number" id="fxComp" value="0" min="0" max="64" step="1"></span>
+      <span class="hint">lookahead + envelope detection per sample</span>
+    </div>
+
+    <div class="row">
+      <span class="lead">EQ</span>
+      <span class="field">bands <input type="number" id="fxEq" value="0" min="0" max="256" step="1"></span>
+      <span class="hint">one biquad per band</span>
+    </div>
+
+    <div class="row">
+      <span class="lead">DELAY</span>
+      <span class="field">count <input type="number" id="fxDelay" value="0" min="0" max="64" step="1"></span>
+      <span class="field">time <input type="number" id="dTime" value="250" min="1" max="2000" step="1"> ms</span>
+      <span class="field">fb <input type="number" id="dFb" value="0.40" min="0" max="0.95" step="0.05"></span>
+      <span class="field">mix <input type="number" id="dMix" value="0.30" min="0" max="1" step="0.05"></span>
+      <span class="hint">ring buffer + tone filter; feedback stacks</span>
+    </div>
+
+    <div class="row">
+      <span class="lead">REVERB</span>
+      <span class="field">count <input type="number" id="fxRev" value="0" min="0" max="32" step="1"></span>
+      <span class="field">len <input type="number" id="rLen" value="2.0" min="0.1" max="12" step="0.1"> s</span>
+      <span class="field">decay <input type="number" id="rDecay" value="2.0" min="0.1" max="12" step="0.1"></span>
+      <span class="field">mix <input type="number" id="rMix" value="0.30" min="0" max="1" step="0.05"></span>
+      <span class="hint">convolution; cost scales with length, not node count</span>
+    </div>
+  </section>
+
+  <!-- ── VISUALS ───────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-label">Visuals — main-thread drawing</div>
+
+    <div class="row">
+      <span class="lead">SPECTRUM</span>
+      <span class="field">count <input type="number" id="vsSpec" value="0" min="0" max="32" step="1"></span>
+      <span class="field">fft <input type="number" id="specFft" value="2048" min="32" max="32768" step="32"></span>
+      <span class="hint">own analyser each; fft rounds to a power of two</span>
+    </div>
+
+    <div class="row">
+      <span class="lead">SCOPE</span>
+      <span class="field">count <input type="number" id="vsScope" value="0" min="0" max="32" step="1"></span>
+      <span class="field">window <input type="number" id="scopeWin" value="1024" min="32" max="32768" step="32"></span>
+      <span class="hint">time-domain samples drawn per frame</span>
+    </div>
+
+    <div class="row">
+      <span class="lead">METER</span>
+      <span class="field">count <input type="number" id="vsMeter" value="0" min="0" max="64" step="1"></span>
+      <span class="field">poll every <input type="number" id="meterPoll" value="1" min="1" max="30" step="1"> frames</span>
+      <span class="hint">RMS read + style write per poll</span>
+    </div>
+  </section>
+
+  <!-- ── CHROME ────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-label">Chrome — compositor + layout</div>
+
+    <div class="row">
+      <span class="lead">CSS ANIM</span>
+      <span class="field">elements <input type="number" id="chAnim" value="0" min="0" max="4000" step="10"></span>
+      <span class="hint">animating elements competing for the compositor</span>
+    </div>
+
+    <div class="row">
+      <span class="lead">DOM CHURN</span>
+      <span class="field">nodes/sec <input type="number" id="chChurn" value="0" min="0" max="20000" step="50"></span>
+      <span class="hint">insert + remove + forced layout read each second</span>
+    </div>
+  </section>
+
+  <!-- ── RENDER ────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-label">Render</div>
+    <div id="renderArea"></div>
+    <div id="chromeArea"></div>
+    <div id="churnArea"></div>
+  </section>
+
+  <section>
+    <div class="note-line" id="graphLine">graph: idle</div>
+    <div class="note-line">No browser exposes true CPU percent. Every meter here is a proxy — drift jumps are the truest one.</div>
+  </section>
+
+</div>
+
+<script>
+'use strict';
+
+/* ══ CONSTANTS ═══════════════════════════════════════════════════ */
+
+const STEPS = 64;                 // 4 bars of sixteenths
+const PITCHES = ['B','A#','A','G#','G','F#','F','E','D#','D','C#','C'];
+const BLACK = { 'A#':1,'G#':1,'F#':1,'D#':1,'C#':1 };
+const BASE_MIDI = 60;             // C row = middle C
+const MASTER_GAIN = 0.08;         // barely audible, by request
+const DRIFT_JUMP_MS = 5;          // drift step counted as a dropout
+
+const KEYMAP = { a:0, w:1, s:2, e:3, d:4, f:5, t:6, g:7, y:8, h:9, u:10, j:11 };
+const KEYNAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const KEYLABEL = ['A','W','S','E','D','F','T','G','Y','H','U','J'];
+
+/* ══ NODE ACCOUNTING ═════════════════════════════════════════════ */
+// Every AudioNode this page makes goes through mk(); every teardown goes
+// through kill(). The NODES meter is a count, not an estimate.
+
+let nodeCount = 0;
+
+function mk(type, ...args) {
+  const n = ctx['create' + type](...args);
+  nodeCount++;
+  return n;
+}
+
+function kill(n) {
+  if (!n) return;
+  try { n.disconnect(); } catch (e) {}
+  nodeCount--;
+}
+
+/* ══ AUDIO GRAPH ═════════════════════════════════════════════════ */
+// voices -> voiceBus -> chainIn -> [comp][eq][delay][reverb] -> chainOut
+//        -> master -> destination, with visual analysers tapping master.
+
+let ctx = null;
+let voiceBus = null, chainIn = null, chainOut = null, master = null;
+let chainNodes = [];              // everything between chainIn and chainOut
+let irCache = { key: '', buf: null };
+
+function ensureCtx() {
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    voiceBus = mk('Gain'); voiceBus.gain.value = 1;
+    chainIn  = mk('Gain'); chainIn.gain.value  = 1;
+    chainOut = mk('Gain'); chainOut.gain.value = 1;
+    master   = mk('Gain'); master.gain.value   = MASTER_GAIN;
+
+    voiceBus.connect(chainIn);
+    chainOut.connect(master);
+    master.connect(ctx.destination);
+
+    buildChain();
+    startCapacity();
+    resetDrift();
+    document.getElementById('ctxInfo').textContent =
+      Math.round(ctx.sampleRate) + ' Hz · ' + (ctx.baseLatency ? (ctx.baseLatency * 1000).toFixed(1) + ' ms base' : 'base n/a');
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+
+const num = (id) => parseFloat(document.getElementById(id).value) || 0;
+const int = (id) => Math.max(0, Math.round(num(id)));
+
+/** Rounds an fft/window request to a legal power of two in [32, 32768]. */
+function pow2(v) {
+  let n = 32;
+  while (n < v && n < 32768) n *= 2;
+  return n;
+}
+
+/** Noise burst with an exponential tail — the reverb impulse. Cached by
+ *  (length, decay) so dragging an unrelated control doesn't rebuild it. */
+function impulse(len, decay) {
+  const key = len + '/' + decay;
+  if (irCache.key === key && irCache.buf) return irCache.buf;
+  const rate = ctx.sampleRate;
+  const frames = Math.max(1, Math.floor(rate * len));
+  const buf = ctx.createBuffer(2, frames, rate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < frames; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / frames, decay);
+    }
+  }
+  irCache = { key, buf };
+  return buf;
+}
+
+/** Tears down the effects chain and rebuilds it from the current counts and
+ *  parameters. Audible glitch on rebuild is expected — this is a test rig. */
+function buildChain() {
+  if (!ctx) return;
+
+  try { chainIn.disconnect(); } catch (e) {}
+  chainNodes.forEach(kill);
+  chainNodes = [];
+
+  let node = chainIn;
+  const parts = [];
+
+  // COMP — count only
+  const nComp = int('fxComp');
+  for (let i = 0; i < nComp; i++) {
+    const c = mk('DynamicsCompressor');
+    c.threshold.value = -24; c.ratio.value = 4;
+    c.attack.value = 0.003;  c.release.value = 0.25;
+    node.connect(c); node = c; chainNodes.push(c);
+  }
+  if (nComp) parts.push(nComp + '×comp');
+
+  // EQ — count only, peaking bands spread across the spectrum
+  const nEq = int('fxEq');
+  for (let i = 0; i < nEq; i++) {
+    const f = mk('BiquadFilter');
+    f.type = 'peaking';
+    f.frequency.value = 80 * Math.pow(1.35, i % 24);
+    f.Q.value = 1.2;
+    f.gain.value = (i % 2 ? 2 : -2);
+    node.connect(f); node = f; chainNodes.push(f);
+  }
+  if (nEq) parts.push(nEq + '×eq');
+
+  // DELAY — count + time/feedback/mix
+  const nDly = int('fxDelay');
+  const dTime = Math.min(2, Math.max(0.001, num('dTime') / 1000));
+  const dFb   = Math.min(0.95, Math.max(0, num('dFb')));
+  const dMix  = Math.min(1, Math.max(0, num('dMix')));
+  for (let i = 0; i < nDly; i++) {
+    const sum = mk('Gain');
+    const dry = mk('Gain'); dry.gain.value = 1;
+    const wet = mk('Gain'); wet.gain.value = dMix;
+    const dl  = mk('Delay', 2); dl.delayTime.value = dTime;
+    const tone = mk('BiquadFilter'); tone.type = 'lowpass'; tone.frequency.value = 3000;
+    const fb  = mk('Gain'); fb.gain.value = dFb;
+
+    node.connect(dry); dry.connect(sum);
+    node.connect(dl);
+    dl.connect(tone); tone.connect(fb); fb.connect(dl);   // feedback loop
+    tone.connect(wet); wet.connect(sum);
+
+    node = sum;
+    chainNodes.push(sum, dry, wet, dl, tone, fb);
+  }
+  if (nDly) parts.push(nDly + '×delay');
+
+  // REVERB — count + impulse length/decay/mix
+  const nRev = int('fxRev');
+  const rLen = Math.min(12, Math.max(0.1, num('rLen')));
+  const rDec = Math.min(12, Math.max(0.1, num('rDecay')));
+  const rMix = Math.min(1, Math.max(0, num('rMix')));
+  if (nRev) {
+    const ir = impulse(rLen, rDec);
+    for (let i = 0; i < nRev; i++) {
+      const sum = mk('Gain');
+      const dry = mk('Gain'); dry.gain.value = 1 - rMix;
+      const wet = mk('Gain'); wet.gain.value = rMix;
+      const cv  = mk('Convolver'); cv.normalize = true; cv.buffer = ir;
+
+      node.connect(dry); dry.connect(sum);
+      node.connect(cv); cv.connect(wet); wet.connect(sum);
+
+      node = sum;
+      chainNodes.push(sum, dry, wet, cv);
+    }
+    parts.push(nRev + '×reverb ' + rLen.toFixed(1) + 's');
+  }
+
+  node.connect(chainOut);
+
+  document.getElementById('graphLine').textContent =
+    'graph: ' + (parts.length ? parts.join(' → ') : 'dry, no effects') +
+    ' · chain nodes ' + chainNodes.length;
+}
+
+/* ══ VOICES ══════════════════════════════════════════════════════ */
+
+let wave = 'sine';
+const heldByKey = new Map();      // pitch index -> live voice (keyboard)
+const scheduled = new Set();      // voices the sequencer started
+
+/** One note = N oscillators + N gains, all summing into one envelope gain. */
+function startVoice(midi, t0, dur) {
+  ensureCtx();
+  const n = Math.max(1, int('vCount'));
+  const spread = num('vDetune');
+  const env = mk('Gain');
+  env.gain.setValueAtTime(0, t0);
+  env.gain.linearRampToValueAtTime(1 / Math.sqrt(n), t0 + 0.008);
+  env.connect(voiceBus);
+
+  const oscs = [];
+  const hz = 440 * Math.pow(2, (midi - 69) / 12);
+  for (let i = 0; i < n; i++) {
+    const o = mk('Oscillator');
+    o.type = wave;
+    o.frequency.value = hz;
+    o.detune.value = (i - (n - 1) / 2) * spread;
+    o.connect(env);
+    o.start(t0);
+    oscs.push(o);
+  }
+
+  const v = { env, oscs, released: false };
+  if (dur != null) stopVoice(v, t0 + dur);
+  return v;
+}
+
+function stopVoice(v, tOff) {
+  if (!v || v.released) return;
+  v.released = true;
+  const t = Math.max(tOff, ctx.currentTime);
+  v.env.gain.cancelScheduledValues(t);
+  v.env.gain.setValueAtTime(v.env.gain.value, t);
+  v.env.gain.linearRampToValueAtTime(0, t + 0.05);
+  v.oscs.forEach(o => { try { o.stop(t + 0.06); } catch (e) {} });
+  setTimeout(() => {
+    v.oscs.forEach(kill);
+    kill(v.env);
+    scheduled.delete(v);
+  }, (t + 0.1 - ctx.currentTime) * 1000 + 60);
+}
+
+document.querySelectorAll('.wave').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.wave').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    wave = b.dataset.wave;
+  });
+});
+
+/* ══ PIANO ROLL ══════════════════════════════════════════════════ */
+
+const grid = PITCHES.map(() => new Array(STEPS).fill(false));
+const cellEls = [];
+
+function buildRoll() {
+  const table = document.getElementById('roll');
+  const head = document.createElement('tr');
+  head.appendChild(document.createElement('th'));
+  for (let s = 0; s < STEPS; s++) {
+    const th = document.createElement('th');
+    th.className = 'barnum';
+    if (s % 16 === 0) th.textContent = (s / 16 + 1);
+    head.appendChild(th);
+  }
+  table.appendChild(head);
+
+  PITCHES.forEach((p, r) => {
+    const tr = document.createElement('tr');
+    if (BLACK[p]) tr.className = 'black';
+    const th = document.createElement('th');
+    th.className = 'pitch' + (BLACK[p] ? ' black' : '');
+    th.textContent = p;
+    tr.appendChild(th);
+
+    cellEls[r] = [];
+    for (let s = 0; s < STEPS; s++) {
+      const td = document.createElement('td');
+      td.className = 'cell' + (s % 16 === 0 ? ' bar' : s % 4 === 0 ? ' beat' : '');
+      td.addEventListener('mousedown', () => toggleCell(r, s));
+      tr.appendChild(td);
+      cellEls[r][s] = td;
+    }
+    table.appendChild(tr);
+  });
+}
+
+function toggleCell(r, s) {
+  grid[r][s] = !grid[r][s];
+  cellEls[r][s].classList.toggle('on', grid[r][s]);
+}
+
+function clearRoll() {
+  for (let r = 0; r < PITCHES.length; r++)
+    for (let s = 0; s < STEPS; s++) {
+      grid[r][s] = false;
+      cellEls[r][s].classList.remove('on');
+    }
+}
+
+/** A plain four-bar figure so PLAY does something the moment you press it. */
+function seedRoll() {
+  clearRoll();
+  const put = (name, step) => {
+    const r = PITCHES.indexOf(name);
+    if (r < 0) return;
+    grid[r][step] = true;
+    cellEls[r][step].classList.add('on');
+  };
+  const fig = [['C',0],['E',4],['G',8],['A',12]];
+  for (let bar = 0; bar < 4; bar++) {
+    fig.forEach(([n, s]) => put(n, bar * 16 + s));
+    put(bar % 2 ? 'D' : 'F', bar * 16 + 14);
+  }
+}
+
+/* ══ TRANSPORT ═══════════════════════════════════════════════════ */
+
+let playing = false, stepIdx = 0, nextTime = 0, schedTimer = null, lastDrawn = -1;
+const LOOKAHEAD = 0.12, TICK = 25;
+
+function stepDur() { return (60 / Math.max(40, num('bpm'))) / 4; }
+
+function scheduleAhead() {
+  if (!playing) return;
+  while (nextTime < ctx.currentTime + LOOKAHEAD) {
+    const s = stepIdx;
+    const dur = stepDur() * Math.max(0.05, num('gate')) * 4;
+    for (let r = 0; r < PITCHES.length; r++) {
+      if (!grid[r][s]) continue;
+      const midi = BASE_MIDI + (PITCHES.length - 1 - r);
+      scheduled.add(startVoice(midi, nextTime, dur));
+    }
+    nextTime += stepDur();
+    stepIdx = (s + 1) % STEPS;
+  }
+}
+
+function drawPlayhead() {
+  if (!playing) return;
+  const ahead = Math.max(0, Math.round((nextTime - ctx.currentTime) / stepDur()));
+  const cur = ((stepIdx - ahead) % STEPS + STEPS) % STEPS;
+  if (cur === lastDrawn) return;
+  if (lastDrawn >= 0) for (let r = 0; r < PITCHES.length; r++) cellEls[r][lastDrawn].classList.remove('play');
+  for (let r = 0; r < PITCHES.length; r++) cellEls[r][cur].classList.add('play');
+  lastDrawn = cur;
+}
+
+function play() {
+  ensureCtx();
+  if (playing) return;
+  playing = true;
+  stepIdx = 0;
+  nextTime = ctx.currentTime + 0.06;
+  schedTimer = setInterval(scheduleAhead, TICK);
+  document.getElementById('play').classList.add('on');
+}
+
+function stop() {
+  playing = false;
+  clearInterval(schedTimer);
+  schedTimer = null;
+  scheduled.forEach(v => stopVoice(v, ctx ? ctx.currentTime : 0));
+  document.getElementById('play').classList.remove('on');
+  if (lastDrawn >= 0) {
+    for (let r = 0; r < PITCHES.length; r++) cellEls[r][lastDrawn].classList.remove('play');
+    lastDrawn = -1;
+  }
+}
+
+/* ══ QWERTY KEYBOARD ═════════════════════════════════════════════ */
+
+function buildKeys() {
+  const wrap = document.getElementById('kbd');
+  KEYNAMES.forEach((n, i) => {
+    const k = document.createElement('div');
+    k.className = 'key' + (n.includes('#') ? ' blk' : '');
+    k.dataset.idx = i;
+    k.innerHTML = '<span>' + KEYLABEL[i] + '</span><span class="note">' + n + '</span>';
+    k.addEventListener('mousedown', () => keyDown(i));
+    k.addEventListener('mouseup', () => keyUp(i));
+    k.addEventListener('mouseleave', () => keyUp(i));
+    wrap.appendChild(k);
+  });
+}
+
+function keyDown(i) {
+  if (heldByKey.has(i)) return;
+  ensureCtx();
+  heldByKey.set(i, startVoice(BASE_MIDI + i, ctx.currentTime, null));
+  document.querySelector('.key[data-idx="' + i + '"]').classList.add('down');
+}
+
+function keyUp(i) {
+  const v = heldByKey.get(i);
+  if (!v) return;
+  heldByKey.delete(i);
+  stopVoice(v, ctx.currentTime);
+  document.querySelector('.key[data-idx="' + i + '"]').classList.remove('down');
+}
+
+window.addEventListener('keydown', e => {
+  if (e.repeat || e.metaKey || e.ctrlKey) return;
+  if (e.target.tagName === 'INPUT') return;
+  const i = KEYMAP[e.key.toLowerCase()];
+  if (i !== undefined) { e.preventDefault(); keyDown(i); }
+});
+window.addEventListener('keyup', e => {
+  const i = KEYMAP[e.key.toLowerCase()];
+  if (i !== undefined) keyUp(i);
+});
+
+/* ══ VISUALS ═════════════════════════════════════════════════════ */
+// Each spectrum/scope/meter owns a real AnalyserNode tapping master, so the
+// count is real audio-thread cost as well as main-thread drawing cost.
+
+let specs = [], scopes = [], vus = [];
+
+function syncVisuals() {
+  if (!ctx) { if (int('vsSpec') || int('vsScope') || int('vsMeter')) ensureCtx(); else return; }
+  const area = document.getElementById('renderArea');
+  const fft = pow2(int('specFft') || 2048);
+  const win = pow2(int('scopeWin') || 1024);
+
+  fit(specs, int('vsSpec'), () => {
+    const c = document.createElement('canvas');
+    c.width = 180; c.height = 62;
+    area.appendChild(c);
+    const a = mk('Analyser'); a.fftSize = fft; master.connect(a);
+    return { c, x: c.getContext('2d'), a, d: new Uint8Array(a.frequencyBinCount) };
+  }, o => { area.removeChild(o.c); kill(o.a); });
+
+  fit(scopes, int('vsScope'), () => {
+    const c = document.createElement('canvas');
+    c.width = 180; c.height = 62;
+    area.appendChild(c);
+    const a = mk('Analyser'); a.fftSize = win; master.connect(a);
+    return { c, x: c.getContext('2d'), a, d: new Uint8Array(a.fftSize) };
+  }, o => { area.removeChild(o.c); kill(o.a); });
+
+  fit(vus, int('vsMeter'), () => {
+    const el = document.createElement('div');
+    el.className = 'vu';
+    const bar = document.createElement('i');
+    el.appendChild(bar);
+    area.appendChild(el);
+    const a = mk('Analyser'); a.fftSize = 256; master.connect(a);
+    return { el, bar, a, d: new Uint8Array(a.fftSize) };
+  }, o => { area.removeChild(o.el); kill(o.a); });
+
+  // param changes on existing analysers
+  specs.forEach(o => { if (o.a.fftSize !== fft) { o.a.fftSize = fft; o.d = new Uint8Array(o.a.frequencyBinCount); } });
+  scopes.forEach(o => { if (o.a.fftSize !== win) { o.a.fftSize = win; o.d = new Uint8Array(o.a.fftSize); } });
+}
+
+/** Grows or shrinks `arr` to `n`, calling make()/drop() for the difference. */
+function fit(arr, n, make, drop) {
+  while (arr.length > n) drop(arr.pop());
+  while (arr.length < n) arr.push(make());
+}
+
+function drawVisuals(frame) {
+  const poll = Math.max(1, int('meterPoll'));
+
+  for (const o of specs) {
+    o.a.getByteFrequencyData(o.d);
+    const x = o.x, w = o.c.width, h = o.c.height;
+    x.fillStyle = '#08090b'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#ff6b3d';
+    const bins = Math.min(o.d.length, w);
+    for (let i = 0; i < bins; i++) {
+      const v = o.d[i] / 255 * h;
+      x.fillRect(i * (w / bins), h - v, Math.max(1, w / bins - 0.5), v);
+    }
+  }
+
+  for (const o of scopes) {
+    o.a.getByteTimeDomainData(o.d);
+    const x = o.x, w = o.c.width, h = o.c.height;
+    x.fillStyle = '#08090b'; x.fillRect(0, 0, w, h);
+    x.strokeStyle = '#4ec9a8'; x.lineWidth = 1; x.beginPath();
+    for (let i = 0; i < o.d.length; i++) {
+      const px = i / o.d.length * w;
+      const py = (o.d[i] / 255) * h;
+      i ? x.lineTo(px, py) : x.moveTo(px, py);
+    }
+    x.stroke();
+  }
+
+  if (frame % poll === 0) {
+    for (const o of vus) {
+      o.a.getByteTimeDomainData(o.d);
+      let sum = 0;
+      for (let i = 0; i < o.d.length; i++) { const v = (o.d[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / o.d.length);
+      o.bar.style.height = Math.min(100, rms * 340).toFixed(1) + '%';
+    }
+  }
+}
+
+/* ══ CHROME LOAD ═════════════════════════════════════════════════ */
+
+let animEls = [];
+let churnTimer = null;
+
+function syncChrome() {
+  const area = document.getElementById('chromeArea');
+  const want = int('chAnim');
+  while (animEls.length > want) area.removeChild(animEls.pop());
+  while (animEls.length < want) {
+    const d = document.createElement('div');
+    d.className = 'spinner';
+    d.style.animationDelay = (animEls.length % 20) * 0.05 + 's';
+    area.appendChild(d);
+    animEls.push(d);
+  }
+
+  clearInterval(churnTimer);
+  churnTimer = null;
+  const rate = int('chChurn');
+  const churn = document.getElementById('churnArea');
+  churn.textContent = '';
+  if (rate > 0) {
+    churnTimer = setInterval(() => {
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < rate; i++) {
+        const s = document.createElement('span');
+        s.textContent = '·';
+        frag.appendChild(s);
+      }
+      churn.appendChild(frag);
+      void churn.offsetHeight;              // forced layout, on purpose
+      churn.textContent = '';
+    }, 1000);
+  }
+}
+
+/* ══ METERS ══════════════════════════════════════════════════════ */
+
+const sparks = {};
+document.querySelectorAll('[data-spark]').forEach(c => {
+  sparks[c.dataset.spark] = { c, x: c.getContext('2d'), v: [] };
+});
+
+let driftT0 = 0, driftA0 = 0, lastDrift = 0, dropCount = 0, maxDrift = 0;
+let ltCount = 0;
+let frames = 0, fps = 0, fpsT0 = performance.now(), frameNo = 0;
+let capValue = null;
+
+function resetDrift() {
+  driftT0 = performance.now();
+  driftA0 = ctx ? ctx.currentTime : 0;
+  lastDrift = 0;
+}
+
+function startCapacity() {
+  // Chrome ships AudioRenderCapacity behind a flag on some builds. When it is
+  // there it is the only true audio-thread load figure available.
+  const note = document.getElementById('capNote');
+  if (ctx.renderCapacity && typeof ctx.renderCapacity.start === 'function') {
+    ctx.renderCapacity.onupdate = e => { capValue = e.averageLoad; };
+    ctx.renderCapacity.start({ updateInterval: 0.25 });
+    note.textContent = 'audio load = real render capacity';
+  } else {
+    note.textContent = 'audio load unavailable on this build — read drift jumps instead';
+  }
+}
+
+if (window.PerformanceObserver) {
+  try {
+    new PerformanceObserver(list => { ltCount += list.getEntries().length; })
+      .observe({ entryTypes: ['longtask'] });
+  } catch (e) {
+    document.getElementById('m_lt').textContent = 'n/a';
+  }
+}
+
+function setMeter(id, text, cls) {
+  const el = document.getElementById(id);
+  el.innerHTML = text;
+  el.className = 'val ' + cls;
+}
+
+function pushSpark(key, v, max) {
+  const s = sparks[key];
+  if (!s) return;
+  s.v.push(v);
+  if (s.v.length > 70) s.v.shift();
+  const c = s.c, x = s.x;
+  if (c.width !== c.clientWidth) c.width = c.clientWidth || 60;
+  c.height = 16;
+  x.clearRect(0, 0, c.width, c.height);
+  x.fillStyle = '#2a323b';
+  const w = c.width / 70;
+  for (let i = 0; i < s.v.length; i++) {
+    const h = Math.max(1, Math.min(1, s.v[i] / (max || 1)) * c.height);
+    x.fillRect(i * w, c.height - h, Math.max(1, w - 0.5), h);
+  }
+}
+
+function tickMeters() {
+  frames++;
+  const now = performance.now();
+  if (now - fpsT0 >= 500) {
+    fps = frames / ((now - fpsT0) / 1000);
+    frames = 0; fpsT0 = now;
+  }
+
+  if (ctx) {
+    const wall = (now - driftT0) / 1000;
+    const audio = ctx.currentTime - driftA0;
+    const drift = (wall - audio) * 1000;
+    if (drift - lastDrift > DRIFT_JUMP_MS) dropCount++;
+    lastDrift = drift;
+    maxDrift = Math.max(maxDrift, drift);
+
+    setMeter('m_drop', dropCount, dropCount === 0 ? 'v-ok' : dropCount < 5 ? 'v-warn' : 'v-bad');
+    pushSpark('drop', Math.min(20, dropCount), 20);
+
+    setMeter('m_drift', drift.toFixed(1) + '<small> ms</small>',
+      drift < 10 ? 'v-ok' : drift < 40 ? 'v-warn' : 'v-bad');
+    pushSpark('drift', Math.abs(drift), 60);
+
+    const lat = (ctx.outputLatency || 0) * 1000;
+    setMeter('m_lat', lat ? lat.toFixed(1) + '<small> ms</small>' : '<small>n/a</small>',
+      !lat ? 'v-off' : lat < 40 ? 'v-ok' : lat < 90 ? 'v-warn' : 'v-bad');
+    pushSpark('lat', lat, 150);
+
+    if (capValue != null) {
+      const pct = capValue * 100;
+      setMeter('m_cap', pct.toFixed(0) + '<small> %</small>',
+        pct < 50 ? 'v-ok' : pct < 85 ? 'v-warn' : 'v-bad');
+      pushSpark('cap', pct, 100);
+    }
+  }
+
+  setMeter('m_fps', fps ? fps.toFixed(0) : '—',
+    fps >= 50 ? 'v-ok' : fps >= 30 ? 'v-warn' : 'v-bad');
+  pushSpark('fps', fps, 65);
+
+  setMeter('m_lt', ltCount, ltCount === 0 ? 'v-ok' : ltCount < 20 ? 'v-warn' : 'v-bad');
+  pushSpark('lt', Math.min(50, ltCount), 50);
+
+  if (performance.memory) {
+    const mb = performance.memory.usedJSHeapSize / 1048576;
+    setMeter('m_heap', mb.toFixed(0) + '<small> MB</small>', 'v-off');
+    pushSpark('heap', mb, Math.max(200, mb * 1.2));
+  }
+
+  setMeter('m_nodes', nodeCount, nodeCount < 200 ? 'v-ok' : nodeCount < 1000 ? 'v-warn' : 'v-bad');
+  pushSpark('nodes', nodeCount, Math.max(200, nodeCount * 1.2));
+}
+
+/* ══ FRAME LOOP ══════════════════════════════════════════════════ */
+
+function frame() {
+  frameNo++;
+  drawVisuals(frameNo);
+  drawPlayhead();
+  tickMeters();
+  requestAnimationFrame(frame);
+}
+
+/* ══ PANIC ═══════════════════════════════════════════════════════ */
+
+function panic() {
+  stop();
+  heldByKey.forEach((v, i) => keyUp(i));
+  ['fxComp','fxEq','fxDelay','fxRev','vsSpec','vsScope','vsMeter','chAnim','chChurn']
+    .forEach(id => { document.getElementById(id).value = 0; });
+  syncVisuals();
+  syncChrome();
+  buildChain();
+  dropCount = 0; ltCount = 0; maxDrift = 0; capValue = null;
+  resetDrift();
+}
+
+/* ══ WIRING ══════════════════════════════════════════════════════ */
+
+['fxComp','fxEq','fxDelay','fxRev','dTime','dFb','dMix','rLen','rDecay','rMix']
+  .forEach(id => document.getElementById(id).addEventListener('change', () => { ensureCtx(); buildChain(); }));
+
+['vsSpec','vsScope','vsMeter','specFft','scopeWin']
+  .forEach(id => document.getElementById(id).addEventListener('change', syncVisuals));
+
+['chAnim','chChurn']
+  .forEach(id => document.getElementById(id).addEventListener('change', syncChrome));
+
+document.getElementById('play').addEventListener('click', play);
+document.getElementById('stop').addEventListener('click', stop);
+document.getElementById('clear').addEventListener('click', clearRoll);
+document.getElementById('seed').addEventListener('click', seedRoll);
+document.getElementById('panic').addEventListener('click', panic);
+
+document.getElementById('resetMeters').addEventListener('click', () => {
+  dropCount = 0; ltCount = 0; maxDrift = 0;
+  resetDrift();
+  Object.values(sparks).forEach(s => { s.v = []; });
+});
+
+document.getElementById('srcHead').addEventListener('click', () => {
+  const body = document.getElementById('srcBody');
+  body.hidden = !body.hidden;
+  document.getElementById('srcToggleLabel').textContent = body.hidden ? 'expand' : 'collapse';
+  document.querySelector('#srcHead .sec-label').innerHTML =
+    (body.hidden ? '&#9654;' : '&#9660;') + ' Source — piano roll + keyboard';
+});
+
+buildRoll();
+buildKeys();
+seedRoll();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

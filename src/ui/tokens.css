@@ -208,6 +208,7 @@
   --flexdir-column: column;
   --box-border-box: border-box;
   --flexwrap-wrap: wrap;
+  --flexwrap-nowrap: nowrap;
   --ov-hidden: hidden;
   --ov-visible: visible;
   --justify-center: center;

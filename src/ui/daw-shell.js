@@ -11,7 +11,10 @@ import { clock } from '../core/clock.js';
 import { state } from '../core/state.js';
 import { tracks } from '../core/tracks.js';
 import { regions } from '../core/regions.js';
-import Arrangement from './arrangement.js';
+import { createRollScheduler } from '../core/roll-scheduler.js';
+import { createTrackBus } from '../core/track-bus.js';
+import { input } from '../core/input.js';
+import Arrangement, { INSTRUMENT_OPTIONS } from './arrangement.js';
 import { createStrips } from '../mixer/strip.js';
 import Graph from '../mixer/graph.js';
 import { createAutomationRack } from '../mixer/automation.js';
@@ -21,11 +24,11 @@ import ChordModule from '../instruments/chord-module.js';
 import PatchSynth from '../instruments/patch-synth.js';
 import DrumSynth from '../instruments/drum-synth.js';
 import DrumSampler from '../instruments/drum-sampler.js';
+import { spellingOf } from '../theory/scale.js';
+import { PLACEHOLDER_LETTERS } from '../surfaces/keyboard.js';
 import {
-  createScaleControl,
   createCpuMeter,
   createSurfaceSwitcher,
-  createFileMenu,
   acquireShellStyle,
   releaseShellStyle,
 } from './shell.js';
@@ -46,7 +49,6 @@ const INSTRUMENTS = {
 /** The named mount points every S3/S4/S5 seat reads by `data-mount`. */
 export const MOUNTS = {
   header: 'project-header',
-  transport: 'transport-bar',
   playingSurface: 'playing-surface',
   arrangement: 'arrangement',
   nodeGraph: 'node-graph',
@@ -71,20 +73,12 @@ const STYLE_TEXT = `
   box-sizing: var(--box-border-box);
 }
 
-.cbdaw-daw-shell__header,
-.cbdaw-daw-shell__transport {
+.cbdaw-daw-shell__header {
   flex: var(--flex-0-0-auto);
+  min-height: var(--sp-18);
   background: var(--transport-ground);
   border-bottom: var(--bw) solid var(--line);
   box-sizing: var(--box-border-box);
-}
-
-.cbdaw-daw-shell__header {
-  min-height: var(--sp-30);
-}
-
-.cbdaw-daw-shell__transport {
-  min-height: var(--sp-16);
 }
 
 .cbdaw-daw-shell__body {
@@ -118,7 +112,8 @@ const STYLE_TEXT = `
 .cbdaw-daw-shell__automation  { background: var(--lane-ground); }
 
 .cbdaw-daw-shell__mixer {
-  flex: var(--flex-0-0-auto);
+  flex: var(--flex-0-1-auto);
+  min-width: var(--sp-0);
   display: var(--disp-flex);
   align-items: var(--align-stretch);
   gap: var(--sp-1);
@@ -126,6 +121,15 @@ const STYLE_TEXT = `
   background: var(--recess);
   border-left: var(--bw) solid var(--line);
   box-sizing: var(--box-border-box);
+}
+
+.cbdaw-daw-shell__strips-scroll {
+  flex: var(--flex-1-1-0);
+  min-width: var(--sp-0);
+  display: var(--disp-flex);
+  align-items: var(--align-stretch);
+  gap: var(--sp-1);
+  overflow-x: var(--auto);
 }
 
 .cbdaw-daw-shell__strip {
@@ -174,53 +178,23 @@ const STYLE_TEXT = `
   box-sizing: var(--box-border-box);
 }
 
-/* project header */
+/* project header — one horizontal bar: transport, key, meter, ranges, CPU */
 .cbdaw-dawhead {
   display: var(--disp-flex);
   align-items: var(--align-center);
-  flex-wrap: var(--flexwrap-wrap);
-  gap: var(--sp-6);
+  flex-wrap: var(--flexwrap-nowrap);
+  gap: var(--sp-4);
   height: var(--pct-100);
-  padding: var(--sp-3) var(--sp-6);
-  box-sizing: var(--box-border-box);
-}
-
-.cbdaw-dawhead__field {
-  display: var(--disp-flex);
-  align-items: var(--align-center);
-  gap: var(--sp-2);
-  color: var(--text-dim);
-  font-size: var(--fs-sm);
-}
-
-.cbdaw-dawhead__field input {
-  width: var(--sp-30);
-  font: var(--font-inherit);
-  color: var(--text);
-  background: var(--btn-face);
-  border: var(--bw) solid var(--line);
-  border-radius: var(--r-ctl);
-  padding: var(--sp-1) var(--sp-2);
-}
-
-.cbdaw-dawhead__spacer {
-  flex: var(--flex-1-1-auto);
-}
-
-/* transport bar */
-.cbdaw-transport {
-  display: var(--disp-flex);
-  align-items: var(--align-center);
-  flex-wrap: var(--flexwrap-wrap);
-  gap: var(--sp-5);
-  height: var(--pct-100);
-  padding: var(--sp-3) var(--sp-6);
+  padding: var(--sp-2) var(--sp-4);
   box-sizing: var(--box-border-box);
   font-size: var(--fs-sm);
   color: var(--text-dim);
+  overflow-x: var(--auto);
+  overflow-y: var(--ov-hidden);
 }
 
-.cbdaw-transport__btn {
+.cbdaw-dawhead__btn {
+  flex: var(--flex-0-0-auto);
   font: var(--font-inherit);
   font-weight: var(--w-bold);
   min-width: var(--sp-15);
@@ -232,41 +206,65 @@ const STYLE_TEXT = `
   cursor: var(--cur-pointer);
 }
 
-.cbdaw-transport__btn[data-on="true"] { background: var(--btn-active); color: var(--recess); }
-.cbdaw-transport__btn[data-role="play"][data-on="true"] { background: var(--play-on); }
-.cbdaw-transport__btn[data-role="record"][data-on="true"] { background: var(--rec-on); }
+.cbdaw-dawhead__btn[data-on="true"] { background: var(--btn-active); color: var(--recess); }
+.cbdaw-dawhead__btn[data-role="play"][data-on="true"] { background: var(--play-on); }
+.cbdaw-dawhead__btn[data-role="record"][data-on="true"] { background: var(--rec-on); }
 
-.cbdaw-transport__field {
-  display: var(--disp-flex);
-  align-items: var(--align-center);
-  gap: var(--sp-2);
+.cbdaw-dawhead__position {
+  flex: var(--flex-0-0-auto);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--num-tabular);
+  color: var(--text);
 }
 
-.cbdaw-transport__field input[type="number"] {
+.cbdaw-dawhead__field {
+  flex: var(--flex-0-0-auto);
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-1);
+}
+
+.cbdaw-dawhead__field input[type="number"] {
   width: var(--sp-16);
   font: var(--font-inherit);
   color: var(--text);
   background: var(--btn-face);
   border: var(--bw) solid var(--line);
   border-radius: var(--r-ctl);
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--sp-1) var(--sp-1);
 }
 
-.cbdaw-transport__toggle {
+.cbdaw-dawhead__field select {
+  font: var(--font-inherit);
+  color: var(--text);
+  background: var(--btn-face);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-1) var(--sp-1);
+}
+
+.cbdaw-dawhead__toggle {
+  flex: var(--flex-0-0-auto);
   display: var(--disp-flex);
   align-items: var(--align-center);
-  gap: var(--sp-2);
+  gap: var(--sp-1);
   cursor: var(--cur-pointer);
   user-select: var(--usel-none);
 }
 
-.cbdaw-transport__toggle[data-role="loop"][data-on="true"] { color: var(--loop-region); }
-.cbdaw-transport__toggle[data-role="punch"][data-on="true"] { color: var(--punch-region); }
+.cbdaw-dawhead__toggle[data-role="loop"][data-on="true"] { color: var(--loop-region); }
+.cbdaw-dawhead__toggle[data-role="punch"][data-on="true"] { color: var(--punch-region); }
 
-.cbdaw-transport__position {
-  font-family: var(--font-mono);
-  font-variant-numeric: var(--num-tabular);
-  color: var(--text);
+.cbdaw-dawhead__sep {
+  flex: var(--flex-0-0-auto);
+  width: var(--bw);
+  height: var(--sp-8);
+  background: var(--line);
+}
+
+.cbdaw-dawhead__spacer {
+  flex: var(--flex-1-1-auto);
+  min-width: var(--sp-0);
 }
 `;
 
@@ -310,7 +308,6 @@ export function mountDawShell(host = document.body) {
   root.dataset.mount = 'daw-root';
   root.innerHTML = `
     <header class="cbdaw-daw-shell__header" data-mount="${MOUNTS.header}"></header>
-    <div class="cbdaw-daw-shell__transport" data-mount="${MOUNTS.transport}"></div>
     <div class="cbdaw-daw-shell__playing-surface" data-mount="${MOUNTS.playingSurface}"></div>
     <div class="cbdaw-daw-shell__body">
       <div class="cbdaw-daw-shell__workspace">
@@ -319,7 +316,9 @@ export function mountDawShell(host = document.body) {
         <div class="cbdaw-daw-shell__pane cbdaw-daw-shell__automation" data-mount="${MOUNTS.automationLanes}"></div>
       </div>
       <div class="cbdaw-daw-shell__mixer" data-mount="mixer">
-        ${tracks.all.map((t) => stripMarkup(t.id, false)).join('')}
+        <div class="cbdaw-daw-shell__strips-scroll" data-mount="strips-scroll">
+          ${tracks.all.map((t) => stripMarkup(t.id, false)).join('')}
+        </div>
         ${stripMarkup('master', true)}
       </div>
     </div>
@@ -338,14 +337,15 @@ export function mountDawShell(host = document.body) {
   return {
     root,
     header: root.querySelector(`[data-mount="${MOUNTS.header}"]`),
-    transport: root.querySelector(`[data-mount="${MOUNTS.transport}"]`),
     playingSurface: root.querySelector(`[data-mount="${MOUNTS.playingSurface}"]`),
     arrangement: root.querySelector(`[data-mount="${MOUNTS.arrangement}"]`),
     nodeGraph: root.querySelector(`[data-mount="${MOUNTS.nodeGraph}"]`),
     automationLanes: root.querySelector(`[data-mount="${MOUNTS.automationLanes}"]`),
     devicePopout: root.querySelector(`[data-mount="${MOUNTS.devicePopout}"]`),
-    /** the strip rail itself — strip slots are inserted into it as tracks are added */
+    /** the strip rail itself — master lives here, pinned outside the scroll area */
     mixer: root.querySelector('[data-mount="mixer"]'),
+    /** the scrollable strip row — non-master strip slots are inserted into it */
+    stripsScroll: root.querySelector('[data-mount="strips-scroll"]'),
     strips,
     /** Removes the frame from the DOM and releases the stylesheet ref. */
     unmount() {
@@ -355,7 +355,7 @@ export function mountDawShell(host = document.body) {
   };
 }
 
-// Fills mountDawShell()'s mount points: header, transport, playing surface, one instrument.
+// Fills mountDawShell()'s mount points: header, playing surface, one instrument.
 
 function listenerBag() {
   const bag = [];
@@ -373,86 +373,101 @@ function listenerBag() {
   };
 }
 
-/** File menu over channel strips. Selecting one hides the rest; selecting it again shows all.
- *  The menu's item list is fixed at construction, so a track change rebuilds it in place. */
-function buildIsolateControl(strips) {
-  const host = document.createElement('div');
-  let isolated = null;
-  let menu = null;
+/** Key picker: one tonic select plus a mode readout. Writes `store.setScaleTonic`; redraws
+ *  on `store.on('scale')`. Degrees are not shown here — the circle and diatonic keys own them. */
+function buildKeyControl(store) {
+  const listeners = listenerBag();
 
-  function apply() {
-    for (const [id, el] of Object.entries(strips)) {
-      if (el) el.hidden = isolated !== null && id !== isolated;
+  const root = document.createElement('div');
+  root.className = 'cbdaw-dawhead__field';
+  root.innerHTML =
+    '<label>Key</label><select data-tonic></select><span data-scale-name></span>';
+
+  const select = root.querySelector('[data-tonic]');
+  const nameEl = root.querySelector('[data-scale-name]');
+  for (let pc = 0; pc < PLACEHOLDER_LETTERS.length; pc++) {
+    const opt = document.createElement('option');
+    opt.value = String(pc);
+    opt.textContent = PLACEHOLDER_LETTERS[pc];
+    select.appendChild(opt);
+  }
+
+  function render() {
+    const scale = store.scale;
+    select.value = String(scale.tonic);
+    // the selected option carries theory/scale.js's spelling; the rest keep the fallback
+    for (let pc = 0; pc < select.options.length; pc++) {
+      select.options[pc].textContent = PLACEHOLDER_LETTERS[pc];
     }
+    const spelled = spellingOf(scale, 0).text;
+    if (spelled) select.options[scale.tonic].textContent = spelled;
+    nameEl.textContent = scale.name;
   }
 
-  function build() {
-    const ids = [...tracks.all.map((t) => t.id), 'master'];
-    if (isolated !== null && !ids.includes(isolated)) isolated = null;
-    menu?.dispose();
-    host.replaceChildren();
-    menu = createFileMenu({
-      items: ids.map((id) => ({ id, label: tracks.get(id)?.name || id, available: true, phase: 'ch' })),
-      currentId: null,
-      label: 'Isolate',
-      onSelect(item) {
-        isolated = isolated === item.id ? null : item.id;
-        menu.setCurrent(isolated);
-        apply();
-      },
-    });
-    menu.setCurrent(isolated);
-    host.appendChild(menu.el);
-    apply();
-  }
+  listeners.add(select, 'change', () => {
+    store.setScaleTonic(Number(select.value));
+  });
 
-  build();
-  const offTracks = tracks.on('change', build);
+  const offStore = store.on('scale', render);
+  render();
 
   return {
-    el: host,
+    el: root,
     dispose() {
-      offTracks();
-      menu?.dispose();
-      isolated = null;
-      apply();
-      host.remove();
+      offStore();
+      listeners.dropAll();
+      root.remove();
     },
   };
 }
 
-/** Header: isolate control, scale, BPM, time signature, song length, CPU meter. */
-export function mountProjectHeader(el, { store = state, clockRef = clock, strips = {}, instrument = null } = {}) {
+/** The one project-header bar: transport, position, key, BPM, time signature, song length,
+ *  metronome, count-in, loop range, punch range, CPU meter. No second row, no sub-panels. */
+export function mountProjectHeader(el, { store = state, clockRef = clock, instrument = null } = {}) {
   acquireShellStyle();
   const listeners = listenerBag();
 
   const root = document.createElement('div');
   root.className = 'cbdaw-dawhead';
+  root.innerHTML = `
+    <button type="button" class="cbdaw-dawhead__btn" data-role="play">Play</button>
+    <button type="button" class="cbdaw-dawhead__btn" data-role="stop">Stop</button>
+    <button type="button" class="cbdaw-dawhead__btn" data-role="record">Rec</button>
+    <span class="cbdaw-dawhead__position" data-position>1.1.000</span>
+    <span class="cbdaw-dawhead__sep"></span>
+    <span data-key-slot></span>
+    <div class="cbdaw-dawhead__field"><label>BPM</label><input type="number" min="1" step="1" data-bpm></div>
+    <div class="cbdaw-dawhead__field">
+      <label>Time</label><input type="number" min="1" step="1" data-ts-top><span>/</span><input type="number" min="1" step="1" data-ts-bottom>
+    </div>
+    <div class="cbdaw-dawhead__field"><label>Bars</label><input type="number" min="1" step="1" data-song-length></div>
+    <span class="cbdaw-dawhead__sep"></span>
+    <label class="cbdaw-dawhead__toggle" data-role="metronome"><input type="checkbox" data-metronome>Click</label>
+    <div class="cbdaw-dawhead__field"><label>Count-in</label><input type="number" min="0" step="1" data-countin></div>
+    <span class="cbdaw-dawhead__sep"></span>
+    <label class="cbdaw-dawhead__toggle" data-role="loop"><input type="checkbox" data-loop-on>Loop</label>
+    <div class="cbdaw-dawhead__field">
+      <input type="number" min="1" step="1" data-loop-start><span>–</span><input type="number" min="1" step="1" data-loop-end>
+    </div>
+    <label class="cbdaw-dawhead__toggle" data-role="punch"><input type="checkbox" data-punch-on>Punch</label>
+    <div class="cbdaw-dawhead__field">
+      <input type="number" min="1" step="1" data-punch-start><span>–</span><input type="number" min="1" step="1" data-punch-end>
+    </div>
+    <div class="cbdaw-dawhead__spacer"></div>
+  `;
+  el.appendChild(root);
 
-  const isolate = buildIsolateControl(strips);
-  root.appendChild(isolate.el);
+  const keyControl = buildKeyControl(store);
+  root.querySelector('[data-key-slot]').replaceWith(keyControl.el);
 
-  const scaleControl = createScaleControl(store);
-  root.appendChild(scaleControl.el);
-
-  const bpmField = document.createElement('div');
-  bpmField.className = 'cbdaw-dawhead__field';
-  bpmField.innerHTML = `<label>BPM</label><input type="number" min="1" step="1" data-bpm>`;
-  root.appendChild(bpmField);
-  const bpmInput = bpmField.querySelector('[data-bpm]');
+  const bpmInput = root.querySelector('[data-bpm]');
   bpmInput.value = clockRef.bpm;
   listeners.add(bpmInput, 'change', () => {
     clockRef.bpm = Number(bpmInput.value) || clockRef.bpm;
   });
 
-  const tsField = document.createElement('div');
-  tsField.className = 'cbdaw-dawhead__field';
-  tsField.innerHTML =
-    '<label>Time</label><input type="number" min="1" step="1" data-ts-top>' +
-    '<span>/</span><input type="number" min="1" step="1" data-ts-bottom>';
-  root.appendChild(tsField);
-  const tsTop = tsField.querySelector('[data-ts-top]');
-  const tsBottom = tsField.querySelector('[data-ts-bottom]');
+  const tsTop = root.querySelector('[data-ts-top]');
+  const tsBottom = root.querySelector('[data-ts-bottom]');
   tsTop.value = clockRef.timeSignature.top;
   tsBottom.value = clockRef.timeSignature.bottom;
   function applyTs() {
@@ -464,61 +479,14 @@ export function mountProjectHeader(el, { store = state, clockRef = clock, strips
   listeners.add(tsTop, 'change', applyTs);
   listeners.add(tsBottom, 'change', applyTs);
 
-  const lenField = document.createElement('div');
-  lenField.className = 'cbdaw-dawhead__field';
-  lenField.innerHTML = '<label>Length</label><input type="number" min="1" step="1" data-song-length><span>bars</span>';
-  root.appendChild(lenField);
-  const lenInput = lenField.querySelector('[data-song-length]');
+  const lenInput = root.querySelector('[data-song-length]');
   lenInput.value = clockRef.songLengthBars;
   listeners.add(lenInput, 'change', () => {
     clockRef.songLengthBars = Number(lenInput.value) || clockRef.songLengthBars;
   });
 
-  const spacer = document.createElement('div');
-  spacer.className = 'cbdaw-dawhead__spacer';
-  root.appendChild(spacer);
-
   const cpu = createCpuMeter({ instrument });
   root.appendChild(cpu.el);
-
-  el.appendChild(root);
-
-  return {
-    el: root,
-    dispose() {
-      listeners.dropAll();
-      cpu.dispose();
-      scaleControl.dispose();
-      isolate.dispose();
-      root.remove();
-      releaseShellStyle();
-    },
-  };
-}
-
-/** Transport: play/stop/record, position readout, metronome, count-in, loop, arm, punch. */
-export function mountTransportBar(el, { store = state, clockRef = clock } = {}) {
-  const listeners = listenerBag();
-
-  const root = document.createElement('div');
-  root.className = 'cbdaw-transport';
-  root.innerHTML = `
-    <button type="button" class="cbdaw-transport__btn" data-role="play">Play</button>
-    <button type="button" class="cbdaw-transport__btn" data-role="stop">Stop</button>
-    <button type="button" class="cbdaw-transport__btn" data-role="record">Rec</button>
-    <span class="cbdaw-transport__position" data-position>1.1.000</span>
-    <label class="cbdaw-transport__toggle" data-role="metronome"><input type="checkbox" data-metronome>Metronome</label>
-    <div class="cbdaw-transport__field"><label>Count-in</label><input type="number" min="0" step="1" data-countin><span>bars</span></div>
-    <label class="cbdaw-transport__toggle" data-role="loop"><input type="checkbox" data-loop-on>Loop</label>
-    <div class="cbdaw-transport__field">
-      <input type="number" min="1" step="1" data-loop-start><span>–</span><input type="number" min="1" step="1" data-loop-end>
-    </div>
-    <label class="cbdaw-transport__toggle" data-role="punch"><input type="checkbox" data-punch-on>Punch</label>
-    <div class="cbdaw-transport__field">
-      <input type="number" min="1" step="1" data-punch-start><span>–</span><input type="number" min="1" step="1" data-punch-end>
-    </div>
-  `;
-  el.appendChild(root);
 
   const playBtn = root.querySelector('[data-role="play"]');
   const stopBtn = root.querySelector('[data-role="stop"]');
@@ -613,7 +581,10 @@ export function mountTransportBar(el, { store = state, clockRef = clock } = {}) 
       clockRef.off('statechange', onStatechange);
       offProject();
       listeners.dropAll();
+      cpu.dispose();
+      keyControl.dispose();
       root.remove();
+      releaseShellStyle();
     },
   };
 }
@@ -635,20 +606,27 @@ export function mountPlayingSurface(el, { kind = 'pitch' } = {}) {
   };
 }
 
-/** Wires every mountDawShell() mount point: header, transport, playing surface, mixer
- *  strips, routing graph, arrangement, automation lanes — and holds the track lifecycle:
- *  add, instrument assignment, remove. A track's channel, strip and graph node belong to
- *  the track and survive an instrument swap; only the instance is torn down and rebuilt. */
-export function wireDawShell(handle) {
-  const header = mountProjectHeader(handle.header, {
-    strips: handle.strips,
-    instrument: null,
-  });
-  const transport = mountTransportBar(handle.transport);
+/** Wires every mountDawShell() mount point: header, playing surface, mixer strips, routing
+ *  graph, arrangement, automation lanes — and holds the track lifecycle: add, instrument
+ *  assignment, remove. A track's channel, strip and graph node belong to the track and
+ *  survive an instrument swap; only the instance is torn down and rebuilt. */
+export function wireDawShell(handle, opts = {}) {
+  const header = mountProjectHeader(handle.header, { instrument: null });
   const surface = mountPlayingSurface(handle.playingSurface);
 
+  // the strip head's instrument picker — the same list and hook the lane head uses
+  const stripPicker = {
+    instrumentOptions: INSTRUMENT_OPTIONS,
+    onAssignInstrument: (id, type) => assignInstrument(id, type),
+  };
+
   // master plus one strip per live track — boot is zero tracks, so master alone
-  const mixer = createStrips(ctx, tracks.all.map((t) => ({ id: t.id, label: t.name || t.id })));
+  const mixer = createStrips(ctx, tracks.all.map((t) => ({
+    id: t.id,
+    label: t.name || t.id,
+    instrumentType: t.instrumentType || null,
+    ...stripPicker,
+  })));
   for (const [id, el] of Object.entries(handle.strips)) {
     mixer.strips[id]?.mountCompact(el);
   }
@@ -662,20 +640,68 @@ export function wireDawShell(handle) {
 
   const automationRack = createAutomationRack();
 
-  const arrangement = new Arrangement(handle.arrangement);
+  // opts.laneSurfaces false: lanes carry no surface slot and no surface picker
+  const arrangement = new Arrangement(handle.arrangement, undefined, undefined, undefined, {
+    laneSurfaces: opts.laneSurfaces,
+  });
   arrangement.mount();
+
+  // the one scheduler for melodic region playback — reads regions + tracks off the clock's
+  // own tick pass, schedules nothing of its own
+  const rollScheduler = createRollScheduler();
 
   /** track id -> live instrument instance. The store holds the same reference; this is what
    *  a swap and a removal read to dispose. */
   const instruments = new Map();
 
-  /** One strip slot in the mixer rail, ahead of master. */
+  /** track id -> that track's note bus. One per track, born with the track, bound to the
+   *  instrument on assignment, disposed on removal. Surfaces mount against these. */
+  const buses = new Map();
+
+  /** The track's bus, creating it if this track has none yet. */
+  function busFor(id) {
+    let bus = buses.get(id);
+    if (!bus) {
+      bus = createTrackBus({
+        id,
+        instrument: instruments.get(id) || null,
+        armed: Boolean(tracks.get(id)?.armed),
+      });
+      buses.set(id, bus);
+    }
+    return bus;
+  }
+
+  /** Drops the track's bus. Releases held notes and every subscriber. */
+  function disposeBus(id) {
+    const bus = buses.get(id);
+    if (!bus) return false;
+    buses.delete(id);
+    bus.dispose();
+    return true;
+  }
+
+  // MIDI fan-out. The hardware reaches the `input` singleton and only the singleton; these
+  // two listeners are the whole bridge to the tracks. Every bus is offered the note and
+  // each one's own arm gate decides — armed tracks layer, unarmed tracks drop it.
+  const offMidiOn = input.on('noteon', (e) => {
+    if (e?.source !== 'midi') return;
+    for (const bus of buses.values()) {
+      bus.emitNoteOn({ note: e.note, velocity: e.velocity, source: 'midi' });
+    }
+  });
+  const offMidiOff = input.on('noteoff', (e) => {
+    if (e?.source !== 'midi') return;
+    for (const bus of buses.values()) bus.emitNoteOff({ note: e.note, source: 'midi' });
+  });
+
+  /** One strip slot in the scrollable strip row. Master lives outside it. */
   function addStripSlot(id) {
     const el = document.createElement('div');
     el.className = 'cbdaw-daw-shell__strip';
     el.dataset.mount = MOUNTS.strip(id);
     el.dataset.channel = id;
-    handle.mixer.insertBefore(el, handle.strips.master || null);
+    handle.stripsScroll.appendChild(el);
     handle.strips[id] = el;
     return el;
   }
@@ -688,12 +714,17 @@ export function wireDawShell(handle) {
   }
 
   mountAutomation('master');
-  for (const t of tracks.all) mountAutomation(t.id);
+  for (const t of tracks.all) {
+    mountAutomation(t.id);
+    arrangement.bindLaneBus(t.id, busFor(t.id));
+  }
 
-  /** Releases the track's instrument instance. The channel, strip and graph node stay. */
+  /** Releases the track's instrument instance. The bus, channel, strip and graph node stay;
+   *  the bus is unbound first so anything held releases through a live instrument. */
   function disposeInstrument(id) {
     const instance = instruments.get(id);
     if (!instance) return false;
+    buses.get(id)?.bindInstrument(null);
     instruments.delete(id);
     arrangement.bindLaneInstrument(id, null);
     instance.dispose();
@@ -710,24 +741,30 @@ export function wireDawShell(handle) {
       instance = new Ctor(ctx, strip.input);
       instruments.set(id, instance);
     }
+    if (strip) strip.instrumentType = Ctor ? type : null;
     tracks.setInstrumentType(id, Ctor ? type : null);
     tracks.setInstrument(id, instance);
     arrangement.bindLaneInstrument(id, instance);
+    busFor(id).bindInstrument(instance);
     return instance;
   }
   arrangement.onAssignInstrument = assignInstrument;
 
-  // strip -> graph node -> automation. The track is born empty; no instrument is built here.
+  // strip -> graph node -> automation -> note bus -> lane. The track is born empty; no
+  // instrument is built here, so the bus is born unbound and silent. The lane is already
+  // built by the time this runs — the arrangement subscribes to the track store first.
   function onTrackAdd(t) {
     const slot = addStripSlot(t.id);
-    mixer.add({ id: t.id, label: t.name || t.id })?.mountCompact(slot);
+    mixer.add({ id: t.id, label: t.name || t.id, ...stripPicker })?.mountCompact(slot);
     graph.addChannel(t.id);
     mountAutomation(t.id);
+    arrangement.bindLaneBus(t.id, busFor(t.id));
   }
 
-  // the add flow backwards: regions, instrument, graph node, automation lanes, strip, slot
+  // the add flow backwards: regions, bus, instrument, graph node, automation lanes, strip, slot
   function onTrackRemove(t) {
     regions.clear(t.id);
+    disposeBus(t.id);
     disposeInstrument(t.id);
     graph.removeChannel(t.id);
     automationRack.remove(t.id);
@@ -751,13 +788,15 @@ export function wireDawShell(handle) {
 
   return {
     header,
-    transport,
     surface,
     mixer,
     graph,
     arrangement,
     automationRack,
     instruments,
+    buses,
+    /** The track's note bus — what a surface is handed instead of the input singleton. */
+    trackBus: (id) => buses.get(id) || null,
     addTrack: () => tracks.add(),
     assignInstrument,
     removeTrack: (id) => tracks.remove(id),
@@ -765,14 +804,19 @@ export function wireDawShell(handle) {
       offAdd();
       offRemove();
       offUpdate();
+      offMidiOn();
+      offMidiOff();
+      rollScheduler.dispose();
       arrangement.onAssignInstrument = null;
+      // arrangement first: its lane surfaces release held notes through live buses and
+      // live instruments, so nothing is stranded sounding
+      arrangement.dispose();
+      for (const id of [...buses.keys()]) disposeBus(id);
       for (const id of [...instruments.keys()]) disposeInstrument(id);
       automationRack.dispose();
-      arrangement.dispose();
       graph.dispose();
       mixer.dispose();
       surface.dispose();
-      transport.dispose();
       header.dispose();
     },
   };

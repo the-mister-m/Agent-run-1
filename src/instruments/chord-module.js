@@ -29,7 +29,7 @@
 // default.
 // =========================================================================================
 
-import { voicePool, governor } from '../core/audio.js';
+import { voicePool, governor, createVoiceOut } from '../core/audio.js';
 import { state as sharedState } from '../core/state.js';
 
 import {
@@ -762,7 +762,7 @@ export default class ChordModule {
       }
     }
 
-    const voice = new Voice(this.ctx, this._mixGain, VOICE_COST);
+    const voice = new Voice(this.ctx, createVoiceOut(ChordModule.id, this._mixGain), VOICE_COST);
     voice.onFree = () => {
       this._voices.delete(voice);
       const set = this._noteToVoices.get(note);

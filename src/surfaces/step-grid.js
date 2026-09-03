@@ -352,7 +352,7 @@ const STYLE_TEXT = `
 }
 .cbdaw-grid[data-variant="compact"] .cbdaw-grid__ruler-cell { font-size: var(--fs-micro); padding: var(--sp-hair) 0; }
 .cbdaw-grid__ruler-cell[data-beat="true"] { color: var(--grid-text); font-weight: var(--w-bold); }
-.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell { font-size: 18px; padding: var(--sp-2) 0; }
+.cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell { font-size: var(--fs-2xl); padding: var(--sp-2) 0; }
 .cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
 
 .cbdaw-grid__cell {

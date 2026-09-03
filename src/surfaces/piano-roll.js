@@ -247,8 +247,8 @@ let liveInstances = 0;
 
 const STYLE_TEXT = `
 .cbdaw-roll {
-  --roll-row-h: 18px;
-  --roll-gutter: 62px;
+  --roll-row-h: var(--sp-9);
+  --roll-gutter: var(--sp-31);
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
   gap: var(--sp-3);
@@ -263,8 +263,8 @@ const STYLE_TEXT = `
   user-select: var(--usel-none);
   -webkit-user-select: var(--usel-none);
 }
-.cbdaw-roll[data-variant="compact"] { --roll-row-h: 11px; --roll-gutter: 44px; }
-.cbdaw-roll[data-variant="expanded"] { --roll-row-h: 24px; --roll-gutter: 78px; }
+.cbdaw-roll[data-variant="compact"] { --roll-row-h: var(--sp-6); --roll-gutter: var(--sp-23); }
+.cbdaw-roll[data-variant="expanded"] { --roll-row-h: var(--sp-12); --roll-gutter: var(--sp-39); }
 
 .cbdaw-roll__toolbar {
   display: var(--disp-flex);
@@ -329,7 +329,7 @@ const STYLE_TEXT = `
   flex: var(--flex-1-1-0);
   display: var(--disp-flex);
   gap: var(--sp-hair);
-  border-left: 2px solid var(--line);
+  border-left: calc(var(--bw) * 2) solid var(--line);
   padding-left: var(--sp-hair);
 }
 .cbdaw-roll__bar:first-child { border-left: var(--none); padding-left: var(--sp-0); }
@@ -351,7 +351,7 @@ const STYLE_TEXT = `
   border-radius: var(--r-cell);
 }
 .cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell { font-size: var(--fs-micro); padding: var(--sp-hair) 0; }
-.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell { font-size: 18px; padding: var(--sp-2) 0; }
+.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell { font-size: var(--fs-2xl); padding: var(--sp-2) 0; }
 .cbdaw-roll__ruler-cell[data-beat="true"] { color: var(--text); font-weight: var(--w-bold); }
 .cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
 /* SEAT QUESTION 4 — "note length must relate to the ruler." While a note is drawn or
@@ -379,7 +379,7 @@ const STYLE_TEXT = `
   display: var(--disp-flex);
   align-items: var(--align-center);
   justify-content: var(--justify-flex-end);
-  gap: 3px;
+  gap: var(--sp-2);
   padding-right: var(--sp-2h);
   font-size: var(--fs-xs);
   line-height: var(--lh-none);

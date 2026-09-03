@@ -129,7 +129,8 @@ export function createTrackStore() {
     add({ name = null, color = null } = {}) {
       const id = nextId();
       const frozen = commit({
-        id, name, instrumentType: null, instrument: null, kind: null, color,
+        id, name, instrumentType: null, instrument: null, kind: null, surfaceType: null,
+        armed: false, color,
       }, 'add');
       order.push(id);
       return frozen;
@@ -154,6 +155,29 @@ export function createTrackStore() {
       if (!t) return null;
       const type = instrumentType ?? null;
       return commit({ ...t, instrumentType: type, kind: deriveKind(type) }, 'update');
+    },
+
+    /** Write `surfaceType` — which playing surface the track's lane mounts, or null for
+     *  none. Derives nothing and constructs nothing. */
+    setSurfaceType(id, surfaceType) {
+      const t = tracks.get(id);
+      if (!t) return null;
+      return commit({ ...t, surfaceType: surfaceType ?? null }, 'update');
+    },
+
+    /** Write `armed` — whether this track hears shared physical input. Any number of tracks
+     *  may be armed at once. Derives nothing and gates nothing itself. */
+    setArmed(id, armed) {
+      const t = tracks.get(id);
+      if (!t) return null;
+      const on = Boolean(armed);
+      if (t.armed === on) return t;
+      return commit({ ...t, armed: on }, 'update');
+    },
+
+    /** Ids of every armed track, in list order. */
+    get armedIds() {
+      return order.filter((id) => tracks.get(id)?.armed);
     },
 
     /** Store the live instance, or null to clear it. Never constructs, never disposes. */

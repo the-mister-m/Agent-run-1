@@ -24,7 +24,7 @@
  * ui/tokens.css; never constructs an AudioContext, never touches ctx.destination.
  */
 
-import { voicePool, governor } from '../core/audio.js';
+import { voicePool, governor, createVoiceOut } from '../core/audio.js';
 // The pads and the home-row keys EMIT on the bus rather than calling noteOn themselves, so
 // every gesture takes one path and the host page's monitor is the only caller. A host that
 // mounts this instrument must wire input -> noteOn or the pads make no sound.
@@ -710,7 +710,7 @@ export default class DrumSynth {
     }
 
     const build = BUILDERS[def.family];
-    const built = build(this.ctx, this._masterGain, this._params[idx], v, t0, getNoiseBuffer(this.ctx));
+    const built = build(this.ctx, createVoiceOut(DrumSynth.id, this._masterGain), this._params[idx], v, t0, getNoiseBuffer(this.ctx));
     const voice = new Voice(this.ctx, built, cost);
     voice.onFree = () => {
       this._voices.delete(voice);

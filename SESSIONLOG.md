@@ -1,10 +1,20 @@
-Updated 2026-09-01 — Closer, devsplash close
+Updated 2026-09-02 — Closer, signal chain close
 
 # SESSIONLOG — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Append-only. Work done and decisions made.
 
 ## SESSION INDEX
 (one line per session, newest first: date · name · 5–10 word summary)
+- 2026-09-03 · subagent, DAW window template · `tools/daw-window.html` built to SPEC-daw-window: frame + collapse chips + three draggable borders, bottom third radio-switches All 7 Strips / Piano Roll / Node Graph, strips hand off between left column and bottom third because `Strip.mountCompact()` self-unmounts, no `/src` edit, no browser run, [receipt](docs/reports/receipt-daw-window-template.md) · [review](docs/reports/2026-09-03-review-daw-window-template.md)
+- 2026-09-02 · subagent, devbar token attribution + collapse · all 28 devbar entries mapped to own/shared/global tokens, GLOBAL corrected to 41 (not 45), FRAME's real file is `daw-shell.js` not `shell.js`, dev-splash.html devbar rebuilt as collapsible rows with tier chips + count badges, [receipt](docs/reports/receipt-devbar-token-attribution.md)
+- 2026-09-02 · Closer, signal chain close · INDEX roll-scheduler entry corrected for job 3b, mixer-rack entry added, TODO carries the four open items, MEMORY warm start replaced, [receipt](docs/reports/2026-09-02-closer-signal-chain.md)
+- 2026-09-02 · Goto job 5, armed input routing · arm moved onto the track record and QWERTY/MIDI now gate on it per track and layer across armed tracks, MIDI fanned out from the input singleton, no surface file needed changing, job 1's harness left red on purpose, no browser run, [receipt](docs/reports/receipt-job5-armed-input-routing.md)
+- 2026-09-02 · tokenize seat, surface geometry · 6 px literals in piano-roll.js/step-grid.js/shell.js mapped to `--sp-*`/`--fs-*`, `:332` border-left tied to `--bw`, 3 off-grid values left raw, no browser run, [receipt](docs/reports/2026-09-02-tokenize-surface-geometry.md)
+- 2026-09-02 · Goto job 2, surface picker · every lane now picks its own playing surface and mounts it under its region row against that track's bus, audio unlock added on the mount slot, no browser run, [receipt](docs/reports/receipt-job2-surface-picker.md)
+- 2026-09-02 · Goto job 1, per-track note bus · `core/track-bus.js` built and wired into the `daw-shell.js` track lifecycle, three tracks no longer sound at once, 25-assertion harness passes, no browser run, [receipt](docs/reports/receipt-job1-track-bus.md)
+- 2026-09-02 · Goto job 3b, hanging noteOff · roll-scheduler fires noteOff at noteOn time instead of a second window check, loop wrap can no longer eat it, [receipt](docs/reports/receipt-job3b-hanging-noteoff.md)
+- 2026-09-02 · Goto job 4, mixer rack layout · strip width fixed, mixer rack now scrolls horizontally, master pinned outside the scroll, [receipt](docs/reports/receipt-job4-mixer-rack.md)
+- 2026-09-02 · Goto job 3, roll scheduler · `core/roll-scheduler.js` built, wired into `daw-shell.js`, melodic regions now scheduled, [receipt](docs/reports/receipt-job3-roll-scheduler.md)
 - 2026-09-02 · session agent, unlimited tracks + Phase D · six jobs run, SPEC §7 rewritten with seven Brandon rulings, §10 added, six agent judgment calls flagged, nothing browser-verified, [review](docs/reports/2026-09-01-session-review-unlimited-tracks.md)
 - 2026-09-01 · unlimited-tracks job 6/6, Phase D region editor · double-click opens PianoRoll/StepGrid, close writes back, `regions.js` notes made opaque, [receipt](docs/reports/receipt-region-editor.md)
 - 2026-09-01 · unlimited-tracks job 4/6, integration · add/assign/remove wired end to end in `wireDawShell()`, +TRACK and per-lane × controls, ledger rows 32-34 closed, [receipt](docs/reports/receipt-unlimited-tracks-integration.md)
@@ -1728,3 +1738,31 @@ lines, `tools/patch-synth.html` new, one line appended to `src/ui/tokens.css`.
 - LINKS: [receipt-mixer-live-list.md](docs/reports/receipt-mixer-live-list.md) ·
   [src/mixer/strip.js](src/mixer/strip.js) · [src/mixer/graph.js](src/mixer/graph.js) ·
   [src/mixer/automation.js](src/mixer/automation.js)
+
+## 2026-09-02 (14:22:25Z–15:42:02Z) — `tools/dev-test.html` — Chromebook load test
+
+- Brandon asked for an HTML tool testing a Chromebook's ceiling: voices, effects, channels
+  at once. Built standalone, zero imports, `file://`-openable.
+- Shape settled across four passes of Brandon's corrections, not one spec: number inputs
+  with arrows everywhere (no sliders), delay + reverb get parameters, comp + EQ get counts
+  only, visuals and chrome get the same precision, 4-bar roll + 12-key QWERTY on a
+  collapsible row.
+- Eight meters, each a sparkline: drift jumps, drift ms, output latency, audio load
+  (`ctx.renderCapacity`, feature-detected, flag-gated in Chrome), FPS, long tasks, JS heap,
+  live node count. Every node created through `mk()` and torn down through `kill()`, so the
+  node meter is a count and not a model.
+- "Dropouts" renamed "Drift jumps" in the UI — no browser exposes real dropout events.
+  Labelled as what it measures.
+- **THE FINDING:** the tool's voice normalization, written without reading `core/audio.js`,
+  landed on the same formula the DAW already ships — `gain(n) = n ** -exponent`. Different
+  exponent: `-0.5` here vs `-0.8` shipped. Brandon compared by ear and called `-0.5` better.
+  Three variables uncontrolled (exponent, what `n` counts, smoothing) — not isolated,
+  not measured.
+- Correction logged: I told Brandon the DAW had no normalization. Wrong — I greped
+  `createChannel` and stopped before [src/core/audio.js:231](src/core/audio.js#L231).
+- Two planned greps (`devices/eq.js` band count, `mixer/graph.js:368` channel cost) dropped
+  after Brandon asked whether they were actually needed. They weren't.
+- **Never run.** No browser, no Chromebook. Nothing in `src/` edited.
+- LINKS: [tools/dev-test.html](tools/dev-test.html) ·
+  [receipt-dev-test-load-tool.md](docs/reports/receipt-dev-test-load-tool.md) ·
+  [src/core/audio.js:192-259](src/core/audio.js#L192-L259)

@@ -104,13 +104,28 @@
     padding: var(--sp-2) 0 180px;
   }
   .dsp-rail__group {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1h);
+    width: 100%;
+    background: var(--color-transparent);
+    border: 0;
     padding: var(--sp-4) var(--sp-4) var(--sp-1);
+    font: inherit;
     font-size: var(--fs-micro);
     letter-spacing: var(--track-label);
     text-transform: var(--tt-label);
     color: var(--accent);
+    cursor: var(--cur-pointer);
   }
+  .dsp-rail__group-arrow {
+    display: inline-block;
+    transition: transform var(--dur-fast, .1s) var(--ease, ease);
+  }
+  .dsp-rail__group[data-open="true"] .dsp-rail__group-arrow { transform: rotate(90deg); }
+  .dsp-rail__row { display: flex; align-items: stretch; }
   .dsp-rail__item {
+    flex: 1 1 auto;
     display: block;
     width: 100%;
     text-align: var(--canvas-textalign-left);
@@ -129,6 +144,55 @@
     border-left-color: var(--accent);
     color: var(--accent);
   }
+  .dsp-rail__disclose {
+    flex: 0 0 auto;
+    background: var(--color-transparent);
+    border: 0;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: var(--fs-micro);
+    padding: var(--sp-1h) var(--sp-2);
+    cursor: var(--cur-pointer);
+  }
+  .dsp-rail__disclose:hover { color: var(--text); }
+  .dsp-rail__badge {
+    flex: 0 0 auto;
+    align-self: center;
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    color: var(--text-dim);
+    padding: 0 var(--sp-2);
+    white-space: nowrap;
+  }
+  .dsp-rail__detail {
+    padding: var(--sp-1) var(--sp-4) var(--sp-3) var(--sp-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1h);
+  }
+  .dsp-rail__tier-label {
+    font-size: var(--fs-micro);
+    letter-spacing: var(--track-label);
+    text-transform: var(--tt-label);
+    color: var(--text-dim);
+  }
+  .dsp-rail__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1h);
+  }
+  .dsp-rail__chip {
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    border: var(--bw) solid var(--line);
+    border-radius: var(--r-sm);
+    padding: var(--sp-hair, 1px) var(--sp-1h);
+    color: var(--text);
+    background: var(--panel);
+  }
+  .dsp-rail__chip--own { border-color: var(--accent); color: var(--accent); font-weight: var(--w-bold); }
+  .dsp-rail__chip--shared { color: var(--text); }
+  .dsp-rail__chip--global { color: var(--text-dim); opacity: var(--op-faint); }
 
   .dsp-stage {
     flex: 1 1 auto;
@@ -179,7 +243,9 @@
   .dsp-strip-row {
     display: flex;
     gap: var(--sp-4);
-    align-items: flex-start;
+    align-items: stretch;
+    height: 100%;
+    min-height: 220px;
   }
   .dsp-strip-row > div { flex: 0 0 auto; width: 132px; }
   .dsp-meter-box { height: 260px; display: flex; }
@@ -304,7 +370,36 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
+    scrollbar-color: var(--line) var(--bg);
   }
+  .dsp-slot__body::-webkit-scrollbar { width: 10px; height: 10px; }
+  .dsp-slot__body::-webkit-scrollbar-track { background: var(--bg); }
+  .dsp-slot__body::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border: 2px solid var(--bg);
+    border-radius: var(--r-cell);
+  }
+  .dsp-slot__body::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+  .dsp-slot__body::-webkit-scrollbar-corner { background: var(--bg); }
+  /* zoom target. height:100% keeps piece-level height:100% resolvable;
+     min-width lets wide content push past the panel so the bar can reach it */
+  .dsp-slot__zoom {
+    height: 100%;
+    min-width: min-content;
+  }
+  .dsp-slot__zlabel {
+    flex: 0 0 auto;
+    min-width: 4ch;
+    text-align: center;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: var(--fs-micro);
+    background: var(--color-transparent);
+    border: 0;
+    padding: 0;
+    cursor: var(--cur-pointer);
+  }
+  .dsp-slot__zlabel:hover { color: var(--accent); }
   .dsp-slot__empty {
     height: 100%;
     display: flex;
@@ -498,7 +593,7 @@ import { input } from '../src/core/input.js';
 import { createStrips } from '../src/mixer/strip.js';
 import Graph from '../src/mixer/graph.js';
 import { createChannelAutomation } from '../src/mixer/automation.js';
-import { mountProjectHeader, mountTransportBar, mountPlayingSurface }
+import { mountProjectHeader, mountPlayingSurface }
   from '../src/ui/daw-shell.js';
 import Keyboard from '../src/surfaces/keyboard.js';
 import DiatonicKeys from '../src/surfaces/diatonic-keys.js';
@@ -820,11 +915,8 @@ function visPiece(id, label, Ctor) {
 
 const CATALOG = [
   framePiece('header', 'Project Header',
-    'mountProjectHeader(el, { strips: MIXER.strips })',
-    (el) => mountProjectHeader(el, { strips: mixer.strips })),
-  framePiece('transport', 'Transport Bar',
-    'mountTransportBar(el)',
-    (el) => mountTransportBar(el)),
+    'mountProjectHeader(el)',
+    (el) => mountProjectHeader(el)),
   framePiece('surface-block', 'Playing Surface Block',
     'mountPlayingSurface(el)',
     (el) => mountPlayingSurface(el)),
@@ -864,6 +956,7 @@ const CATALOG = [
       const strip = mixer.strips[ch];
       const box = document.createElement('div');
       box.style.width = '132px';
+      box.style.height = '100%';
       el.appendChild(box);
       strip.mountCompact(box);
       return () => { strip.unmount(); box.remove(); };
@@ -950,6 +1043,43 @@ const CATALOG_BY_ID = new Map(CATALOG.map((e) => [e.id, e]));
 
 const GROUP_ORDER = ['FRAME', 'SURFACES', 'SEQUENCING', 'MIXER', 'DEVICES', 'INSTRUMENTS', 'VIS'];
 
+// per-entry var(--…) attribution, from docs/reports/receipt-devbar-token-attribution.md.
+// own = exclusive to this entry's group. shared = used by 2-4 of the 7 groups.
+// global = used by 5+ of the 7 groups (the 41-token GLOBAL set in that receipt).
+const TOKEN_ATTRIBUTION = {
+  "header": { own: ["--align-baseline", "--dropdown-offset", "--flex-0-1-auto", "--flex-1-1-240", "--grid-1-115", "--grid-minmax-0-1fr", "--ls-none", "--op-mid", "--shadow-lifted", "--shell-gap", "--sp-17", "--sp-33", "--tr-width", "--track-tight", "--vh-100", "--ws-prewrap", "--z-popover"], shared: ["--accent", "--align-flex-start", "--align-start", "--auto", "--cur-not-allowed", "--disp-grid", "--disp-none", "--flex-1-1-auto", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-md", "--fs-xl", "--justify-space-between", "--lh-base", "--meter-hot", "--meter-ok", "--op-dim", "--pct-0", "--r-panel", "--r-pill", "--shadow-raised", "--sp-13", "--sp-15", "--sp-2h", "--sp-3h", "--sp-60", "--sp-7", "--sp-8", "--ta-left", "--track-label", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "transport": { own: ["--align-baseline", "--dropdown-offset", "--flex-0-1-auto", "--flex-1-1-240", "--grid-1-115", "--grid-minmax-0-1fr", "--ls-none", "--op-mid", "--shadow-lifted", "--shell-gap", "--sp-17", "--sp-33", "--tr-width", "--track-tight", "--vh-100", "--ws-prewrap", "--z-popover"], shared: ["--accent", "--align-flex-start", "--align-start", "--auto", "--cur-not-allowed", "--disp-grid", "--disp-none", "--flex-1-1-auto", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-md", "--fs-xl", "--justify-space-between", "--lh-base", "--meter-hot", "--meter-ok", "--op-dim", "--pct-0", "--r-panel", "--r-pill", "--shadow-raised", "--sp-13", "--sp-15", "--sp-2h", "--sp-3h", "--sp-60", "--sp-7", "--sp-8", "--ta-left", "--track-label", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "surface-block": { own: ["--align-baseline", "--dropdown-offset", "--flex-0-1-auto", "--flex-1-1-240", "--grid-1-115", "--grid-minmax-0-1fr", "--ls-none", "--op-mid", "--shadow-lifted", "--shell-gap", "--sp-17", "--sp-33", "--tr-width", "--track-tight", "--vh-100", "--ws-prewrap", "--z-popover"], shared: ["--accent", "--align-flex-start", "--align-start", "--auto", "--cur-not-allowed", "--disp-grid", "--disp-none", "--flex-1-1-auto", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-md", "--fs-xl", "--justify-space-between", "--lh-base", "--meter-hot", "--meter-ok", "--op-dim", "--pct-0", "--r-panel", "--r-pill", "--shadow-raised", "--sp-13", "--sp-15", "--sp-2h", "--sp-3h", "--sp-60", "--sp-7", "--sp-8", "--ta-left", "--track-label", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "keyboard": { own: ["--kbd-accent", "--kbd-dim", "--kbd-line", "--kbd-text", "--key-border", "--pct-62"], shared: ["--accent", "--align-flex-end", "--flexwrap-wrap", "--fs-base", "--fs-lg", "--fs-md", "--fs-xs", "--justify-center", "--sp-13", "--sp-15", "--sp-28", "--sp-7", "--sp-84", "--tr-background", "--z-raise-1", "--z-raise-2"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med", "--warn"] },
+  "diatonic": { own: ["--deg-altered", "--deg-aug", "--deg-dim", "--deg-major", "--deg-minor", "--filter-brighten", "--tr-filter"], shared: ["--accent", "--cur-default", "--flex-1-1-0", "--flexwrap-wrap", "--fs-lg", "--fs-md", "--fs-xs", "--justify-flex-end", "--lh-none", "--op-faint", "--sp-13", "--sp-15", "--sp-28", "--sp-7", "--sp-8", "--sp-84", "--sp-9"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--panel", "--pct-100", "--pe-none", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med"] },
+  "circle": { own: ["--dominant-baseline-central", "--op-full", "--sp-95", "--text-anchor-middle", "--tr-opacity-stroke", "--w-heavy"], shared: ["--accent", "--auto", "--disp-none", "--flexwrap-wrap", "--fs-md", "--justify-center", "--op-soft", "--ov-visible", "--sp-230", "--stroke-dash"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--panel", "--pct-100", "--pe-none", "--r-body", "--r-ctl", "--sp-0", "--sp-2", "--sp-4", "--sp-5", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med"] },
+  "comp-builder": { own: ["--aspect-square", "--cb-cell", "--font-style-italic", "--fs-chord", "--fs-em-62", "--fs-numeral", "--grid-1fr", "--grid-60-140", "--justify-flex-start", "--lh-loose", "--r-chip", "--ring-off", "--sp-4h", "--sp-5h", "--sp-7h", "--sp-em-14", "--sp-em-21", "--track-mid"], shared: ["--accent", "--align-flex-end", "--align-start", "--cur-default", "--cur-grab", "--cur-grabbing", "--disp-grid", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-lg", "--fs-md", "--fs-tiny", "--fs-xs", "--justify-center", "--justify-flex-end", "--lh-base", "--lh-none", "--line-dashed", "--op-faint", "--sp-20", "--sp-2h", "--sp-3h", "--sp-9", "--sp-em-36", "--sp-hair"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--panel", "--pct-100", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--ta-center", "--text", "--text-dim", "--w-bold", "--w-med", "--warn"] },
+  "piano-roll": { own: ["--align-stretch", "--bw-3", "--bw-5", "--fs-2xl", "--fs-3xl", "--line-dotted", "--line-double", "--line-groove", "--note-deg", "--roll-gutter", "--roll-row-h", "--row-deg", "--sp-23", "--sp-31", "--sp-ch-4", "--td-underline", "--wc-left"], shared: ["--accent", "--cur-ew-resize", "--cur-grab", "--cur-ns-resize", "--flex-0-0-auto", "--flex-1-1-0", "--flex-1-1-auto", "--flexwrap-wrap", "--fs-base", "--fs-lg", "--fs-micro", "--fs-xs", "--justify-flex-end", "--lh-none", "--line-dashed", "--line-solid", "--op-soft", "--pct-0", "--pe-auto", "--sp-12", "--sp-2h", "--sp-39", "--sp-9", "--sp-hair", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--none", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "step-grid": { own: ["--align-stretch", "--fs-2xl", "--fs-3xl", "--grid-accent", "--grid-bg", "--grid-dim", "--grid-line", "--grid-panel", "--grid-text", "--grid-warn", "--sp-23", "--sp-37", "--wc-left"], shared: ["--accent", "--bw-2", "--flex-0-0-auto", "--flex-1-1-0", "--flex-1-1-auto", "--flexwrap-wrap", "--fs-base", "--fs-micro", "--fs-tiny", "--fs-xs", "--lh-none", "--op-soft", "--pct-0", "--sp-13", "--sp-20", "--sp-7", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--none", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "arrangement": { own: ["--arm-on", "--arr-bar-w", "--arr-zoom", "--clip-fill", "--lane-head", "--lane-row", "--lane-row-alt", "--loop-region", "--playhead-line", "--pos-sticky", "--punch-region", "--ruler-ground", "--ruler-tick-bar", "--ruler-tick-beat", "--strip-sel", "--z-sticky"], shared: ["--btn-face", "--bw-2", "--cur-ew-resize", "--cur-grab", "--cur-grabbing", "--disp-grid", "--disp-none", "--flex-0-0-auto", "--flex-1-1-0", "--fs-base", "--fs-micro", "--fs-xs", "--justify-center", "--lh-none", "--op-faint", "--op-soft", "--popout-ground", "--raise", "--recess", "--sp-10", "--sp-14", "--sp-230", "--sp-28", "--sp-60", "--sp-84", "--ws-nowrap", "--z-raise-1", "--z-raise-2"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--ov-hidden", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none"] },
+  "strip": { own: ["--fader-fill", "--fader-thumb", "--fader-track", "--mute-on", "--pan-center", "--pan-thumb", "--pan-track", "--slot-empty", "--slot-face", "--slot-route", "--solo-on"], shared: ["--cur-default", "--cur-ew-resize", "--cur-ns-resize", "--flex-0-0-auto", "--flex-1", "--fs-micro", "--fs-tiny", "--raise", "--sp-30", "--sp-9", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--ov-hidden", "--pct-100", "--pos-absolute", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strips-all": { own: ["--fader-fill", "--fader-thumb", "--fader-track", "--mute-on", "--pan-center", "--pan-thumb", "--pan-track", "--slot-empty", "--slot-face", "--slot-route", "--solo-on"], shared: ["--cur-default", "--cur-ew-resize", "--cur-ns-resize", "--flex-0-0-auto", "--flex-1", "--fs-micro", "--fs-tiny", "--raise", "--sp-30", "--sp-9", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--ov-hidden", "--pct-100", "--pos-absolute", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "graph": { own: ["--dur-med", "--stroke-med", "--tr-transform"], shared: ["--auto", "--btn-face", "--cable-drag", "--cur-grab", "--cur-grabbing", "--ease", "--edge-audio", "--edge-control", "--edge-hover", "--edge-refused", "--flex-0-0-auto", "--flex-1", "--fs-micro", "--graph-grid", "--graph-ground", "--justify-center", "--justify-space-between", "--lh-none", "--node-border", "--node-dimmed", "--node-dragging", "--node-fill", "--node-head", "--node-selected", "--op-dim", "--ov-visible", "--pe-auto", "--port-active", "--port-in", "--port-out", "--r-pill", "--shadow-raised", "--sp-60", "--sp-8", "--sp-hair", "--stroke-bold", "--stroke-dash", "--to-ellipsis", "--tr-stroke", "--ws-nowrap", "--z-drag", "--z-raise-1"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-5", "--sp-6", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.gain": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.pan": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.mute": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.solo": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "gate": { own: ["--bypass-off", "--bypass-on", "--device-head", "--gate-closed", "--gate-open", "--gate-threshold", "--knob-fill"], shared: ["--flex-1", "--fs-xs", "--r-pill", "--sp-30", "--sp-em-36", "--ta-right", "--tr-background"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--r-body", "--r-ctl", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim"] },
+  "compressor": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill"], shared: ["--flex-1", "--fs-xs", "--sp-30", "--sp-em-36", "--ta-right"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--pct-100", "--r-body", "--r-ctl", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim"] },
+  "eq": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-pointer", "--knob-track", "--sp-em-46"], shared: ["--bw-2", "--cur-ew-resize", "--flex-0-0-auto", "--flex-1", "--fs-md", "--fs-xs", "--justify-space-between", "--pct-0", "--popout-ground", "--r-pill", "--sp-em-16", "--ta-right", "--tr-background", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med"] },
+  "reverb": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-track"], shared: ["--fs-xs", "--popout-ground", "--sp-16", "--tr-color"], global: ["--bw", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--text", "--text-dim", "--w-med"] },
+  "delay": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-track"], shared: ["--fs-xs", "--popout-ground", "--sp-16", "--tr-color"], global: ["--bw", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--text", "--text-dim", "--w-med"] },
+  "wave-synth": { own: ["--anim-pulse", "--color-current", "--content-empty", "--r-lg", "--r-xl", "--scale-pulse-peak", "--scale-pulse-rest", "--sp-11", "--sp-65", "--sp-em-17", "--sp-em-35", "--stroke-heavy", "--z-behind"], shared: ["--accent", "--disp-none", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-micro", "--fs-xl", "--fs-xs", "--lh-none", "--op-faint", "--op-soft", "--sp-10", "--sp-12", "--sp-13", "--sp-16", "--sp-20", "--sp-30", "--sp-39", "--sp-7", "--sp-8", "--sp-9", "--sp-em-16", "--sp-em-36", "--ta-right", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--r-sm", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--w-bold"] },
+  "overtone-synth": { own: ["--tr-shadow"], shared: ["--accent", "--flex-1", "--flexwrap-wrap", "--meter-ok", "--sp-60"], global: ["--align-center", "--box-border-box", "--bw", "--disp-flex", "--flexdir-column", "--font-ui", "--line", "--ov-hidden", "--panel", "--pct-100", "--r-ctl", "--sp-1", "--sp-4", "--sp-5", "--text", "--text-dim"] },
+  "drum-synth": { own: ["--dur-fast", "--fs-em-65", "--fs-em-75", "--fs-em-85", "--grid-repeat4-1fr", "--r-xl", "--sp-18", "--sp-em-38"], shared: ["--accent", "--align-flex-start", "--disp-grid", "--disp-none", "--ease", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-xl", "--justify-center", "--sp-14", "--sp-30", "--sp-7", "--sp-8", "--sp-9", "--sp-em-36", "--ta-right", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--panel", "--pct-100", "--r-body", "--r-ctl", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med"] },
+  "drum-sampler": { own: ["--anim-hit-flash", "--anim-miss-flash", "--fs-em-75", "--fs-em-85", "--grid-repeat4-1fr", "--grid-repeat4-minmax90", "--touch-manipulation"], shared: ["--accent", "--disp-grid", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-xl", "--justify-center", "--line-dashed", "--op-dim", "--sp-16", "--sp-20", "--sp-9", "--track-title"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--panel", "--pct-100", "--pos-relative", "--r-body", "--r-ctl", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim", "--w-bold", "--w-med", "--warn"] },
+  "patch-synth": { own: ["--angle-vertical", "--glow", "--math-group", "--stroke-heavy", "--stroke-semi", "--tr-bg-border"], shared: ["--accent", "--align-flex-end", "--cable-drag", "--cur-ew-resize", "--cur-grab", "--cur-grabbing", "--cur-not-allowed", "--disp-grid", "--disp-none", "--edge-audio", "--edge-control", "--edge-hover", "--edge-refused", "--flex-0-0-auto", "--flex-1-1-0", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-micro", "--fs-xs", "--graph-grid", "--graph-ground", "--justify-space-between", "--lh-none", "--line-solid", "--node-border", "--node-dimmed", "--node-dragging", "--node-fill", "--node-head", "--node-selected", "--op-dim", "--op-faint", "--ov-visible", "--port-active", "--port-in", "--port-out", "--r-panel", "--r-pill", "--raise", "--recess", "--sp-10", "--sp-60", "--sp-hair", "--stroke-bold", "--stroke-dash", "--ta-left", "--to-ellipsis", "--tr-background", "--tr-color", "--tr-stroke", "--track-label", "--track-title", "--tt-label", "--ws-nowrap", "--z-drag", "--z-raise-1", "--z-raise-2"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-ui", "--fs-sm", "--line", "--none", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "spectrum": { own: [], shared: [], global: ["--box-border-box", "--disp-block", "--pct-100", "--pos-relative"] },
+  "scope": { own: [], shared: [], global: ["--box-border-box", "--disp-block", "--pct-100", "--pos-relative"] },
+  "meter": { own: [], shared: [], global: ["--box-border-box", "--disp-block", "--ov-hidden", "--pct-100", "--pos-relative", "--r-cell"] },
+  "gov-meter": { own: [], shared: ["--edge-refused", "--meter-hot"], global: ["--align-center", "--bw", "--disp-flex", "--fs-sm", "--num-tabular", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-5", "--sp-6", "--text", "--text-dim", "--w-bold", "--warn"] },
+};
+
 
 // ---- rig-object occupancy: one place at a time, later mount steals ----------------
 
@@ -987,7 +1117,12 @@ const HOST = document.getElementById('dsp-host');
 const STAGE_TITLE = document.getElementById('dsp-stage-title');
 const STAGE_MAKE = document.getElementById('dsp-stage-make');
 
-let shown = null;   // { entry, channel, teardown, btn }
+let shown = null;   // { entry, channel, teardown }
+
+// which GROUP_ORDER headers are expanded — collapsed by default, opened by selection
+const openGroups = new Set();
+// which entry rows have their token-tier detail expanded — key is `${id}::${channel ?? ''}`
+const openEntries = new Set();
 
 function railRows() {
   const rows = [];
@@ -1002,24 +1137,104 @@ function railRows() {
   return rows;
 }
 
+function entryKey(id, channel) {
+  return `${id}::${channel ?? ''}`;
+}
+
+function chipRow(tier, tokens) {
+  const wrap = document.createElement('div');
+  wrap.className = 'dsp-rail__chips';
+  for (const t of tokens) {
+    const chip = document.createElement('span');
+    chip.className = `dsp-rail__chip dsp-rail__chip--${tier}`;
+    chip.textContent = t;
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
+// OWN first and prominent, SHARED next, GLOBAL last and dimmed — per the brief
+function buildEntryDetail(entry) {
+  const attr = TOKEN_ATTRIBUTION[entry.id];
+  const detail = document.createElement('div');
+  detail.className = 'dsp-rail__detail';
+  if (!attr) {
+    const note = document.createElement('div');
+    note.className = 'dsp-rail__tier-label';
+    note.textContent = 'no token attribution on file';
+    detail.appendChild(note);
+    return detail;
+  }
+  for (const [tier, tierLabel, tokens] of [
+    ['own', 'OWN', attr.own],
+    ['shared', 'SHARED', attr.shared],
+    ['global', 'GLOBAL', attr.global],
+  ]) {
+    if (!tokens.length) continue;
+    const label = document.createElement('div');
+    label.className = 'dsp-rail__tier-label';
+    label.textContent = `${tierLabel} (${tokens.length})`;
+    detail.appendChild(label);
+    detail.appendChild(chipRow(tier, tokens));
+  }
+  return detail;
+}
+
 function buildRail() {
   RAIL.innerHTML = '';
   const rows = railRows();
   for (const group of GROUP_ORDER) {
     const inGroup = rows.filter((r) => r.entry.group === group);
     if (!inGroup.length) continue;
-    const head = document.createElement('div');
+    const groupOpen = openGroups.has(group);
+
+    const head = document.createElement('button');
     head.className = 'dsp-rail__group';
-    head.textContent = group;
+    head.dataset.open = String(groupOpen);
+    const arrow = document.createElement('span');
+    arrow.className = 'dsp-rail__group-arrow';
+    arrow.textContent = '▸';
+    const text = document.createElement('span');
+    text.textContent = group;
+    head.append(arrow, text);
+    head.addEventListener('click', () => {
+      if (openGroups.has(group)) openGroups.delete(group); else openGroups.add(group);
+      buildRail();
+    });
     RAIL.appendChild(head);
+
+    if (!groupOpen) continue;
+
     for (const row of inGroup) {
+      const key = entryKey(row.entry.id, row.channel);
+      const entryOpen = openEntries.has(key);
+
+      const rowWrap = document.createElement('div');
+      rowWrap.className = 'dsp-rail__row';
+
       const btn = document.createElement('button');
       btn.className = 'dsp-rail__item';
       btn.textContent = row.label;
       btn.dataset.pieceId = row.entry.id;
       btn.dataset.channel = row.channel ?? '';
-      btn.addEventListener('click', () => showPiece(row.entry, row.channel, btn));
-      RAIL.appendChild(btn);
+      if (shown && shown.entry.id === row.entry.id && (shown.channel ?? '') === (row.channel ?? '')) {
+        btn.setAttribute('aria-current', 'true');
+      }
+      btn.addEventListener('click', () => showPiece(row.entry, row.channel));
+      rowWrap.appendChild(btn);
+
+      const disclose = document.createElement('button');
+      disclose.className = 'dsp-rail__disclose';
+      disclose.textContent = entryOpen ? '−' : '+';
+      disclose.title = entryOpen ? 'hide tokens' : 'show tokens';
+      disclose.addEventListener('click', () => {
+        if (openEntries.has(key)) openEntries.delete(key); else openEntries.add(key);
+        buildRail();
+      });
+      rowWrap.appendChild(disclose);
+
+      RAIL.appendChild(rowWrap);
+      if (entryOpen) RAIL.appendChild(buildEntryDetail(row.entry));
     }
   }
 }
@@ -1028,7 +1243,6 @@ function clearStage(reason) {
   if (shown) {
     try { shown.teardown(); } catch (e) { console.warn('[dev-splash] teardown', shown.entry.id, e); }
     release(keysFor(shown.entry, shown.channel), TAB1);
-    shown.btn?.setAttribute('aria-current', 'false');
     shown = null;
   }
   HOST.innerHTML = '';
@@ -1036,18 +1250,19 @@ function clearStage(reason) {
     STAGE_TITLE.textContent = 'nothing shown';
     STAGE_MAKE.textContent = 'moved to a Matrix slot';
   }
+  buildRail();
 }
 
-function showPiece(entry, channel, btn) {
+function showPiece(entry, channel) {
   clearStage();
   claim(keysFor(entry, channel), TAB1);
   STAGE_TITLE.textContent = entry.railLabel ? entry.railLabel(channel)
     : channel ? `${entry.label} ${channel}` : entry.label;
   STAGE_MAKE.textContent = `${entry.id}${channel ? `/${channel}` : ''} — ${entry.make(channel)}`;
-  btn?.setAttribute('aria-current', 'true');
+  openGroups.add(entry.group);
   try {
     const teardown = entry.mount(HOST, channel);
-    shown = { entry, channel, teardown, btn };
+    shown = { entry, channel, teardown };
   } catch (e) {
     HOST.innerHTML = '';
     const note = document.createElement('div');
@@ -1056,12 +1271,13 @@ function showPiece(entry, channel, btn) {
     HOST.appendChild(note);
     console.error('[dev-splash] mount failed', entry.id, e);
   }
+  buildRail();
 }
 
 buildRail();
 
 rig.catalog = CATALOG_BY_ID;
-rig.showPiece = (id, ch = null) => showPiece(CATALOG_BY_ID.get(id), ch, null);
+rig.showPiece = (id, ch = null) => showPiece(CATALOG_BY_ID.get(id), ch);
 
 
 // ---- tab 2 — matrix -------------------------------------------------------------
@@ -1071,8 +1287,71 @@ const MATRIX_BAR = document.getElementById('dsp-matrix-bar');
 
 let slotSeq = 0;
 
-function makeSlot(piece = null, channel = null) {
-  return { kind: 'slot', key: `s${++slotSeq}`, piece, channel, parent: null, el: null, body: null, view: null };
+function makeSlot(piece = null, channel = null, zoom = 1, zmode = 'glass') {
+  return { kind: 'slot', key: `s${++slotSeq}`, piece, channel, zoom, zmode,
+           parent: null, el: null, body: null, view: null };
+}
+
+// zoom ladder shared by the − / + buttons; 1 is the identity rung
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+// token roots read once from :root — reflow zoom multiplies these two
+let ZOOM_ROOTS = null;
+function zoomRoots() {
+  if (!ZOOM_ROOTS) {
+    const cs = getComputedStyle(document.documentElement);
+    ZOOM_ROOTS = {
+      fs: parseFloat(cs.getPropertyValue('--fs-root')) || 12,
+      sp: parseFloat(cs.getPropertyValue('--sp-unit')) || 2,
+    };
+  }
+  return ZOOM_ROOTS;
+}
+
+/** glass — CSS `zoom` scales layout too, so the body scrolls like a magnifier.
+ *  reflow — retunes --fs-root / --sp-unit, the two roots every token derives from,
+ *  so the piece re-lays out at the new density instead of being magnified. */
+function applyZoom(node) {
+  const wrap = node.body;
+  if (!wrap) return;
+  const z = node.zoom ?? 1;
+  wrap.style.zoom = '';
+  wrap.style.removeProperty('--fs-root');
+  wrap.style.removeProperty('--sp-unit');
+  if (node.zmode === 'reflow') {
+    const { fs, sp } = zoomRoots();
+    wrap.style.setProperty('--fs-root', `${fs * z}px`);
+    wrap.style.setProperty('--sp-unit', `${sp * z}px`);
+  } else if (z !== 1) {
+    wrap.style.zoom = String(z);
+  }
+}
+
+function paintZoomUI(node) {
+  const label = node.el?.querySelector('.dsp-slot__zlabel');
+  if (label) label.textContent = `${Math.round((node.zoom ?? 1) * 100)}%`;
+  const modeBtn = node.el?.querySelector('[data-zmode]');
+  if (modeBtn) {
+    modeBtn.textContent = node.zmode === 'reflow' ? '⇔' : '⌕';
+    modeBtn.title = node.zmode === 'reflow'
+      ? 'reflow zoom — retunes token roots, panel re-lays out (click for magnifier)'
+      : 'magnifier zoom — scales pixels, panel scrolls (click for reflow)';
+  }
+}
+
+function setZoom(node, z, mode = node.zmode) {
+  node.zoom = Math.min(3, Math.max(0.5, z));
+  node.zmode = mode === 'reflow' ? 'reflow' : 'glass';
+  applyZoom(node);
+  paintZoomUI(node);
+  saveLayout();
+}
+
+function stepZoom(node, dir) {
+  const i = ZOOM_STEPS.findIndex((s) => Math.abs(s - (node.zoom ?? 1)) < 0.001);
+  const at = i === -1 ? ZOOM_STEPS.indexOf(1) : i;
+  const next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, at + dir))];
+  setZoom(node, next);
 }
 
 function makeSplit(dir, a, b, ratio = 0.5) {
@@ -1193,7 +1472,7 @@ function emptySlot(node) {
 }
 
 function splitSlot(node, dir) {
-  const moved = makeSlot(node.piece, node.channel);
+  const moved = makeSlot(node.piece, node.channel, node.zoom, node.zmode);
   const fresh = makeSlot();
   const split = makeSplit(dir, moved, fresh);
   // the old slot's mounted view is torn down and remounted in its new leaf
@@ -1207,7 +1486,9 @@ function mergeSplit(node) {
   forEachSlot(node.b, unmountSlot);
   const keep = node.a;
   const rebuilt = makeSlot(keep.kind === 'slot' ? keep.piece : null,
-    keep.kind === 'slot' ? keep.channel : null);
+    keep.kind === 'slot' ? keep.channel : null,
+    keep.kind === 'slot' ? keep.zoom : 1,
+    keep.kind === 'slot' ? keep.zmode : 'glass');
   if (keep.kind === 'slot') {
     unmountSlot(keep);
     replaceNode(node, rebuilt);
@@ -1278,6 +1559,33 @@ function paintSlot(node) {
     head.appendChild(sel);
   }
 
+  const zmode = document.createElement('button');
+  zmode.className = 'dsp-slot__btn';
+  zmode.dataset.zmode = '1';
+  zmode.addEventListener('click', () =>
+    setZoom(node, node.zoom, node.zmode === 'reflow' ? 'glass' : 'reflow'));
+  head.appendChild(zmode);
+
+  const zout = document.createElement('button');
+  zout.className = 'dsp-slot__btn';
+  zout.textContent = '−';
+  zout.title = 'zoom out';
+  zout.addEventListener('click', () => stepZoom(node, -1));
+  head.appendChild(zout);
+
+  const zlabel = document.createElement('button');
+  zlabel.className = 'dsp-slot__zlabel';
+  zlabel.title = 'click to reset to 100%';
+  zlabel.addEventListener('click', () => setZoom(node, 1));
+  head.appendChild(zlabel);
+
+  const zin = document.createElement('button');
+  zin.className = 'dsp-slot__btn';
+  zin.textContent = '+';
+  zin.title = 'zoom in';
+  zin.addEventListener('click', () => stepZoom(node, 1));
+  head.appendChild(zin);
+
   head.appendChild(splitBtn(node, 'row', '⇆'));
   head.appendChild(splitBtn(node, 'col', '⇵'));
   const clear = document.createElement('button');
@@ -1288,10 +1596,16 @@ function paintSlot(node) {
   head.appendChild(clear);
   el.appendChild(head);
 
+  // body scrolls, wrap zooms — pieces mount into the wrap
   const body = document.createElement('div');
   body.className = 'dsp-slot__body';
+  const wrap = document.createElement('div');
+  wrap.className = 'dsp-slot__zoom';
+  body.appendChild(wrap);
   el.appendChild(body);
-  node.body = body;
+  node.body = wrap;
+  applyZoom(node);
+  paintZoomUI(node);
 
   if (node.stolen) {
     const back = document.createElement('button');
@@ -1419,7 +1733,10 @@ let saveArmed = false;
 
 // piece ids + channels + ratios only, never DOM or view handles
 function serializeNode(node) {
-  if (node.kind === 'slot') return { kind: 'slot', piece: node.piece, channel: node.channel };
+  if (node.kind === 'slot') {
+    return { kind: 'slot', piece: node.piece, channel: node.channel,
+             zoom: node.zoom ?? 1, zmode: node.zmode === 'reflow' ? 'reflow' : 'glass' };
+  }
   return {
     kind: 'split', dir: node.dir, ratio: node.ratio,
     a: serializeNode(node.a), b: serializeNode(node.b),
@@ -1439,7 +1756,8 @@ function deserializeNode(raw) {
   const channel = entry?.channels
     ? (entry.channels.includes(raw.channel) ? raw.channel : defaultChannel(entry))
     : null;
-  return makeSlot(piece, channel);
+  const zoom = Math.min(3, Math.max(0.5, Number(raw.zoom) || 1));
+  return makeSlot(piece, channel, zoom, raw.zmode === 'reflow' ? 'reflow' : 'glass');
 }
 
 function layoutJSON() {

@@ -16,6 +16,14 @@ const COMMIT_MS = 120;
 const BOX_STYLE_ID = 'cbdaw-devbox-style';
 const TOGGLE_STYLE_ID = 'cbdaw-devbox-toggles';
 const PROBE_ID = 'cbdaw-devbox-probe';
+const SKIN_LINK_ID = 'cbdaw-devbox-skin';
+const SCOPED_STYLE_ID = 'cbdaw-devbox-scoped';
+
+// Manifest. A browser cannot list a directory, so every shippable skin is named here.
+const SKINS = [
+  { file: '', label: 'default — tokens.css only' },
+  { file: 'moog2077', label: 'moog2077' },
+];
 
 // =======================================================================================
 // 1 · DISCOVERY — knobs and derived tokens, read out of tokens.css
@@ -27,6 +35,61 @@ let KNOBS = [];
 let DERIVED = [];
 /** 'cssom' | 'fetch' | 'none' — how KNOBS/DERIVED were found. */
 let discoveryMode = 'none';
+
+// Custom properties declared on a component's own selector, not on :root. Discovery cannot
+// see them and a :root write cannot beat them — the component's own declaration wins inside
+// its subtree. Each one is written back through its selector instead.
+// Pass-throughs of a global (--kbd-*, --grid-*) are left out: turning --accent moves them.
+const SCOPED = [
+  { name: '--shell-gap', selector: '.cbdaw-shell', value: 'var(--sp-6)' },
+  { name: '--cb-cell', selector: '.cb-root', value: 'var(--sp-20)' },
+  { name: '--roll-row-h', selector: '.cbdaw-roll', value: 'var(--sp-9)' },
+  { name: '--roll-gutter', selector: '.cbdaw-roll', value: 'var(--sp-31)' },
+  { name: '--arr-zoom', selector: '.cbdaw-arr', value: '1' },
+];
+
+/** name -> selector, for the write path. */
+const SCOPE_OF = new Map(SCOPED.map((s) => [s.name, s.selector]));
+
+/**
+ * Measures each scoped token through a probe carrying the component's class, so the row
+ * gets a slider off a real number instead of a text field off `var(...)`. Falls back to the
+ * declared value when the component's stylesheet is not on the page.
+ */
+function resolveScoped() {
+  const rack = document.createElement('div');
+  rack.setAttribute('aria-hidden', 'true');
+  rack.style.cssText = 'position:fixed;left:-9999px;top:0;width:0;height:0;visibility:hidden;overflow:hidden;';
+  const probes = [];
+  for (const s of SCOPED) {
+    const cls = s.selector.replace(/^\./, '');
+    const asLength = document.createElement('i');
+    const asNumber = document.createElement('i');
+    for (const node of [asLength, asNumber]) {
+      node.className = cls;
+      node.style.display = 'inline-block';
+      node.style.height = '0';
+    }
+    asLength.style.width = `calc(var(${s.name}) * ${PROBE_SCALE})`;
+    asNumber.style.width = `calc(var(${s.name}) * ${PROBE_SCALE}px)`;
+    rack.append(asLength, asNumber);
+    probes.push({ s, asLength, asNumber });
+  }
+  document.body.appendChild(rack);
+
+  const out = [];
+  for (const { s, asLength, asNumber } of probes) {
+    const len = parseFloat(getComputedStyle(asLength).width) || 0;
+    if (len > 0) {
+      out.push({ name: s.name, value: `${round(len / PROBE_SCALE)}px` });
+      continue;
+    }
+    const num = parseFloat(getComputedStyle(asNumber).width) || 0;
+    out.push({ name: s.name, value: num > 0 ? String(round(num / PROBE_SCALE)) : s.value });
+  }
+  rack.remove();
+  return out;
+}
 
 /** Reads both blocks through the CSSOM. Returns false if no tokens.css rule was readable. */
 function discoverFromCssom() {
@@ -167,6 +230,112 @@ function rangeFor(shape) {
 }
 
 // =======================================================================================
+// 2b · GROUPING — every knob sits in exactly one subgroup
+// =======================================================================================
+
+// Reach decides the section. A token used by more than one surface never sits under a
+// single surface's header. Subgroups collapse; sections are dividers.
+const GROUPS = [
+  ['GLOBAL — 5+ surfaces', [
+    // Every --sp-*, --r-* and --fs-* is a calc() off one of these. Turning one moves the
+    // whole scale; the scale members themselves are declared on `*` and read-only.
+    ['scale roots — the whole system', ['--fs-root', '--sp-unit', '--r-unit', '--stroke-w', '--ring-w']],
+    ['ground colors', ['--bg', '--panel', '--line', '--text', '--text-dim', '--accent', '--warn', '--color-transparent']],
+    ['spacing scale', ['--sp-0', '--sp-1', '--sp-1h', '--sp-2', '--sp-3', '--sp-4', '--sp-5', '--sp-6', '--sp-7', '--sp-8', '--sp-9', '--sp-13', '--sp-30', '--sp-60', '--sp-hair', '--sp-em-36']],
+    ['radius scale', ['--r-cell', '--r-sm', '--r-ctl', '--r-body', '--r-pill']],
+    ['type scale', ['--font-ui', '--font-inherit', '--fs-micro', '--fs-xs', '--fs-sm', '--fs-base', '--fs-md', '--w-med', '--w-bold', '--num-tabular', '--lh-none']],
+    ['line weight', ['--bw']],
+    ['label set', ['--track-label', '--track-title', '--tt-label']],
+    ['text behavior', ['--to-ellipsis', '--ws-nowrap', '--ta-center', '--ta-right']],
+    ['cursor set', ['--cur-pointer', '--cur-grab', '--cur-ew-resize']],
+    ['opacity set', ['--op-faint', '--op-soft']],
+    ['layout keywords — no dials', ['--box-border-box', '--align-center', '--disp-flex', '--disp-block', '--disp-grid', '--disp-none', '--flexdir-column', '--flexwrap-wrap', '--flex-1', '--flex-0-0-auto', '--flex-1-1-0', '--justify-center', '--justify-space-between', '--pct-100', '--pos-relative', '--pos-absolute', '--ov-hidden', '--pe-none', '--none', '--touch-none', '--usel-none']],
+  ]],
+  ['FAMILIES — a shared vocabulary', [
+    ['node vocabulary — graph, patch synth', ['--cable-drag', '--edge-audio', '--edge-control', '--edge-hover', '--graph-grid', '--graph-ground', '--node-border', '--node-dimmed', '--node-dragging', '--node-fill', '--node-head', '--node-selected', '--port-active', '--port-in', '--port-out', '--stroke-bold', '--tr-stroke', '--z-drag']],
+    ['device chrome — gate, comp, eq, reverb, delay', ['--bypass-off', '--bypass-on', '--device-head', '--knob-fill']],
+    ['sequencer grid — piano roll, step grid', ['--align-stretch', '--fs-2xl', '--fs-3xl', '--sp-23', '--wc-left']],
+    ['drum pads — drum synth, drum sampler', ['--fs-em-75', '--fs-em-85', '--grid-repeat4-1fr']],
+  ]],
+  ['CROSSOVER — 2-4 surfaces, no family', [
+    ['spacing crossovers', ['--sp-10', '--sp-12', '--sp-14', '--sp-15', '--sp-16', '--sp-20', '--sp-28', '--sp-2h', '--sp-39', '--sp-3h', '--sp-84', '--sp-230', '--sp-em-16']],
+    ['type crossovers', ['--fs-lg', '--fs-xl', '--fs-tiny', '--fs-em-70', '--lh-base', '--font-mono']],
+    ['depth set', ['--raise', '--recess', '--shadow-raised', '--z-raise-1', '--z-raise-2']],
+    ['stroke set', ['--bw-2', '--line-dashed', '--line-solid', '--stroke-dash', '--stroke-heavy']],
+    ['surface grounds', ['--btn-face', '--popout-ground', '--r-panel', '--r-xl']],
+    ['cursor crossovers', ['--cur-default', '--cur-grabbing', '--cur-not-allowed', '--cur-ns-resize']],
+    ['meter colors', ['--meter-hot', '--meter-ok', '--edge-refused']],
+    ['motion', ['--ease', '--tr-background', '--tr-color']],
+    ['canvas drawing — automation, eq, spectrum', ['--canvas-lw', '--fade-faint']],
+    ['odds', ['--op-dim', '--ta-left', '--knob-track']],
+    ['layout keywords — no dials', ['--align-flex-end', '--align-flex-start', '--align-start', '--auto', '--flex-1-1-auto', '--justify-flex-end', '--ov-visible', '--pct-0', '--pe-auto']],
+  ]],
+  ['SURFACE — 1 surface only', [
+    ['project header / transport / surface block', ['--align-baseline', '--dropdown-offset', '--flex-0-1-auto', '--flex-1-1-240', '--grid-1-1', '--grid-1-115', '--grid-minmax-0-1fr', '--ls-none', '--op-mid', '--shadow-lifted', '--shell-gap', '--sp-17', '--sp-33', '--tr-width', '--track-tight', '--vh-100', '--ws-prewrap', '--z-popover']],
+    ['daw shell frame', ['--btn-active', '--flexwrap-nowrap', '--play-on', '--rec-on', '--scrim', '--strip-head', '--transport-ground', '--z-scrim']],
+    ['12-note keyboard', ['--kbd-accent', '--kbd-dim', '--kbd-line', '--kbd-text', '--key-border', '--pct-62']],
+    ['diatonic keys', ['--deg-major', '--deg-minor', '--deg-dim', '--deg-aug', '--deg-altered', '--deg-flat5', '--deg-sharp5', '--filter-brighten', '--tr-filter']],
+    ['scale circle', ['--dominant-baseline-central', '--op-full', '--sp-95', '--text-anchor-middle', '--tr-opacity-stroke', '--w-heavy']],
+    ['comp builder', ['--aspect-square', '--cb-cell', '--font-style-italic', '--fs-chord', '--fs-em-62', '--fs-numeral', '--grid-1fr', '--grid-60-140', '--justify-flex-start', '--lh-loose', '--r-chip', '--ring-off', '--sp-4h', '--sp-5h', '--sp-7h', '--sp-em-14', '--sp-em-21', '--track-mid']],
+    ['piano roll', ['--bw-3', '--bw-5', '--line-dotted', '--line-double', '--line-groove', '--note-deg', '--roll-gutter', '--roll-row-h', '--row-deg', '--sp-31', '--sp-ch-4', '--td-underline']],
+    ['step grid', ['--grid-accent', '--grid-bg', '--grid-dim', '--grid-line', '--grid-panel', '--grid-text', '--grid-warn', '--sp-37']],
+    ['arrangement', ['--arm-on', '--arr-bar-w', '--arr-zoom', '--clip-fill', '--lane-head', '--lane-row', '--lane-row-alt', '--loop-region', '--playhead-line', '--pos-sticky', '--punch-region', '--ruler-ground', '--ruler-tick-bar', '--ruler-tick-beat', '--strip-sel', '--z-sticky']],
+    ['channel strips', ['--fader-fill', '--fader-thumb', '--fader-track', '--mute-on', '--pan-center', '--pan-thumb', '--pan-track', '--slot-empty', '--slot-face', '--slot-route', '--solo-on']],
+    ['automation lanes', ['--lane-ground', '--lane-curve', '--lane-grid', '--lane-point', '--lane-point-on', '--lane-step']],
+    ['node graph', ['--dur-med', '--stroke-med', '--tr-transform']],
+    ['gate', ['--gate-closed', '--gate-open', '--gate-threshold']],
+    ['eq', ['--knob-pointer', '--sp-em-46', '--band-1', '--band-2', '--band-3', '--band-curve', '--band-fill', '--band-handle']],
+    ['wave synth', ['--anim-pulse', '--color-current', '--content-empty', '--r-lg', '--scale-pulse-peak', '--scale-pulse-rest', '--sp-11', '--sp-65', '--sp-em-17', '--sp-em-35', '--z-behind']],
+    ['overtone synth', ['--tr-shadow']],
+    ['drum synth', ['--dur-fast', '--fs-em-65', '--sp-18', '--sp-em-38']],
+    ['drum sampler', ['--anim-hit-flash', '--anim-miss-flash', '--grid-repeat4-minmax90', '--touch-manipulation']],
+    ['patch synth', ['--angle-vertical', '--glow', '--math-group', '--stroke-semi', '--tr-bg-border']],
+    ['spectrum', ['--fade-label', '--fade-mid', '--fade-strong']],
+    ['scope', ['--fade-half', '--fade-near']],
+    ['master meter', ['--meter-clip', '--meter-peak', '--meter-tick', '--meter-track']],
+    ['gain reduction', ['--reduction-fill', '--reduction-track', '--reduction-zero']],
+  ]],
+  // No file in src/ references these. They sit in tokens.css and nothing reads them.
+  ['ORPHANS — nothing references these', [
+    ['unused', ['--canvas-round', '--canvas-textalign-center', '--canvas-textalign-left', '--canvas-textalign-right', '--canvas-textbaseline-bottom', '--canvas-textbaseline-middle', '--canvas-textbaseline-top', '--disp-inline-flex', '--ease-linear', '--flex-1-1-300', '--flex-1-1-320', '--font-mono-compact', '--grid-135-1', '--grid-90-70-140', '--grid-autofit-260', '--grid-repeat4-minmax0', '--grid-repeat8-minmax0', '--lh-tight', '--op-strong', '--pos-static', '--ring-off-lg', '--sp-em-24', '--sp-em-32', '--sp-em-34', '--sp-em-62', '--w-normal']],
+  ]],
+];
+
+/** name -> [sectionLabel, subLabel]. Built once from GROUPS. */
+const GROUP_OF = new Map();
+for (const [section, subs] of GROUPS) {
+  for (const [sub, names] of subs) for (const n of names) GROUP_OF.set(n, [section, sub]);
+}
+
+/** Buckets KNOBS into the GROUPS order. Anything unmapped lands in UNGROUPED. */
+function groupKnobs() {
+  const byKey = new Map();
+  const loose = [];
+  for (const knob of KNOBS) {
+    const at = GROUP_OF.get(knob.name);
+    if (!at) {
+      loose.push(knob);
+      continue;
+    }
+    const key = `${at[0]} ${at[1]}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(knob);
+  }
+
+  const out = [];
+  for (const [section, subs] of GROUPS) {
+    const built = [];
+    for (const [sub] of subs) {
+      const rows = byKey.get(`${section} ${sub}`);
+      if (rows && rows.length) built.push({ sub, rows });
+    }
+    if (built.length) out.push({ section, subs: built });
+  }
+  if (loose.length) out.push({ section: 'UNGROUPED — not in the map', subs: [{ sub: 'unmapped', rows: loose }] });
+  return out;
+}
+
+// =======================================================================================
 // 3 · STATE — overrides, panel flags, toggles
 // =======================================================================================
 
@@ -177,6 +346,8 @@ const state = {
   showDerived: false,
   animsOff: false,
   interactionsOff: false,
+  skin: '',
+  openGroups: [],
 };
 
 /** Loads persisted state. A guest-mode Chromebook can throw on localStorage access. */
@@ -194,6 +365,7 @@ function load() {
     /* corrupt entry: keep defaults */
   }
   if (!state.overrides || typeof state.overrides !== 'object') state.overrides = {};
+  if (!Array.isArray(state.openGroups)) state.openGroups = [];
 }
 
 /** Persists state. Silent on quota or access failure. */
@@ -212,8 +384,41 @@ function save() {
 const dirty = new Set();
 let commitTimer = 0;
 
-/** Writes one knob to the root, or removes it when the value is null. */
+/**
+ * Rebuilds the scoped stylesheet from every turned scoped knob. Rules are emitted as
+ * `:root <selector>` so they outrank the component's own one-class declaration whatever
+ * order the two stylesheets land in.
+ */
+function writeScoped() {
+  const bySelector = new Map();
+  for (const { name, selector } of SCOPED) {
+    const value = state.overrides[name];
+    if (value == null) continue;
+    if (!bySelector.has(selector)) bySelector.set(selector, []);
+    bySelector.get(selector).push(`  ${name}: ${value};`);
+  }
+
+  let el = document.getElementById(SCOPED_STYLE_ID);
+  if (bySelector.size === 0) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement('style');
+    el.id = SCOPED_STYLE_ID;
+    document.head.appendChild(el);
+  }
+  const parts = [];
+  for (const [selector, lines] of bySelector) parts.push(`:root ${selector} {\n${lines.join('\n')}\n}`);
+  el.textContent = parts.join('\n');
+}
+
+/** Writes one knob. Scoped names go through the scoped stylesheet, the rest to the root. */
 function writeKnob(name) {
+  if (SCOPE_OF.has(name)) {
+    writeScoped();
+    return;
+  }
   const value = state.overrides[name];
   if (value == null) document.documentElement.style.removeProperty(name);
   else document.documentElement.style.setProperty(name, value);
@@ -352,15 +557,73 @@ function applyToggles() {
 // =======================================================================================
 
 /** Returns the skin body for every knob whose value differs from tokens.css. */
+/** Resolves a skin filename against the page's own tokens.css href. */
+function skinHref(file) {
+  const link = document.querySelector('link[rel="stylesheet"][href*="tokens.css"]');
+  if (!link) return null;
+  return link.href.replace(/tokens\.css(\?.*)?$/, `skins/${file}.skin.css`);
+}
+
+/** Adds, swaps or removes the skin <link>. Empty state.skin means no link. */
+function applySkin() {
+  const existing = document.getElementById(SKIN_LINK_ID);
+  if (existing) existing.remove();
+  if (!state.skin) return;
+  const href = skinHref(state.skin);
+  if (!href) return;
+  const link = document.createElement('link');
+  link.id = SKIN_LINK_ID;
+  link.rel = 'stylesheet';
+  link.href = href;
+  document.head.appendChild(link);
+}
+
+/** Builds the skin selector. Sits above the knobs — it changes what they read. */
+function skinSection() {
+  const wrap = el('div');
+  wrap.append(el('div', 'db-sec', 'skin'));
+  const line = el('div', 'db-tog');
+  const sel = el('select');
+  for (const skin of SKINS) {
+    const opt = el('option', null, skin.label);
+    opt.value = skin.file;
+    if (skin.file === state.skin) opt.selected = true;
+    sel.append(opt);
+  }
+  sel.addEventListener('change', () => {
+    state.skin = sel.value;
+    applySkin();
+    save();
+    // The link loads async; knob discovery and derived values re-read after it lands.
+    setTimeout(() => { repaintKnobs(); refreshDerived(); }, 60);
+  });
+  line.append(sel);
+  wrap.append(line);
+  return wrap;
+}
+
 function skinText() {
-  const lines = [];
+  const rootLines = [];
+  const scopedLines = new Map();
+
   for (const { name, value } of KNOBS) {
     const over = state.overrides[name];
     if (over == null || over === '' || over === value) continue;
-    lines.push(`  ${name}: ${over};`);
+    const selector = SCOPE_OF.get(name);
+    if (!selector) {
+      rootLines.push(`  ${name}: ${over};`);
+      continue;
+    }
+    if (!scopedLines.has(selector)) scopedLines.set(selector, []);
+    scopedLines.get(selector).push(`  ${name}: ${over};`);
   }
-  if (lines.length === 0) return '/* no knob differs from tokens.css */\n';
-  return `/* skin — dev box, ${new Date().toISOString()} */\n:root {\n${lines.join('\n')}\n}\n`;
+
+  if (rootLines.length === 0 && scopedLines.size === 0) return '/* no knob differs from tokens.css */\n';
+
+  const blocks = [`/* skin — dev box, ${new Date().toISOString()} */`];
+  if (rootLines.length) blocks.push(`:root {\n${rootLines.join('\n')}\n}`);
+  for (const [selector, lines] of scopedLines) blocks.push(`:root ${selector} {\n${lines.join('\n')}\n}`);
+  return `${blocks.join('\n')}\n`;
 }
 
 /** Parses the skin body in a detached stylesheet. Returns true when every line survived. */
@@ -373,8 +636,11 @@ function skinParses(text) {
   let ok = false;
   try {
     const rules = el.sheet ? el.sheet.cssRules : null;
-    const rule = rules && rules.length ? rules[rules.length - 1] : null;
-    ok = !!rule && rule.style && rule.style.length === declCount;
+    let survived = 0;
+    for (const rule of Array.from(rules || [])) {
+      if (rule.style) survived += rule.style.length;
+    }
+    ok = survived === declCount;
   } catch (err) {
     ok = false;
   }
@@ -438,6 +704,16 @@ const BOX_CSS = `
 #cbdaw-devbox .db-sec {
   margin: 8px 0 4px; color: #8b98ad; letter-spacing: 0.08em; text-transform: uppercase;
 }
+#cbdaw-devbox .db-grp { border-top: 1px solid #1e2634; }
+#cbdaw-devbox .db-grp-head {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 4px 2px; border: 0; border-radius: 0; background: none; text-align: left;
+}
+#cbdaw-devbox .db-grp-head:hover { background: #171d29; }
+#cbdaw-devbox .db-grp-arrow { color: #8b98ad; width: 10px; }
+#cbdaw-devbox .db-grp-label { flex: 1 1 auto; color: #cfd8e6; }
+#cbdaw-devbox .db-grp-count { color: #8b98ad; }
+#cbdaw-devbox .db-grp-body { padding: 0 0 4px 12px; border-left: 1px solid #1e2634; margin-left: 4px; }
 #cbdaw-devbox .db-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 4px; padding: 3px 0; }
 #cbdaw-devbox .db-row + .db-row { border-top: 1px solid #1e2634; }
 #cbdaw-devbox .db-name { color: #cfd8e6; overflow: hidden; text-overflow: ellipsis; }
@@ -458,6 +734,7 @@ const BOX_CSS = `
 #cbdaw-devbox .db-rst { padding: 0 5px; color: #8b98ad; }
 #cbdaw-devbox .db-tog { display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; }
 #cbdaw-devbox .db-tog + .db-tog { border-top: 1px solid #1e2634; }
+#cbdaw-devbox .db-tog select { flex: 1 1 auto; min-width: 0; background: #10151f; color: #cfd8e6; border: 1px solid #55627a; font: inherit; padding: 2px 4px; }
 #cbdaw-devbox .db-tog span { flex: 1 1 auto; color: #cfd8e6; }
 #cbdaw-devbox .db-der { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; color: #8b98ad; }
 #cbdaw-devbox .db-der b { color: #cfd8e6; font-weight: 400; }
@@ -652,24 +929,73 @@ function derivedSection() {
   return wrap;
 }
 
-/** Hides knob rows that do not match the filter box. */
+/** One entry per subgroup: its header button, its row container, its rows. */
+const knobGroups = [];
+
+/**
+ * Hides rows that do not match the filter box, then hides any subgroup left with none.
+ * A live filter force-opens the subgroups that still have rows.
+ */
 function applyFilter() {
   const q = state.filter.trim().toLowerCase();
   for (const r of knobRows) {
     r.row.style.display = !q || r.name.textContent.toLowerCase().includes(q) ? '' : 'none';
   }
+  for (const g of knobGroups) {
+    const hits = g.rows.filter((r) => r.row.style.display !== 'none').length;
+    g.head.parentElement.style.display = hits ? '' : 'none';
+    const open = q ? true : state.openGroups.includes(g.key);
+    g.body.style.display = open ? '' : 'none';
+    g.arrow.textContent = open ? '▾' : '▸';
+    g.count.textContent = q ? `${hits}/${g.rows.length}` : String(g.rows.length);
+  }
 }
 
-/** Builds the whole panel body once. */
+/** Builds one collapsible subgroup: header button, count, and its knob rows. */
+function subgroupBlock(sectionLabel, sub, groupList) {
+  const key = `${sectionLabel}·${sub.sub}`;
+  const wrap = el('div', 'db-grp');
+
+  const head = el('button', 'db-grp-head');
+  const arrow = el('span', 'db-grp-arrow', '▸');
+  const label = el('span', 'db-grp-label', sub.sub);
+  const count = el('span', 'db-grp-count', String(sub.rows.length));
+  head.append(arrow, label, count);
+
+  const body = el('div', 'db-grp-body');
+  const built = [];
+  for (const knob of sub.rows) {
+    const rowObj = knobRow(knob);
+    knobRows.push(rowObj);
+    built.push(rowObj);
+    body.append(rowObj.row);
+  }
+
+  const group = { key, head, arrow, count, body, rows: built };
+  head.addEventListener('click', () => {
+    const at = state.openGroups.indexOf(key);
+    if (at < 0) state.openGroups.push(key);
+    else state.openGroups.splice(at, 1);
+    save();
+    applyFilter();
+  });
+
+  wrap.append(head, body);
+  groupList.push(group);
+  return wrap;
+}
+
+/** Builds the whole panel body once. Knobs render grouped by reach, every group collapsed. */
 function buildBody() {
   const body = el('div', 'db-body');
   knobRows.length = 0;
+  knobGroups.length = 0;
 
-  body.append(el('div', 'db-sec', `knobs (${KNOBS.length}) — :root, absolute units`));
-  for (const knob of KNOBS) {
-    const built = knobRow(knob);
-    knobRows.push(built);
-    body.append(built.row);
+  body.append(skinSection());
+  for (const { section, subs } of groupKnobs()) {
+    const total = subs.reduce((n, s) => n + s.rows.length, 0);
+    body.append(el('div', 'db-sec', `${section} (${total})`));
+    for (const sub of subs) body.append(subgroupBlock(section, sub, knobGroups));
   }
 
   body.append(toggleSection());
@@ -685,6 +1011,7 @@ function repaintKnobs() {
 /** Mounts the box. Collapsed or expanded per stored state. */
 function mount() {
   injectBoxStyle();
+  applySkin();
   root = el('div');
   root.id = 'cbdaw-devbox';
   document.body.appendChild(root);
@@ -740,6 +1067,7 @@ function render() {
       delete state.overrides[name];
       document.documentElement.style.removeProperty(name);
     }
+    writeScoped();
     save();
     repaintKnobs();
     refreshDerived();
@@ -772,6 +1100,7 @@ function unmount() {
   probeRack = null;
   probeRows.length = 0;
   knobRows.length = 0;
+  knobGroups.length = 0;
   derivedBody = null;
 }
 
@@ -796,7 +1125,9 @@ async function start() {
     started = false;
     return;
   }
+  KNOBS = KNOBS.concat(resolveScoped());
   applyAll();
+  writeScoped();
   applyToggles();
   mount();
 }

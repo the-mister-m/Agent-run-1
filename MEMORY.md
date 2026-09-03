@@ -1,4 +1,4 @@
-Updated 2026-09-02 — Closer, unlimited tracks + Phase D close
+Updated 2026-09-02 — Closer, signal chain close
 
 # MEMORY — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
@@ -168,29 +168,28 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
   otherwise, unruled. Also found and fixed: `regions.js` coerced non-array `notes` to `[]`
   at six sites, silently erasing every drum-region save since the arrange rebuild. Nothing
   browser-verified — `node --check` only, no browser driver in this environment.
+- 09-02 ("signal chain", 23:37 EDT 09-01–01:32 EDT 09-02): five jobs, six subagents, wired the
+  chain Brandon asked for — playing surface + roll/steps → instrument → mixer. Job 1 built
+  [track-bus.js](src/core/track-bus.js), one note bus per track. Job 2 gave every lane its own
+  playing-surface picker, mounted against that bus. Job 3 built
+  [roll-scheduler.js](src/core/roll-scheduler.js) — melodic regions play for the first time in
+  the project; job 3b fixed a same-day hanging-noteOff-on-loop-wrap bug in it. Job 4 fixed the
+  mixer rack so strips scroll instead of squashing. Job 5 put `armed` on the track record and
+  gated key/midi through it — armed tracks layer, unarmed ones stay silent to shared input; it
+  also found two of its own spec's premises were wrong and said so instead of inventing work
+  around them. Nothing verified in a browser — no agent had one, not a single note heard.
   See the current warm start.
 
-## WARM START — 2026-09-02 — unlimited tracks + Phase D shipped, nothing browser-verified
-- Situation: phases D and E are both built and wired. Boot is zero tracks; `+ TRACK` in the
-  arrangement toolbar makes the first one, a per-lane `×` removes it (job 4's stopgap
-  trigger, spec named no other). A track's instrument constructs and makes sound but has no
-  DOM host anywhere — deliberately deferred to the UI matrix work, along with editor
-  placement and lane-head look. The region editor mounts as a bare fixed-position `<div>`
-  for the same reason.
-- Last state: nothing in this six-job run has run in a real browser — `node --check` only,
-  no driver installed here. The top open call, unruled: a live take now lands only in the
-  region whose editor is open and is dropped otherwise (`_commitToRegion` in
-  [arrangement.js](src/ui/arrangement.js), job 6). [SPEC-region-editor.md](docs/specs/SPEC-region-editor.md)
-  is pre-existing and superseded by §10 of
-  [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) per job 6's build, not
-  formally dispositioned. P4/S6's `instrumentCtor` FAIL is root-caused fixed by job 4 but
-  not re-run to confirm.
-- Next move: first browser run of the whole thing, then the recording-destination ruling,
-  then the UI matrix (instrument hosts, editor placement, lane-head look) — all on
-  Brandon's desk, see [TODO.md](TODO.md)'s 2026-09-02 heading.
-- Links: [session review](docs/reports/2026-09-01-session-review-unlimited-tracks.md) ·
-  [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md) ·
-  [src/core/tracks.js](src/core/tracks.js) ·
-  [src/ui/arrangement.js](src/ui/arrangement.js) ·
-  [src/ui/daw-shell.js](src/ui/daw-shell.js) ·
-  [SESSIONLOG.md](SESSIONLOG.md) · [TODO.md](TODO.md)
+## WARM START — 2026-09-02 — dev-test built; signal chain still unheard
+- Situation: signal chain (track-bus, roll-scheduler, arm gating, mixer rack) shipped earlier
+  this day, zero browser verification. This session added a standalone Chromebook load test,
+  `tools/dev-test.html` — no `/src` touched.
+- Last state: `dev-test.html` never opened. Durable finding: its own voice normalizer
+  (`n ** -0.5`) beat shipped `n ** -0.8` ([audio.js:196](src/core/audio.js#L196)) by Brandon's
+  ear — three uncontrolled variables, not a measurement. Do not record it as measured.
+- Next move: Brandon runs both `dev-test.html` and the DAW itself in a real browser — nothing
+  has been run across either session. Then: the exponent decision, job 1's stale harness
+  buses, track-one auto-arm at boot.
+- Links: [dev-test receipt](docs/reports/receipt-dev-test-load-tool.md) ·
+  [signal-chain review](docs/reports/2026-09-02-session-review-signal-chain.md) ·
+  [audio.js:192-259](src/core/audio.js#L192-L259) · [TODO.md](TODO.md) · [SESSIONLOG.md](SESSIONLOG.md)

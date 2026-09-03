@@ -25,7 +25,7 @@
  * four-value enum and this seat's brief both require.
  */
 
-import { voicePool, governor } from '../core/audio.js';
+import { voicePool, governor, createVoiceOut } from '../core/audio.js';
 
 // ---------------------------------------------------------------------------------------
 // CONSTANTS  (seat question 1 — waveforms and their on-screen names)
@@ -501,7 +501,7 @@ export default class WaveSynth {
       }
     }
 
-    const voice = new Voice(this.ctx, this._mixGain, cost);
+    const voice = new Voice(this.ctx, createVoiceOut(WaveSynth.id, this._mixGain), cost);
     voice.onFree = () => {
       this._voices.delete(voice);
       const set = this._noteToVoices.get(note);

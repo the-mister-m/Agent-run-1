@@ -205,3 +205,176 @@ to `INDEX.md` and `SESSIONLOG.md`. Leave a review for the Closer.
   before the build, not reconstructed after it.
 - Two working dev-box toggles, independent of each other.
 - Brandon has seen it in a browser and said it reads.
+
+---
+
+## 9 · ADDENDUM — SKIN SEAT ORIENTATION (2026-09-02)
+
+Written from a token grep on 2026-09-02, before the seat opens. Numbers and
+lists below come from `src/ui/tokens.css` vs every `var(--*)` in `src/`,
+`index.html`, `tools/`. Re-run the grep if S5 has landed since.
+
+### 9.1 · The reach ladder — work top down
+
+```
+  reach ▲
+        │  ┌──────────────────────────────┐
+        │  │ FOUR DIALS                   │  moves every px in the app
+        │  │ --fs-root --sp-unit          │
+        │  │ --r-unit  --bw               │
+        │  ├──────────────────────────────┤
+        │  │ GROUND                       │  what 80% of pixels are
+        │  │ --bg --panel --line          │
+        │  │ --text --text-dim            │
+        │  ├──────────────────────────────┤
+        │  │ DEPTH                        │  how physical it feels
+        │  │ --recess --raise             │
+        │  │ --shadow-raised/lifted       │
+        │  │ --btn-face --glow --ring-*   │
+        │  ├──────────────────────────────┤
+        │  │ LIT STATES                   │  the signal colors
+        │  │ --accent --warn --play-on    │
+        │  │ --rec-on --mute-on --solo-on │
+        │  │ --arm-on --meter-ok/hot      │
+        │  ├──────────────────────────────┤
+        │  │ PER-REGION GROUPS            │  one area each
+        │  │ SEQUENCE MIXER DEVICE        │
+        │  │ INSTRUMENT SURFACE           │
+        │  ├──────────────────────────────┤
+        │  │ MOTION                       │  three knobs
+        │  │ --dur-fast --dur-med --ease  │
+        │  ├──────────────────────────────┤
+        │  │ TYPE + SCALES                │  --font-* --fs-* --sp-*
+        │  │                              │  --r-* --w-* --track-*
+        │  ├──────────────────────────────┤
+        │  │ LAYOUT / BEHAVIOR            │  DO NOT SKIN. reshapes app
+        │  │ --disp-* --pos-* --flex-*    │
+        │  │ --grid-* --cur-* --pe-*      │
+        │  └──────────────────────────────┘
+        ▼
+```
+
+- Dials first. A skin that starts at colors and ends at dials gets rebuilt.
+- Bottom two rungs exist because the tokenizer swept everything. Leave them
+  at template default. A skin that sets `--disp-flex: none` is a bug.
+
+### 9.2 · What each region paints
+
+```
+ ┌─────────────────────── FRAME ────────────────────────┐
+ │ transport-ground  [▶ play-on] [● rec-on]  btn-face   │
+ ├──────────┬───────────────────────────────────────────┤
+ │ lane-head│ ruler-ground   tick-bar  tick-beat        │
+ │          ├───────────────────────────────────────────┤
+ │ track 1  │ lane-row      ▓▓clip-fill▓▓    │playhead  │
+ │ track 2  │ lane-row-alt         ▓▓▓▓▓     │          │  SEQUENCE
+ │ track 3  │ lane-row    loop-region ░░░░░  │          │
+ ├──────────┴───────────────────────────────────────────┤
+ │ strip-head │ strip-head │ strip-head │ MASTER        │
+ │  ┃ meter   │  ┃ meter   │  ┃ meter   │  ┃┃           │
+ │  ┃ ok/hot  │  ┃         │  ┃         │  ┃┃           │  MIXER
+ │ [M][S]     │ [M][S]     │ [M][S]     │               │
+ │ fader-thumb│ pan-thumb  │ slot-face  │ slot-route    │
+ ├──────────────────────────────────────────────────────┤
+ │ device-head ─ knob-track/fill/pointer ─ bypass-on/off│  DEVICE
+ │ gate-open  gate-closed  gate-threshold               │
+ ├──────────────────────────────────────────────────────┤
+ │ graph-ground · grid                                  │
+ │   [node-fill]──edge-audio──▶[node-fill]              │  INSTRUMENT
+ │    port-out   edge-control    port-in                │  (patch-synth)
+ │              edge-refused ✕                          │
+ ├──────────────────────────────────────────────────────┤
+ │ key-border  deg-major  deg-minor  deg-dim  deg-aug   │  SURFACE
+ └──────────────────────────────────────────────────────┘
+```
+
+### 9.3 · Live vs dead tokens (grep 2026-09-02)
+
+**Live, worth the seat's time:**
+- All FRAME. All INSTRUMENT.
+- MIXER except meter detail.
+- SEQUENCE except automation lanes.
+- DEVICE except EQ bands.
+- SURFACE except flat5 / sharp5.
+
+**Defined, nothing draws them yet — set them, expect no visible change:**
+- `--band-1/2/3 --band-curve --band-fill --band-handle` (EQ, not built)
+- `--lane-curve --lane-grid --lane-point --lane-point-on --lane-step`
+  (automation lanes)
+- `--meter-clip --meter-peak --meter-tick --meter-track`
+- `--deg-flat5 --deg-sharp5`
+- `--fade-faint/half/mid/strong/label/near --stroke-hair --stroke-thin`
+- `--canvas-lw-2/3 --canvas-round --canvas-textalign-* --canvas-textbaseline-*`
+- `--fs-2xl --fs-half --fs-readout --lh-tight --ring-w --ring-off-lg`
+  `--ease-linear --sp-em-24 --grid-1-1 --grid-repeat4-minmax0
+  --grid-repeat8-minmax0`
+
+**Used, NOT in tokens.css — a skin cannot reach these:**
+- `--grid-bg --grid-panel --grid-line --grid-text --grid-dim --grid-accent
+  --grid-warn` (step-grid locals)
+- `--kbd-accent --kbd-dim --kbd-line --kbd-text` (keyboard locals)
+- `--roll-gutter --roll-row-h --row-deg --note-deg` (piano-roll locals)
+- `--arr-bar-w --arr-zoom --shell-gap --cb-cell`
+- If the piano roll, keyboard, or step grid look unskinned after the build,
+  this is why. That is an S5 leftover, not a skin bug. Note it in the receipt,
+  do not fix it from this seat.
+
+### 9.4 · Hard rules the validator enforces
+
+- `--text` on `--panel` ≥ 7:1. `--text-dim` ≥ 4.5:1. `--panel` vs `--line`
+  ≥ 1.5:1.
+- `--deg-major` vs `--deg-minor`: one hue, lightness only, ΔE ≥ 15 after CVD
+  simulation. No re-hueing degrees.
+- `--accent` is not a degree hue.
+- No font loading, no network. Every stack has a Chromebook fallback.
+- Every template line present, even at default.
+- Exit 0 or it is not done.
+
+### 9.5 · Motion, exactly what a skin controls
+
+- `--dur-fast` `--dur-med` `--ease`. Hover, press, fader glide.
+- Both durations at 0 = still skin. That is the full range.
+- Interaction animations (Half B) need selectors and event wiring. Separate
+  seat, separate dev-box toggles. Do not mix into this run.
+
+### 9.6 · Session shape
+
+```
+ Brandon                    seat
+ ───────                    ────
+ point at skin picks/  ──▶  pass 1: what it sees        (docs/scratchpad/)
+                            pass 2: three approaches    (docs/scratchpad/)
+                            pass 3: principles          (docs/scratchpad/)
+ rule on conflicts     ◀──  "dial X fights principle Y"
+                            build: template → dials → ground → depth →
+                                   lit → regions → motion
+                            validator ──▶ exit 0
+ open in browser       ◀──  "look"
+ "reads" / "doesn't"   ──▶  adjust, re-gate
+ approve               ──▶  receipt, INDEX, SESSIONLOG, Closer review
+```
+
+### 9.7 · What Brandon brings to the session
+
+- References in `skin picks/` before the seat opens.
+- Four words for the four dials: big/small, dense/airy, sharp/round,
+  hairline/heavy. The seat maps words to values.
+- Three lit-state answers: what is "on", what is "danger", what is
+  "selected". Covers accent, warn, rec, arm, solo, mute.
+- Browser judgement in plain words. "Too flat." "Play doesn't pop."
+  Not values.
+
+### 9.8 · What the seat should expect
+
+- A validator argument. Moog orange may sit near a degree hue. A dark ground
+  may miss 7:1 with the chosen text. Offer a nudge, not a lecture.
+- If Brandon wants a decision he can see, build a devbox knob instead of
+  asking.
+- Devbox itself is ruled exempt. Do not skin it.
+
+### 9.9 · Sticky
+
+- `grep -a` on every `src/` search. `chord-module.js:1624` holds NUL bytes.
+- Do not run concurrent with S5. S5 writes `tokens.css`.
+- `tools/harmonyNEW.html` is live. `harmony.html` does not exist.
+- Edits through the Edit tool. Bash is grep only.

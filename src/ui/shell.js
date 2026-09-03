@@ -147,7 +147,7 @@ let shellStyleRefs = 0;
 
 const STYLE_TEXT = `
 .cbdaw-shell {
-  --shell-gap: 12px;
+  --shell-gap: var(--sp-6);
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
   gap: var(--shell-gap);

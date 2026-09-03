@@ -1,7 +1,12 @@
 import { clock as sharedClock, ticksPerBar, ticksPerBeat } from '../core/clock.js';
 import { tracks as sharedTracks } from '../core/tracks.js';
+import { state as sharedState } from '../core/state.js';
+import { unlock } from '../core/audio.js';
 import StepGrid, { stepLabel } from '../surfaces/step-grid.js';
 import PianoRoll from '../surfaces/piano-roll.js';
+import Keyboard from '../surfaces/keyboard.js';
+import DiatonicKeys from '../surfaces/diatonic-keys.js';
+import ScaleCircle from '../surfaces/scale-circle.js';
 import { regions as sharedRegions } from '../core/regions.js';
 import Capture from '../core/capture.js';
 
@@ -9,7 +14,7 @@ const STYLE_ID = 'cbdaw-arrangement-style';
 let styleRefs = 0;
 
 // instrumentType -> display label, for the lane head's instrument dropdown
-const INSTRUMENT_OPTIONS = [
+export const INSTRUMENT_OPTIONS = [
   { value: '', label: '—' },
   { value: 'wave-synth', label: 'Wave Synth' },
   { value: 'overtone-synth', label: 'Overtone Synth' },
@@ -18,6 +23,25 @@ const INSTRUMENT_OPTIONS = [
   { value: 'drum-synth', label: 'Drum Synth' },
   { value: 'drum-sampler', label: 'Drum Sampler' },
 ];
+
+// surfaceType -> display label, for the lane head's surface dropdown
+const SURFACE_OPTIONS = [
+  { value: '', label: '— no surface —' },
+  { value: 'keyboard', label: 'Keyboard' },
+  { value: 'diatonic-keys', label: 'Diatonic Keys' },
+  { value: 'scale-circle', label: 'Scale Circle' },
+  { value: 'step-grid', label: 'Step Grid' },
+];
+
+// surfaceType -> constructor + what drives it. 'bus' takes the track's note bus as its
+// second argument; 'instrument' takes the clock and is handed the instance via
+// bindInstrument().
+const SURFACES = {
+  keyboard: { Ctor: Keyboard, driver: 'bus' },
+  'diatonic-keys': { Ctor: DiatonicKeys, driver: 'bus' },
+  'scale-circle': { Ctor: ScaleCircle, driver: 'bus' },
+  'step-grid': { Ctor: StepGrid, driver: 'instrument' },
+};
 
 function clampBar(n, max) {
   const v = Math.round(Number(n));
@@ -231,6 +255,18 @@ const STYLE_TEXT = `
   box-sizing: var(--box-border-box);
 }
 
+.cbdaw-arr__lane-surface-pick {
+  font: var(--font-inherit);
+  font-size: var(--fs-micro);
+  color: var(--text);
+  background: var(--btn-face);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1);
+  width: var(--pct-100);
+  box-sizing: var(--box-border-box);
+}
+
 .cbdaw-arr__lane-row {
   display: var(--disp-flex);
   align-items: var(--align-center);
@@ -266,7 +302,6 @@ const STYLE_TEXT = `
 
 .cbdaw-arr__lane-body {
   position: var(--pos-relative);
-  min-height: var(--sp-28);
   border-bottom: var(--bw) solid var(--line);
   background: var(--lane-row);
   box-sizing: var(--box-border-box);
@@ -276,6 +311,26 @@ const STYLE_TEXT = `
 
 .cbdaw-arr__lane-body[data-alt="true"] {
   background: var(--lane-row-alt);
+}
+
+/* The region row: every block is absolutely positioned inside this, not the lane body. */
+.cbdaw-arr__lane-regions {
+  position: var(--pos-relative);
+  min-height: var(--sp-28);
+}
+
+/* The playing surface slot, under the region row. Hidden while the surface is none. Fixed
+   width so it does not stretch with the timeline at zoom. */
+.cbdaw-arr__lane-surface {
+  position: var(--pos-relative);
+  width: var(--sp-230);
+  border-top: var(--bw) solid var(--line);
+  background: var(--recess);
+  box-sizing: var(--box-border-box);
+}
+
+.cbdaw-arr__lane-surface[hidden] {
+  display: var(--disp-none);
 }
 
 .cbdaw-arr__region {
@@ -380,12 +435,14 @@ export default class Arrangement {
   static id = 'arrangement';
   static label = 'Arrangement';
 
-  constructor(el = null, clock = sharedClock, regions = sharedRegions, tracks = sharedTracks) {
+  constructor(el = null, clock = sharedClock, regions = sharedRegions, tracks = sharedTracks, opts = {}) {
     this._clock = clock;
     this._regions = regions;
     this._tracks = tracks;
     this.defaultTarget = el;
     this.mounted = false;
+    // false: lanes carry no surface slot and no surface picker
+    this._laneSurfaces = opts.laneSurfaces !== false;
 
     this._channels = [];
     this._lanes = new Map();
@@ -405,6 +462,8 @@ export default class Arrangement {
     // (id, instrumentType|null) -> the page's assignment flow. Unset, the dropdown writes
     // the store field only and no instance is built.
     this.onAssignInstrument = null;
+    // called with each finished lane; null when no host is hanging controls on the head
+    this.onLaneBuilt = null;
 
     this.el = null;
     this.nodes = {
@@ -445,27 +504,57 @@ export default class Arrangement {
     return this;
   }
 
+  /** Instrument change on a live track: rebinds an instrument-driven surface in place. The
+   *  surface is never rebuilt, and a bus-driven surface needs nothing — its bus is already
+   *  bound to the new instance by the caller. */
   bindLaneInstrument(id, instrument) {
     const lane = this._lanes.get(id);
     if (!lane) return this;
     lane.instrument = instrument || null;
     lane.capture.setInstrument(instrument || null);
+    if (lane.surface && SURFACES[lane.surfaceType]?.driver === 'instrument') {
+      lane.surface.bindInstrument(instrument || null);
+    }
+    return this;
+  }
+
+  /** Pushes one track's `armed` to its button, its capture and its bus. The store is the
+   *  only writer; this is the only reader. Arm layers — never clears another lane. */
+  _syncLaneArm(lane, armed) {
+    const on = Boolean(armed);
+    if (lane.armBtn) lane.armBtn.dataset.on = String(on);
+    if (on) lane.capture.arm('all'); else lane.capture.disarm('all');
+    if (lane.bus) lane.bus.armed = on;
+  }
+
+  /** The track's note bus, from `core/track-bus.js`. Bus-driven surfaces are constructed
+   *  against it. Binding late mounts a surface the lane was built with but could not
+   *  construct yet. */
+  bindLaneBus(id, bus) {
+    const lane = this._lanes.get(id);
+    if (!lane) return this;
+    lane.bus = bus || null;
+    if (lane.bus) lane.bus.armed = Boolean(this._tracks.get(id)?.armed);
+    if (lane.bus && lane.surfaceType && !lane.surface) {
+      this._mountLaneSurface(lane, lane.surfaceType);
+    }
     return this;
   }
 
   get lanes() {
     return [...this._lanes.values()].map((l) => ({
       id: l.id, kind: l.kind, label: l.label, capture: l.capture, instrument: l.instrument,
+      bus: l.bus, surfaceType: l.surfaceType, surface: l.surface,
     }));
   }
 
-  _addDom(el, type, fn) {
-    el.addEventListener(type, fn);
-    this._domListeners.push({ el, type, fn });
+  _addDom(el, type, fn, opts) {
+    el.addEventListener(type, fn, opts);
+    this._domListeners.push({ el, type, fn, opts });
   }
 
   _detachDom() {
-    for (const { el, type, fn } of this._domListeners) el.removeEventListener(type, fn);
+    for (const { el, type, fn, opts } of this._domListeners) el.removeEventListener(type, fn, opts);
     this._domListeners = [];
   }
 
@@ -502,6 +591,10 @@ export default class Arrangement {
       if (this._editor?.regionId === r.id) this._closeEditor({ writeBack: false });
     });
 
+    // Audio unlock, capture phase: a mounted surface's own window keydown listener runs in
+    // the bubble phase, so this resumes the context before the first note is played.
+    this._addDom(window, 'keydown', unlock, true);
+
     this._rafHandle = requestAnimationFrame(this._rafLoop);
     this.mounted = true;
     return this;
@@ -511,7 +604,7 @@ export default class Arrangement {
    *  gesture is attached to. Only the geometry moves. */
   _renderDuringDrag() {
     for (const lane of this._lanes.values()) {
-      for (const el of lane.body.querySelectorAll('.cbdaw-arr__region')) {
+      for (const el of lane.regionRow.querySelectorAll('.cbdaw-arr__region')) {
         const r = this._regions.get(el.dataset.id);
         if (!r) { el.remove(); continue; }
         if (r.laneId !== lane.id) { el.remove(); continue; }
@@ -522,7 +615,7 @@ export default class Arrangement {
     // A region dragged onto another lane has no node there yet.
     for (const lane of this._lanes.values()) {
       for (const r of this._regions.forLane(lane.id)) {
-        if (!lane.body.querySelector(`.cbdaw-arr__region[data-id="${r.id}"]`)) {
+        if (!lane.regionRow.querySelector(`.cbdaw-arr__region[data-id="${r.id}"]`)) {
           this._renderLaneRegions(lane);
           break;
         }
@@ -743,6 +836,7 @@ export default class Arrangement {
 
   _teardownLanes() {
     for (const lane of this._lanes.values()) {
+      this._disposeLaneSurface(lane);
       lane.capture.dispose();
       lane.head.remove();
       lane.body.remove();
@@ -767,6 +861,7 @@ export default class Arrangement {
     const lane = this._lanes.get(t.id);
     if (!lane) return;
     if (this._editor?.laneId === t.id) this._closeEditor();
+    this._disposeLaneSurface(lane);
     lane.capture.dispose();
     lane.head.remove();
     lane.body.remove();
@@ -779,17 +874,24 @@ export default class Arrangement {
     this._layoutOverlay();
   }
 
-  /** Name/instrumentType/kind changed on a live track — updates the one lane in place. */
+  /** Name/instrumentType/kind/surfaceType changed on a live track — updates the one lane in
+   *  place. The surface is remounted only when `surfaceType` itself changed. */
   _onTrackUpdate(t) {
     if (!this.mounted) return;
     const lane = this._lanes.get(t.id);
     if (!lane) return;
     lane.kind = t.kind;
     lane.label = t.name || t.id;
+    this._syncLaneArm(lane, t.armed);
     if (lane.nameInput && document.activeElement !== lane.nameInput) lane.nameInput.value = lane.label;
     if (lane.instrumentSelect && document.activeElement !== lane.instrumentSelect) {
       lane.instrumentSelect.value = t.instrumentType || '';
     }
+    const next = t.surfaceType || null;
+    if (lane.surfaceSelect && document.activeElement !== lane.surfaceSelect) {
+      lane.surfaceSelect.value = next || '';
+    }
+    if (next !== lane.surfaceType) this._mountLaneSurface(lane, next);
     const idx = this._channels.findIndex((c) => c.id === t.id);
     if (idx !== -1) this._channels[idx] = { id: t.id, kind: t.kind, label: lane.label };
   }
@@ -815,6 +917,24 @@ export default class Arrangement {
     instrumentSelect.value = this._tracks.get(ch.id)?.instrumentType || '';
     head.appendChild(instrumentSelect);
 
+    // which surface this track plays through. Writes the store; the store's update event is
+    // what actually mounts it. Null when lane surfaces are off.
+    const storedSurface = this._tracks.get(ch.id)?.surfaceType || null;
+    let surfaceSelect = null;
+    if (this._laneSurfaces) {
+      surfaceSelect = document.createElement('select');
+      surfaceSelect.className = 'cbdaw-arr__lane-surface-pick';
+      surfaceSelect.title = 'Playing surface';
+      for (const opt of SURFACE_OPTIONS) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        surfaceSelect.appendChild(o);
+      }
+      surfaceSelect.value = storedSurface || '';
+      head.appendChild(surfaceSelect);
+    }
+
     this._addDom(nameInput, 'change', () => {
       this._tracks.update(ch.id, { name: nameInput.value });
     });
@@ -824,6 +944,12 @@ export default class Arrangement {
       if (typeof this.onAssignInstrument === 'function') this.onAssignInstrument(ch.id, type);
       else this._tracks.setInstrumentType(ch.id, type);
     });
+
+    if (surfaceSelect) {
+      this._addDom(surfaceSelect, 'change', () => {
+        this._tracks.setSurfaceType(ch.id, surfaceSelect.value || null);
+      });
+    }
 
     const armRow = document.createElement('div');
     armRow.className = 'cbdaw-arr__lane-row';
@@ -877,6 +1003,24 @@ export default class Arrangement {
     body.className = 'cbdaw-arr__lane-body';
     body.dataset.alt = String(this._lanes.size % 2 === 1);
 
+    const regionRow = document.createElement('div');
+    regionRow.className = 'cbdaw-arr__lane-regions';
+    body.appendChild(regionRow);
+
+    // null when lane surfaces are off
+    let surfaceSlot = null;
+    if (this._laneSurfaces) {
+      surfaceSlot = document.createElement('div');
+      surfaceSlot.className = 'cbdaw-arr__lane-surface';
+      surfaceSlot.hidden = true;
+      body.appendChild(surfaceSlot);
+
+      // Audio unlock, capture phase: runs before the surface's own pointer handler sounds the
+      // first note, which a suspended context would otherwise drop silently.
+      this._addDom(surfaceSlot, 'pointerdown', unlock, true);
+      this._addDom(surfaceSlot, 'touchstart', unlock, { capture: true, passive: true });
+    }
+
     this.nodes.grid.appendChild(head);
     this.nodes.grid.appendChild(body);
 
@@ -891,26 +1035,29 @@ export default class Arrangement {
     capture.disarm('all');
 
     const lane = {
-      id: ch.id, kind, label: ch.label, capture, head, body, instrument: null,
-      nameInput, instrumentSelect, armBtn, punchBtn, startReadout, endReadout, punch: punchState,
+      id: ch.id, kind, label: ch.label, capture, head, body, regionRow, surfaceSlot,
+      instrument: null, bus: null, surface: null, surfaceType: null,
+      nameInput, instrumentSelect, surfaceSelect, armBtn, punchBtn, startReadout, endReadout,
+      punch: punchState,
     };
     this._lanes.set(ch.id, lane);
+    this._syncLaneArm(lane, this._tracks.get(ch.id)?.armed);
 
     capture.on('commit', (report) => {
       if (report?.kind === 'discard') return;
       this._commitToRegion(lane, report);
     });
 
-    // Double-click empty lane space makes a one-bar region there.
-    this._addDom(body, 'dblclick', (e) => {
-      if (e.target !== body) return;
+    // Double-click empty region-row space makes a one-bar region there.
+    this._addDom(regionRow, 'dblclick', (e) => {
+      if (e.target !== regionRow) return;
       const bar = this._barFromClientX(e.clientX);
       const made = this._regions.add({ laneId: lane.id, startBar: bar, lengthBars: 1, name: lane.label });
       if (made) this._select(made.id);
     });
 
-    this._addDom(body, 'pointerdown', (e) => {
-      if (e.target === body) this._select(null);
+    this._addDom(regionRow, 'pointerdown', (e) => {
+      if (e.target === regionRow) this._select(null);
     });
 
     const syncReadouts = () => {
@@ -924,10 +1071,10 @@ export default class Arrangement {
       this._renderLanePunchWash(lane);
     };
 
+    // writes the store only; `_syncLaneArm` off the update event moves the button, the
+    // lane's capture and the lane's bus
     this._addDom(armBtn, 'click', () => {
-      const next = armBtn.dataset.on !== 'true';
-      armBtn.dataset.on = String(next);
-      if (next) capture.arm('all'); else capture.disarm('all');
+      this._tracks.setArmed(ch.id, armBtn.dataset.on !== 'true');
     });
 
     this._addDom(punchBtn, 'click', () => {
@@ -965,6 +1112,12 @@ export default class Arrangement {
     wash.hidden = true;
     this.nodes.overlay.appendChild(wash);
     lane.wash = wash;
+
+    // last: mounting a surface measures the overlay, which needs `lane.wash` in place
+    if (storedSurface) this._mountLaneSurface(lane, storedSurface);
+
+    // the finished lane, for a host that hangs its own controls on the head
+    if (typeof this.onLaneBuilt === 'function') this.onLaneBuilt(lane);
   }
 
   _renderRuler() {
@@ -1024,11 +1177,13 @@ export default class Arrangement {
       overlay.appendChild(this._handleEnd);
       this._wireHandle(this._handleEnd, 'endBar');
     }
+    // The wash covers the region row only, not the surface slot beneath it.
     for (const lane of this._lanes.values()) {
-      const top = lane.body.offsetTop - this.nodes.grid.offsetTop;
-      const height = lane.body.offsetHeight;
+      if (!lane.wash) continue;
+      const row = lane.regionRow || lane.body;
+      const top = lane.body.offsetTop + row.offsetTop - this.nodes.grid.offsetTop;
       lane.wash.style.top = `${top}px`;
-      lane.wash.style.height = `${height}px`;
+      lane.wash.style.height = `${row.offsetHeight}px`;
       this._renderLanePunchWash(lane);
     }
   }
@@ -1074,7 +1229,7 @@ export default class Arrangement {
 
   _paintSelection() {
     for (const lane of this._lanes.values()) {
-      for (const el of lane.body.querySelectorAll('.cbdaw-arr__region')) {
+      for (const el of lane.regionRow.querySelectorAll('.cbdaw-arr__region')) {
         el.dataset.selected = String(el.dataset.id === this._selectedId);
       }
     }
@@ -1082,7 +1237,7 @@ export default class Arrangement {
 
   /** Rebuilds one lane's blocks from the store. */
   _renderLaneRegions(lane) {
-    for (const el of [...lane.body.querySelectorAll('.cbdaw-arr__region')]) el.remove();
+    for (const el of [...lane.regionRow.querySelectorAll('.cbdaw-arr__region')]) el.remove();
 
     for (const r of this._regions.forLane(lane.id)) {
       const el = document.createElement('div');
@@ -1116,7 +1271,7 @@ export default class Arrangement {
         this._emit('open', this._regions.get(r.id));
       });
 
-      lane.body.appendChild(el);
+      lane.regionRow.appendChild(el);
     }
   }
 
@@ -1175,6 +1330,57 @@ export default class Arrangement {
     this._regions.addNotes(this._editor.regionId, notes);
   }
 
+  // ——— playing surfaces —————————————————————————————————————————————————————————————————
+
+  /** Unmounts, disposes and forgets the lane's surface, and collapses its slot. Leaves
+   *  `lane.surfaceType` alone — the caller sets that. */
+  _disposeLaneSurface(lane) {
+    if (!lane.surface) return false;
+    const surface = lane.surface;
+    lane.surface = null;
+    surface.dispose();
+    if (lane.surfaceSlot) {
+      lane.surfaceSlot.replaceChildren();
+      lane.surfaceSlot.hidden = true;
+    }
+    return true;
+  }
+
+  /** Builds the lane's playing surface and mounts it compact into the slot. Disposes the
+   *  outgoing one first. `type` null collapses the slot. A bus-driven type with no bus
+   *  bound yet is recorded and left unmounted — `bindLaneBus()` mounts it when the bus
+   *  arrives. */
+  _mountLaneSurface(lane, type) {
+    this._disposeLaneSurface(lane);
+    lane.surfaceType = type || null;
+    if (!this._laneSurfaces || !lane.surfaceSlot) return null;
+    if (!lane.surfaceType) { this._layoutOverlay(); return null; }
+
+    const entry = SURFACES[lane.surfaceType];
+    if (!entry) {
+      console.warn('[arrangement.js] no such surface "%s"', lane.surfaceType);
+      lane.surfaceType = null;
+      return null;
+    }
+
+    let surface = null;
+    if (entry.driver === 'instrument') {
+      surface = new entry.Ctor(null, this._clock);
+      surface.bindInstrument(lane.instrument || null);
+    } else {
+      if (!lane.bus) { this._layoutOverlay(); return null; } // no bus yet: bindLaneBus() mounts it
+      surface = lane.surfaceType === 'scale-circle'
+        ? new entry.Ctor(null, lane.bus, sharedState)
+        : new entry.Ctor(null, lane.bus);
+    }
+
+    lane.surface = surface;
+    lane.surfaceSlot.hidden = false;
+    surface.mountCompact(lane.surfaceSlot);
+    this._layoutOverlay();
+    return surface;
+  }
+
   /** Opens a region editor (§10.3). A kindless track opens nothing. Only one editor is
    *  open at a time — opening a second closes the first, writing it back first. */
   _openRegion(region) {
@@ -1188,10 +1394,10 @@ export default class Arrangement {
     const host = document.createElement('div');
     host.style.position = 'fixed';
     host.style.inset = '10%';
-    host.style.background = '#fff';
+    host.style.background = 'var(--popout-ground, #202a3c)';
     host.style.zIndex = '9999';
     host.style.overflow = 'auto';
-    host.style.border = '1px solid #000';
+    host.style.border = '1px solid var(--line, #3a485f)';
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';

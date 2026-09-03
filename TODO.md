@@ -25,6 +25,42 @@ the port-0/sends tap split, **CLOSED 2026-08-31** by `strip-tap-fix` — two sma
 items left, both Brandon's), one new from 2026-09-01 (`arrange rebuild` — phase D
 unspecced).
 
+## NEW — 2026-09-02 — dev-test tool (Chromebook load test), Brandon's desk
+
+`tools/dev-test.html` built — standalone, `file://`-openable, never run. Full detail:
+[receipt-dev-test-load-tool.md](docs/reports/receipt-dev-test-load-tool.md).
+
+- **Open it on the actual Chromebook** — has never been run, no browser, no device.
+- **Decide whether the shipped exponent at [audio.js:196](src/core/audio.js#L196) moves from
+  0.8 toward 0.5** — an ear call on a different graph, three uncontrolled variables (exponent,
+  what `n` counts, smoothing). Not measured. See MEMORY.md warm start.
+- **Adjust `dev-test.html` gain if the goal is to reproduce the DAW's clipping** — its master
+  is hard at 0.08 and cannot distort.
+- **`responseMs: .05` at [audio.js:196](src/core/audio.js#L196)** — field name says
+  milliseconds, value reads like seconds. Found this session, not chased.
+- **RULE CONFLICT, unresolved, Brandon's to rule:** the output-style block says "everyone but
+  the Closer touches MEMORY.md"; global CLAUDE.md says MEMORY.md is Closer-only. Session agent
+  went with Closer-only.
+
+## NEW — 2026-09-02 — signal chain (track bus, surfaces, roll, arm), Brandon's desk
+
+Five jobs wired the chain Brandon asked for: playing surface + roll/steps → instrument →
+mixer. Full detail: [session review](docs/reports/2026-09-02-session-review-signal-chain.md),
+six job receipts linked from it (job3b is a same-day fix to job3).
+
+- **Nothing verified in a browser. Not a single note heard this session.** No agent had one.
+  Reload and play before trusting any of it.
+- **Job 1's harness is red on purpose.** 4 assertions in
+  [track-bus-smoke.mjs](docs/scratchpad/track-bus-smoke.mjs) send a `key` source to an
+  unarmed bus — job 5's arm gate is what's failing them. Fix is `armed: true` on those test
+  buses, not a code fix.
+- **Nothing is armed at boot.** Tracks are born unarmed, so QWERTY is silent until someone
+  clicks ARM. Whether track one auto-arms is Brandon's call.
+- **MIDI may double-shift** — the `input` singleton's own octave shift plus the track bus's,
+  if anything ever writes `input.octaveShift`. Unproven either way.
+- **MIDI to a track at all is untested against real hardware.** New this session, no browser,
+  no device.
+
 ## NEW — 2026-09-02 — unlimited tracks + Phase D, Brandon's desk
 
 Six-job run shipped phase E (unlimited named tracks, instrument instances) and phase D

@@ -59,7 +59,7 @@
  *    already owns.
  */
 
-import { voicePool, governor } from '../core/audio.js';
+import { voicePool, governor, createVoiceOut } from '../core/audio.js';
 
 // ---------------------------------------------------------------------------------------
 // CONSTANTS  (seat questions 1, 2 — the kit layout and the fixed eight roles)
@@ -458,7 +458,7 @@ export default class DrumSampler {
       }
     }
 
-    const voice = new Voice(this.ctx, this._mixGain, buffer, cost);
+    const voice = new Voice(this.ctx, createVoiceOut(DrumSampler.id, this._mixGain), buffer, cost);
     voice.onFree = () => {
       this._voices.delete(voice);
     };

@@ -18,7 +18,7 @@
  * (scopes, P1/S3) owns the drawing. Never inserted into or reconnected by a reader.
  */
 
-import { voicePool, governor } from '../core/audio.js';
+import { voicePool, governor, createVoiceOut } from '../core/audio.js';
 
 // ---------------------------------------------------------------------------------------
 // Constants — §10-G envelope defaults, §11.3 envelope ranges, §11.5 partial table,
@@ -358,7 +358,7 @@ export default class OvertoneSynth {
     const cost = OvertoneSynth.VOICE_CPU_WEIGHT;
 
     const allocate = () => {
-      const voice = new Voice(this._ctx, this._instrumentGain, cost, this._partials, this._env);
+      const voice = new Voice(this._ctx, createVoiceOut(OvertoneSynth.id, this._instrumentGain), cost, this._partials, this._env);
       voice.trigger(note, velocity, t);
       voicePool.register(voice, OvertoneSynth.id, t);
       this._allVoices.add(voice);

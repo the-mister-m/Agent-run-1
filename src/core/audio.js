@@ -239,6 +239,18 @@ function renormalize(when) {
   }
 }
 
+/** Per-voice output gain. Set once at creation, never written again. */
+export function createVoiceOut(instrumentId, dest) {
+  const node = ctx.createGain();
+
+  let n = 1;
+  for (const meta of registry.values()) if (meta.instrumentId === instrumentId) n++;
+  node.gain.value = Math.pow(n, -normState.exponent);
+
+  node.connect(dest);
+  return node;
+}
+
 /** The dev box's write surface. Every setter re-ramps; bad values are dropped, not thrown. */
 export const synthVoiceNorm = {
   get mode() {
