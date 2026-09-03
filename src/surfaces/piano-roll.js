@@ -544,6 +544,9 @@ export default class PianoRoll {
     this.variant = 'expanded';
     this.mounted = false;
 
+    // song tick this roll's bar 1 sits on. 0 for the standalone, a region's start in the DAW
+    this._originTick = 0;
+
     /** SEAT QUESTION 2 — Brandon's decision: the standalone shows a chromatic roll AND a
      *  diatonic roll, both with diatonic shading; the DAW shows one roll. Both modes live
      *  in this one file and a page decides by constructing two instances. */
@@ -804,6 +807,13 @@ export default class PianoRoll {
    *  identically. */
   toProjectNotes() {
     return this.getNotes().map(({ tick, length, note, velocity }) => ({ tick, length, note, velocity }));
+  }
+
+  /** Places this roll's bar 1 on the song timeline. Only the playhead reads it — note ticks
+   *  stay region-local. */
+  setOriginTick(tick) {
+    this._originTick = Number.isFinite(tick) ? tick : 0;
+    return this;
   }
 
   setNotes(notes) {
@@ -1687,7 +1697,8 @@ export default class PianoRoll {
 
     const total = this._totalTicks();
     if (!(total > 0)) return;
-    const pct = (mod(this._clock.positionTicks ?? 0, total) / total) * 100;
+    const local = (this._clock.positionTicks ?? 0) - this._originTick;
+    const pct = (mod(local, total) / total) * 100;
     if (this.nodes.playhead) this.nodes.playhead.style.left = `${pct}%`;
     if (this.nodes.velPlayhead) this.nodes.velPlayhead.style.left = `${pct}%`;
   }

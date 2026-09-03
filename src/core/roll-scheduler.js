@@ -8,7 +8,7 @@
 // separate "already scheduled" bookkeeping.
 // =========================================================================================
 
-import { clock, ticksPerBeat } from './clock.js';
+import { clock, ticksPerBeat, ticksPerBar } from './clock.js';
 import { tracks } from './tracks.js';
 import { regions } from './regions.js';
 
@@ -22,6 +22,8 @@ function inWindow(tick, fromTick, toTick) {
  *  fire here, noteOff pre-computed from n.length. */
 function onTick({ fromTick, toTick, timeOf, bpm }) {
   const secondsPerTick = 60 / (bpm * ticksPerBeat());
+  // note ticks are region-local; a region's startBar places them on the song's timeline
+  const barTicks = ticksPerBar();
 
   for (const track of tracks.all) {
     const instrument = track.instrument;
@@ -32,9 +34,12 @@ function onTick({ fromTick, toTick, timeOf, bpm }) {
       const notes = region.notes;
       if (!Array.isArray(notes)) continue; // a step-grid pattern object, not this shape
 
+      const offset = (region.startBar - 1) * barTicks;
+
       for (const n of notes) {
-        if (inWindow(n.start, fromTick, toTick)) {
-          const onTime = timeOf(n.start);
+        const at = offset + n.tick;
+        if (inWindow(at, fromTick, toTick)) {
+          const onTime = timeOf(at);
           instrument.noteOn(n.note, n.velocity, onTime);
           instrument.noteOff(n.note, onTime + n.length * secondsPerTick);
         }

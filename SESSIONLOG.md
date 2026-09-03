@@ -1,10 +1,14 @@
-Updated 2026-09-02 — Closer, signal chain close
+Updated 2026-09-03 — session agent, DAW header layout (UNCLOSED)
 
 # SESSIONLOG — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Append-only. Work done and decisions made.
 
 ## SESSION INDEX
 (one line per session, newest first: date · name · 5–10 word summary)
+- 2026-09-03 · session agent, daw header layout · **UNCLOSED** — project header rendered vertical with 1039px-wide inputs because `tools/daw-window.html` calls `wireDawShell()` and never `mountDawShell()`, so daw-shell's `STYLE_TEXT` never injected and `.cbdaw-dawhead` computed `display: block` from the user agent sheet; `acquireStyle` exported and called from the page, the deliberate `@media (max-width: 900px)` column stack changed to row+wrap, `--flexdir-row` added to tokens.css (only the column twin existed); nothing run in a browser after the edits, [review](docs/reports/2026-09-03-session-review-daw-header-layout.md)
+- 2026-09-03 · Closer, daw-window wiring close · folded the same-day per-voice-normalizer session and DAW-window-template subagent into one worklog entry per Brandon's assignment, INDEX/MEMORY/CLAUDE map updated, no discrepancies found, [receipt](docs/reports/2026-09-03-closer-daw-window-wiring.md)
+- 2026-09-03 · session agent, daw-window wiring · root cause of `tools/daw-window.html`'s silence found — it never called `wireDawShell`, so it had no track store, no note buses, no roll scheduler; fake six-channel mixer replaced with `wireDawShell` (7 mount hosts, 4 show/hide bottom panes); instrument picker added to mixer strips sharing `assignInstrument` with the lane picker; playing surfaces pulled off arrangement lanes into a new per-track floating instrument panel; three shared-file edits (arrangement.js/daw-shell.js/strip.js) additive with prior-behavior defaults, dev-splash.html/index.html opt into none; graph.js viewport (Job C) scoped, not started; nothing run in a browser, [review](docs/reports/2026-09-03-session-review-daw-window-wiring.md)
+- 2026-09-03 · session agent, per-voice normalizer · Brandon heard clipping the channel scaler couldn't catch; grep found every instrument schedules the envelope before `voicePool.register()`, so the correction lands late on a node all voices share, `createVoiceOut()` added to audio.js and wired into five instruments, patch-synth excluded (never registers), channel scaler untouched, no dials, no browser run, [review](docs/reports/2026-09-03-session-review-per-voice-normalizer.md)
 - 2026-09-03 · subagent, DAW window template · `tools/daw-window.html` built to SPEC-daw-window: frame + collapse chips + three draggable borders, bottom third radio-switches All 7 Strips / Piano Roll / Node Graph, strips hand off between left column and bottom third because `Strip.mountCompact()` self-unmounts, no `/src` edit, no browser run, [receipt](docs/reports/receipt-daw-window-template.md) · [review](docs/reports/2026-09-03-review-daw-window-template.md)
 - 2026-09-02 · subagent, devbar token attribution + collapse · all 28 devbar entries mapped to own/shared/global tokens, GLOBAL corrected to 41 (not 45), FRAME's real file is `daw-shell.js` not `shell.js`, dev-splash.html devbar rebuilt as collapsible rows with tier chips + count badges, [receipt](docs/reports/receipt-devbar-token-attribution.md)
 - 2026-09-02 · Closer, signal chain close · INDEX roll-scheduler entry corrected for job 3b, mixer-rack entry added, TODO carries the four open items, MEMORY warm start replaced, [receipt](docs/reports/2026-09-02-closer-signal-chain.md)
@@ -1766,3 +1770,39 @@ lines, `tools/patch-synth.html` new, one line appended to `src/ui/tokens.css`.
 - LINKS: [tools/dev-test.html](tools/dev-test.html) ·
   [receipt-dev-test-load-tool.md](docs/reports/receipt-dev-test-load-tool.md) ·
   [src/core/audio.js:192-259](src/core/audio.js#L192-L259)
+
+## 2026-09-03 (09:30:31Z–10:58:34Z) — `piano roll ↔ region` — tools/daw-window.html, roll-scheduler, piano-roll
+
+- Piano Roll is a bottom-third pane in the DAW window, chip beside Surface. It follows the
+  arrangement's selected region and raises its own pane; empty selection or a drum lane
+  shows nothing. One roll for the window, not one per track panel.
+- First build put the roll inside the floating per-track panel. Wrong — Brandon's words were
+  "next to surface," and Surface is a bottom chip. Torn out and rebuilt in the right place.
+- **THE FINDING:** the roll-scheduler had never produced audio. It read `n.start`; nothing in
+  the project ever wrote `start` — the roll and the arrangement both write `tick`, which
+  [piano-roll.js:802](src/surfaces/piano-roll.js#L802) names as §7's shape. Fixed, plus a
+  `startBar` offset so a clip fires where it sits instead of at song start.
+- Piano roll gained `setOriginTick()`. The playhead was mapping absolute song position onto
+  the roll's own length, so it never agreed with the arrangement's. Origin 0 leaves the
+  standalone pages untouched.
+- Space toggles play, Enter parks the playhead at the loop start or bar 1.
+- **THE NOTEOFF SEAM, open.** Live notes are clean, scheduled notes are not.
+  [wave-synth.js:275](src/instruments/wave-synth.js#L275) reads `gain.gain.value` at call
+  time and writes it as a hard value at a future `t0` — the gain jumps, and that jump is a
+  click. Brandon found the tell himself: longer notes remove it.
+  [overtone-synth.js:187](src/instruments/overtone-synth.js#L187) clamps `atTime` to now, so
+  a scheduled release fires immediately and truncates. Drum synth and sampler have no-op
+  note-offs. Nothing in the project uses `cancelAndHoldAtTime`.
+- **Duplicate regions, open.** Two regions on one lane that Brandon did not make through the
+  UI. Both dblclick handlers cleared. [arrangement.js:1046](src/ui/arrangement.js#L1046)
+  subscribes `capture.on('commit')` inside `_buildLane` with no `capture.off` anywhere;
+  [:845](src/ui/arrangement.js#L845) clears the lane map on rebuild and leaves the
+  subscriptions live. Not confirmed as the cause.
+- Correction logged: I told Brandon `toProjectNotes()` was the fix. It isn't — it emits
+  `tick` like `getNotes()` does. I had flagged the shape as the load-bearing unknown at the
+  start, then argued against checking it. The scheduler was the odd one out the whole time.
+- **Never run in a browser** by me. Brandon drove every playback test.
+- LINKS: [session review](docs/reports/2026-09-03-session-review-piano-roll-region-wiring.md) ·
+  [tools/daw-window.html](tools/daw-window.html) ·
+  [src/core/roll-scheduler.js](src/core/roll-scheduler.js) ·
+  [src/surfaces/piano-roll.js](src/surfaces/piano-roll.js)

@@ -270,7 +270,7 @@ const STYLE_TEXT = `
 
 /** Injects the shell's stylesheet, ref-counted — mirrors `ui/shell.js`'s
  *  `acquireShellStyle()`/`releaseShellStyle()` shape without importing that file's chrome. */
-function acquireStyle() {
+export function acquireStyle() {
   styleRefs++;
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');

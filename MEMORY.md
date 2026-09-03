@@ -1,4 +1,4 @@
-Updated 2026-09-02 — Closer, signal chain close
+Updated 2026-09-03 — Closer, piano roll ↔ region wiring close
 
 # MEMORY — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
@@ -178,18 +178,48 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
   gated key/midi through it — armed tracks layer, unarmed ones stay silent to shared input; it
   also found two of its own spec's premises were wrong and said so instead of inventing work
   around them. Nothing verified in a browser — no agent had one, not a single note heard.
-  See the current warm start.
+- 09-03 ("DAW window template", subagent): `tools/daw-window.html` built from nothing to
+  [SPEC-daw-window.md](docs/specs/SPEC-daw-window.md) — frame, collapse chips, three
+  draggable dividers, bottom third radio-switches All 7 Strips/Piano Roll/Node Graph. No
+  `/src` edit. **Never run** — `node --check` + token grep only. Receipt:
+  [receipt-daw-window-template.md](docs/reports/receipt-daw-window-template.md).
+- 09-03 ("per-voice normalizer", 04:14–05:12 EDT, separate session): Brandon heard clipping
+  the channel-level scaler couldn't catch. Grep found every registering instrument schedules
+  the voice's envelope before `voicePool.register()`, so the correction lands late on a node
+  all voices share. `createVoiceOut()` added to [audio.js](src/core/audio.js) — one gain node
+  per voice, written once at creation — wired into five instruments; patch-synth excluded (it
+  never registers). Channel-level scaler left untouched, running underneath. No dials, no
+  browser run. Receipt: [session review](docs/reports/2026-09-03-session-review-per-voice-normalizer.md).
+- 09-03 ("daw-window wiring", 03:24–05:14 EDT): root cause of the template's silence found —
+  it never called `wireDawShell`, so it had no track store, no note buses, no roll scheduler.
+  Fixed: fake six-channel mixer replaced with `wireDawShell`, instrument picker added to mixer
+  strips sharing `assignInstrument` with the lane picker, playing surfaces pulled off
+  arrangement lanes into a new per-track floating panel (surface chips gated by track kind).
+  Three shared-file edits (arrangement.js/daw-shell.js/strip.js) additive with prior-behavior
+  defaults — dev-splash.html/index.html opt into none. Brandon ruled the routing graph is
+  `graph.js`, not "the matrix." Session agent added an unasked Automation chip, flagged, not
+  reverted. Nothing run in a browser. See the current warm start.
 
-## WARM START — 2026-09-02 — dev-test built; signal chain still unheard
-- Situation: signal chain (track-bus, roll-scheduler, arm gating, mixer rack) shipped earlier
-  this day, zero browser verification. This session added a standalone Chromebook load test,
-  `tools/dev-test.html` — no `/src` touched.
-- Last state: `dev-test.html` never opened. Durable finding: its own voice normalizer
-  (`n ** -0.5`) beat shipped `n ** -0.8` ([audio.js:196](src/core/audio.js#L196)) by Brandon's
-  ear — three uncontrolled variables, not a measurement. Do not record it as measured.
-- Next move: Brandon runs both `dev-test.html` and the DAW itself in a real browser — nothing
-  has been run across either session. Then: the exponent decision, job 1's stale harness
-  buses, track-one auto-arm at boot.
-- Links: [dev-test receipt](docs/reports/receipt-dev-test-load-tool.md) ·
-  [signal-chain review](docs/reports/2026-09-02-session-review-signal-chain.md) ·
-  [audio.js:192-259](src/core/audio.js#L192-L259) · [TODO.md](TODO.md) · [SESSIONLOG.md](SESSIONLOG.md)
+## WARM START — 2026-09-03 — piano roll sounds; noteOff seam is next
+- Situation: Piano Roll now wired into `tools/daw-window.html` as a bottom-third pane —
+  follows the arrangement's selected region, audible. `roll-scheduler.js` had never produced
+  sound (read `n.start`, everything else writes `tick`); fixed, plus a `startBar` offset and
+  `piano-roll.js`'s `setOriginTick()` so the playhead agrees with the arrangement.
+- Last state: **THE NOTEOFF SEAM, open, next session's first work.** Two symptoms, one shape —
+  a `noteOff` scheduled in the future is mishandled; live notes are clean.
+  [wave-synth.js:275](src/instruments/wave-synth.js#L275)/[:308](src/instruments/wave-synth.js#L308)
+  reads `gain.gain.value` at call time and writes it as a hard value at a future `t0` — the
+  attack ramp is cancelled, the gain jumps, it clicks. Brandon found the tell: longer notes
+  remove it. [overtone-synth.js:187](src/instruments/overtone-synth.js#L187) clamps `atTime`
+  to `currentTime`, so a scheduled release fires immediately and truncates — clips. Drum
+  synth/sampler `noteOff` is a no-op, not affected. Duplicate regions also seen (not from the
+  UI), unconfirmed lead: [arrangement.js:1046](src/ui/arrangement.js#L1046) subscribes
+  `capture.on('commit')` per lane with no `capture.off`; [:845](src/ui/arrangement.js#L845)
+  clears the lane map on rebuild but leaves those subscriptions live.
+- Next move: fix the noteOff seam in wave-synth.js and overtone-synth.js (schedule against
+  the ramp, not a stale read; don't clamp a future release to now). Then chase the duplicate-
+  regions lead in arrangement.js. Nothing this session run in a browser — Brandon drove
+  playback.
+- Links: [session review](docs/reports/2026-09-03-session-review-piano-roll-region-wiring.md) ·
+  [closer receipt](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md) ·
+  [TODO.md](TODO.md) · [SESSIONLOG.md](SESSIONLOG.md)

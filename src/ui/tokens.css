@@ -206,6 +206,7 @@
   --pos-static: static;
   --pos-sticky: sticky;
   --flexdir-column: column;
+  --flexdir-row: row;
   --box-border-box: border-box;
   --flexwrap-wrap: wrap;
   --flexwrap-nowrap: nowrap;

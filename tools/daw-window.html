@@ -234,12 +234,12 @@
   }
   .dwn-panel__surface[hidden] { display: var(--disp-none); }
 
-  /* header stacks vertical below this width */
+  /* header stays a row below this width and wraps to new lines */
   @media (max-width: 900px) {
     .dwn-header { height: auto; max-height: 50%; }
     .dwn-header__body .cbdaw-dawhead {
-      flex-direction: column;
-      align-items: flex-start;
+      flex-direction: var(--flexdir-row);
+      align-items: var(--align-center);
       flex-wrap: var(--flexwrap-wrap);
       height: auto;
       overflow-x: var(--ov-hidden);
@@ -300,6 +300,7 @@
         <span class="dwn-spacer"></span>
         <button class="dwn-chip" data-bottom="strips-all" data-on="false">All Strips</button>
         <button class="dwn-chip" data-bottom="surface" data-on="false">Surface</button>
+        <button class="dwn-chip" data-bottom="roll" data-on="false">Piano Roll</button>
         <button class="dwn-chip" data-bottom="graph" data-on="false">Node Graph</button>
         <button class="dwn-chip" data-bottom="automation" data-on="false">Automation</button>
       </div>
@@ -309,6 +310,7 @@
           <div class="dwn-master-slot" id="dwn-master-slot"></div>
         </div>
         <div class="dwn-pane" id="dwn-pane-surface" data-show="false"></div>
+        <div class="dwn-pane" id="dwn-pane-roll" data-show="false"></div>
         <div class="dwn-pane" id="dwn-pane-graph" data-show="false"></div>
         <div class="dwn-pane" id="dwn-pane-automation" data-show="false"></div>
       </div>
@@ -320,14 +322,16 @@
 <script type="module">
 
 import { ctx, unlock } from '../src/core/audio.js';
-import { clock } from '../src/core/clock.js';
+import { clock, ticksPerBar } from '../src/core/clock.js';
 import { state } from '../src/core/state.js';
 import { input } from '../src/core/input.js';
 import { tracks } from '../src/core/tracks.js';
-import { wireDawShell } from '../src/ui/daw-shell.js';
+import { regions } from '../src/core/regions.js';
+import { wireDawShell, acquireStyle } from '../src/ui/daw-shell.js';
 import Keyboard from '../src/surfaces/keyboard.js';
 import DiatonicKeys from '../src/surfaces/diatonic-keys.js';
 import StepGrid from '../src/surfaces/step-grid.js';
+import PianoRoll from '../src/surfaces/piano-roll.js';
 import '../src/ui/devbox.js';
 
 // wireDawShell's mount hosts. `strips` is mutable — one key per live track, plus master.
@@ -341,6 +345,9 @@ const handle = {
   strips: { master: document.getElementById('dwn-master-slot') },
 };
 
+// daw-shell's stylesheet — mountDawShell() normally injects it; this page mounts its own frame
+acquireStyle();
+
 // owns header, arrangement, mixer, graph, buses, roll scheduler, track lifecycle
 const shell = wireDawShell(handle, { laneSurfaces: false });
 const { mixer, graph, arrangement, header } = shell;
@@ -351,6 +358,24 @@ window.dwn = rig;
 // audio starts suspended in Chrome — first gesture unlocks
 document.addEventListener('pointerdown', () => unlock());
 window.addEventListener('blur', () => input.allNotesOff());
+
+
+// ---- transport keys ---------------------------------------------------------------
+// space toggles play; enter parks the playhead at the loop start, or bar 1 with loop off
+
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && t.closest && t.closest('input, select, textarea, [contenteditable]')) return;
+
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (clock.state === 'stopped') clock.play();
+    else clock.stop();
+  } else if (e.code === 'Enter') {
+    e.preventDefault();
+    clock.seek(clock.loop.on ? clock.loop.startBar : 1);
+  }
+});
 
 
 // ---- left column strips -----------------------------------------------------------
@@ -605,6 +630,63 @@ tracks.on('update', (t) => {
 tracks.on('remove', (t) => closePanel(t.id));
 
 
+// ---- region roll ------------------------------------------------------------------
+// one piano roll for the window, in the bottom third beside Surface. It follows the
+// arrangement's selected region; nothing selected, nothing mounted.
+
+const rollHost = document.getElementById('dwn-pane-roll');
+
+let roll = null;
+
+// the region the roll holds, null when the roll is unmounted
+let rollRegionId = null;
+
+// push the loaded region's notes back to the store
+function flushRoll() {
+  if (!roll || !rollRegionId) return;
+  if (!regions.get(rollRegionId)) return;
+  regions.setNotes(rollRegionId, roll.getNotes());
+}
+
+function unmountRoll() {
+  if (roll && rollRegionId) roll.unmount();
+  rollRegionId = null;
+}
+
+// a drum region's pattern is not a note list — the roll takes pitched regions only
+function isPitched(region) {
+  return Boolean(region) && tracks.get(region.laneId)?.kind === 'pitched';
+}
+
+// load a region into the roll and raise its pane, or clear both when there is nothing to show
+function showRegion(region) {
+  if (rollRegionId && rollRegionId !== region?.id) flushRoll();
+  if (!isPitched(region)) {
+    unmountRoll();
+    if (bottomId === 'roll') setBottom(null);
+    return;
+  }
+  if (rollRegionId !== region.id) {
+    if (!roll) roll = new PianoRoll();
+    if (!rollRegionId) roll.mountCompact(rollHost);
+    rollRegionId = region.id;
+    roll.setOriginTick((region.startBar - 1) * ticksPerBar());
+    roll.setNotes(region.notes);
+  }
+  if (bottomId !== 'roll') setBottom('roll');
+}
+
+arrangement.on('select', showRegion);
+
+// flush at gesture end; the roll has no change event
+window.addEventListener('pointerup', () => flushRoll());
+
+// a deleted region takes no write-back
+regions.on('remove', (r) => {
+  if (r.id === rollRegionId) unmountRoll();
+});
+
+
 // ---- collapse ---------------------------------------------------------------------
 // a dragged region carries an inline size; it is stashed while collapsed, restored on expand
 
@@ -628,6 +710,7 @@ function applyCollapse(region, prop, open) {
 const PANES = {
   'strips-all': document.getElementById('dwn-pane-strips-all'),
   surface: document.getElementById('dwn-pane-surface'),
+  roll: document.getElementById('dwn-pane-roll'),
   graph: document.getElementById('dwn-pane-graph'),
   automation: document.getElementById('dwn-pane-automation'),
 };

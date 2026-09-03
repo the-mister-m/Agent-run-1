@@ -262,6 +262,45 @@ built by real mouse drags. Zero raw literals. Full detail:
 - **Nothing constructs a `Graph` yet.** `daw-shell.js` has a `MOUNTS.nodeGraph` pane waiting;
   `index.html` is frozen to the S4 seat, so wiring it is a later seat's job.
 
+## NEW — 2026-09-03 — piano roll ↔ region wiring, noteOff seam + duplicate regions
+
+Piano Roll now follows the arrangement's selected region in `tools/daw-window.html` and is
+audible — `roll-scheduler.js` read `n.start` where the project writes `tick`, fixed. Full
+detail: [session review](docs/reports/2026-09-03-session-review-piano-roll-region-wiring.md).
+
+- **THE NOTEOFF SEAM, next session's first work.** Both live instruments mishandle a
+  `noteOff` scheduled in the future; live notes are clean.
+  [wave-synth.js:275](src/instruments/wave-synth.js#L275)/[:308](src/instruments/wave-synth.js#L308)
+  reads `gain.gain.value` at call time, writes it as a hard value at a future `t0` — clicks.
+  Brandon's tell: longer notes remove it.
+  [overtone-synth.js:187](src/instruments/overtone-synth.js#L187) clamps `atTime` to
+  `currentTime` — a scheduled release fires immediately and truncates, clips. See the current
+  warm start in [MEMORY.md](MEMORY.md).
+- **Duplicate regions, not confirmed.** Brandon saw two regions on a lane he did not create.
+  Lead: [arrangement.js:1046](src/ui/arrangement.js#L1046) — `capture.on('commit')`
+  subscribed per lane with no matching `capture.off`; [:845](src/ui/arrangement.js#L845)
+  clears the lane map on rebuild but leaves those subscriptions live.
+- **A second receipt for this work is still coming.** Closer to fold it into
+  [2026-09-03-closer-piano-roll-region-wiring.md](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md)
+  and the matching worklog entry when it lands — not yet done.
+
+## NEW — 2026-09-03 — DAW header layout, fixed but unverified
+
+Session left **UNCLOSED** at Brandon's instruction — see
+[review](docs/reports/2026-09-03-session-review-daw-header-layout.md).
+
+- **Reload `tools/daw-window.html#dev` and confirm the header is a row.** The fix is
+  edits-only; nothing was run in a browser. This is the open risk, not a formality.
+- **Is 32px narrow enough for the number inputs?** `--sp-16` = `--sp-unit × 16`. Brandon's
+  eye decides.
+- **900px breakpoint — wrap or scroll?** It now wraps to new lines. The alternative is one
+  row that scrolls sideways. Brandon's call; no token exists for the breakpoint either way.
+- **`--flexdir-row` added to tokens.css by a session agent.** Global-token addition. Does it
+  belong, and does `skinspecs/token-coverage.md` need it? Closer to judge.
+- **`acquireStyle` is now a public export of `daw-shell.js`.** Ref-count reachable from two
+  callers (`mountDawShell` and `daw-window.html`). `index.html` unaffected. Worth a CONTRACTS
+  note? Closer to judge.
+
 ## CLOSED 2026-08-31 — P4/S2 `daw-shell-fix`, ch1 demo instrument vs. `mixer-strips`
 
 Wiring deferral from the earlier P4/S2 pass is CLOSED — `state.js` has its `'project'`
