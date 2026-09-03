@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Run 1 — Tools</title>
+<style>
+  :root {
+    --bg: #16161a;
+    --fg: #e8e6e3;
+    --dim: #8a8780;
+    --line: #2c2c33;
+    --hot: #d6b25e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  header {
+    padding: 28px 24px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: 18px; letter-spacing: .06em; text-transform: uppercase; }
+  header p { margin: 6px 0 0; color: var(--dim); font-size: 13px; }
+
+  nav { display: flex; flex-wrap: wrap; gap: 10px; padding: 20px 24px; }
+  nav a {
+    display: block;
+    padding: 12px 16px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--fg);
+    text-decoration: none;
+  }
+  nav a:hover { border-color: var(--hot); color: var(--hot); }
+  nav a span { display: block; color: var(--dim); font-size: 12px; }
+  nav a:hover span { color: var(--dim); }
+
+  h2 {
+    margin: 8px 0 0;
+    padding: 0 24px;
+    font-size: 12px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Agent Run 1</h1>
+  <p>Chromebook DAW — tool pages</p>
+</header>
+
+<h2>The DAW</h2>
+<nav>
+  <a href="tools/daw-window.html">daw-window<span>full DAW frame</span></a>
+  <a href="OLDdaw.html">OLDdaw<span>previous DAW page</span></a>
+</nav>
+
+<h2>Instruments</h2>
+<nav>
+  <a href="tools/wave-synth.html">wave-synth<span>subtractive synth</span></a>
+  <a href="tools/overtone-synth.html">overtone-synth<span>additive synth</span></a>
+  <a href="tools/patch-synth.html">patch-synth<span>node patching</span></a>
+  <a href="tools/beat.html">beat<span>drum tool</span></a>
+  <a href="tools/harmonyNEW.html">harmonyNEW<span>harmony tool</span></a>
+</nav>
+
+<h2>Dev</h2>
+<nav>
+  <a href="tools/dev-splash.html">dev-splash<span>skin splash</span></a>
+  <a href="tools/dev-test.html">dev-test<span>test page</span></a>
+</nav>
+
+</body>
+</html>

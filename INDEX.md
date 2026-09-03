@@ -1,4 +1,4 @@
-Updated 2026-09-03 — session agent, DAW header layout (UNCLOSED)
+Updated 2026-09-03 — Closer, piano roll ↔ region wiring close
 
 # INDEX — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Links only, no summaries.
@@ -72,6 +72,7 @@ Rules: GLOBAL-RULES.md. Links only, no summaries.
 - [tools/daw-window.html](tools/daw-window.html) — DAW WINDOW, NEW 2026-09-03, template pass to [docs/specs/SPEC-daw-window.md](docs/specs/SPEC-daw-window.md): the frame and the chips, no new piece invented. Project Header full width on top; left column carries the selected-channel strip + master and runs the full height beside the centre column; centre is Arrangement over a switched bottom third (All 7 Strips / Piano Roll / Node Graph, radio chips, none on → collapsed). Every region carries a collapse chip that stays reachable when the body hides; three pointer-drag dividers (header↔body, left↔centre, arrangement↔bottom), and a collapse stashes the dragged inline size and restores it. Same fixed `ch1..ch6`+master demo rig as `dev-splash.html`, not the track store; rig on `window.dwn`. **`Strip.mountCompact()` self-unmounts, so a strip cannot be in two places** — turning the All-7 chip on hands the left column's two strips to the bottom third and turning it off takes them back. **NEVER RUN** — `node --check` and token grep only. [receipt](docs/reports/receipt-daw-window-template.md)
 
 ## DOCS
+- [docs/reports/2026-09-03-closer-piano-roll-region-wiring.md](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md) — closer receipt, piano roll ↔ region wiring close: warm start rewritten with the noteOff seam, TODO carries the duplicate-regions lead, a second receipt for this work still pending, no discrepancies found
 - [docs/reports/2026-09-03-session-review-daw-header-layout.md](docs/reports/2026-09-03-session-review-daw-header-layout.md) — session agent review, DAW header layout, **UNCLOSED**: `tools/daw-window.html` never injected daw-shell's stylesheet (calls `wireDawShell`, not `mountDawShell`), so `.cbdaw-dawhead` computed `display: block` from the user agent sheet — this is the "header does not stack on its own" note below, answered; `acquireStyle` exported + called, 900px column stack changed to row+wrap, `--flexdir-row` added to tokens.css, nothing browser-verified
 - [docs/reports/2026-09-03-session-review-daw-window-wiring.md](docs/reports/2026-09-03-session-review-daw-window-wiring.md) — session agent review, daw-window wiring: `tools/daw-window.html`'s no-playback root cause (never called `wireDawShell`) found and fixed, instrument picker shared between mixer strip and lane, per-track floating panel added, graph.js viewport (Job C) scoped not started, nothing browser-verified
 - [docs/reports/2026-09-03-closer-daw-window-wiring.md](docs/reports/2026-09-03-closer-daw-window-wiring.md) — closer receipt, daw-window wiring close: folds in the same-day per-voice-normalizer session and daw-window-template subagent, docset + worklog updated, no discrepancies found
@@ -150,6 +151,7 @@ Rules: GLOBAL-RULES.md. Links only, no summaries.
 - [P3-harmony-tool/S7-verify/receipt-redpen-p3.md](Builddocs/P3-harmony-tool/S7-verify/receipt-redpen-p3.md) — P3/S7 redpen-p3 receipt
 
 ## SESSIONS
+- [2026-09-03-closer-piano-roll-region-wiring.md](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md) — closer receipt, piano roll ↔ region wiring close: noteOff seam + duplicate regions carried to warm start/TODO, second receipt pending, no discrepancies
 - [2026-09-03-closer-daw-window-wiring.md](docs/reports/2026-09-03-closer-daw-window-wiring.md) — closer receipt, daw-window wiring close: folds in the per-voice-normalizer session + daw-window-template subagent, INDEX/MEMORY/CLAUDE updated, no discrepancies
 - [2026-09-03-session-review-daw-header-layout.md](docs/reports/2026-09-03-session-review-daw-header-layout.md) — session agent review, DAW header layout, **UNCLOSED**: stylesheet never injected on `daw-window.html`, `acquireStyle` exported, 900px stack → row+wrap, `--flexdir-row` added, no browser run
 - [2026-09-03-session-review-daw-window-wiring.md](docs/reports/2026-09-03-session-review-daw-window-wiring.md) — session agent review, daw-window wiring: `wireDawShell` wired into `tools/daw-window.html`, instrument picker + per-track panel added, nothing browser-verified
