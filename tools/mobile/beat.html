@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beat — Chromebook DAW</title>
+
+<!--
+  /tools/mobile/beat.html — the Beat standalone page, mobile layout.
+
+  Serve the PROJECT ROOT over static HTTP. ES modules do not load from file://.
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/tools/mobile/beat.html
+
+  ASSEMBLES
+    core/clock.js .............. transport
+    core/input.js .............. the note bus every surface emits on
+    surfaces/step-grid.js ...... step grid and counting ruler
+    instruments/drum-synth.js .. the machine this page drives
+    ui/shell.js ................ file menu, CPU meter, shared shell stylesheet
+-->
+
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  /* PAGE LAYOUT — `bt-` prefix, mobile layout. */
+  /* Shell chrome classes: cbdaw-panel, cbdaw-menu, cbdaw-status, cbdaw-cpu, cbdaw-nocap, cbdaw-shell__unlock. */
+  /* Transport: static position. Machine host: single column, no max-height. Buttons/inputs: min-height --sp-23 / --sp-20. */
+
+  html, body { margin: var(--sp-0); padding: var(--sp-0); background: var(--bg, #0a0d13); }
+  body {
+    color: var(--text, #f2f6fc);
+    font-family: var(--font-ui);
+  }
+  .bt-page {
+    display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--sp-6);
+    box-sizing: var(--box-border-box); padding: var(--sp-5) var(--sp-6) var(--sp-14); min-height: var(--vh-100);
+  }
+  .bt-page *, .bt-page *::before, .bt-page *::after { box-sizing: var(--box-border-box); }
+
+  /* Top bar: sticky. Transport: static. */
+  .bt-sticky { position: var(--pos-sticky); z-index: var(--z-sticky); background: var(--bg, #0a0d13); }
+  .bt-top { top: 0; padding-top: var(--sp-2); z-index: var(--z-popover); }
+  .bt-transport-wrap { position: var(--pos-static); padding-bottom: var(--sp-2); }
+
+  .bt-bar {
+    display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-8); flex-wrap: var(--flexwrap-wrap);
+    padding: var(--sp-4) var(--sp-6); background: var(--panel, #1b2332);
+    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-panel);
+  }
+  .bt-titles { flex: var(--flex-1-1-240); min-width: var(--sp-0); }
+  .bt-spacer { flex: var(--flex-0-1-auto); }
+  .bt-title { font-size: var(--fs-xl); font-weight: var(--w-bold); letter-spacing: var(--track-tight); margin: var(--sp-0); }
+  .bt-subtitle { font-size: var(--fs-md); line-height: var(--lh-base); color: var(--text-dim, #93a1b8); margin: var(--sp-0); }
+
+  /* Machine column: single column, no height cap. */
+  .bt-machines {
+    display: var(--disp-grid); grid-template-columns: var(--grid-minmax-0-1fr);
+    gap: var(--sp-6); align-items: var(--align-start);
+  }
+  .bt-machine__host { overflow-x: var(--ov-hidden); }
+  .bt-machine__host > * { width: var(--pct-100); }
+
+  .bt-note { font-size: var(--fs-base); line-height: var(--lh-base); color: var(--text-dim, #93a1b8); }
+
+  /* ——— controls: transport ————————————————————————————————————————————————— */
+  .bt-ctl {
+    display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); font-size: var(--fs-base);
+    color: var(--text-dim, #93a1b8); white-space: var(--ws-nowrap);
+  }
+  .bt-ctl__label { text-transform: var(--tt-label); letter-spacing: var(--track-label); font-size: var(--fs-xs); }
+  .bt-ctl__rule { width: var(--sp-hair); align-self: var(--align-stretch); background: var(--line, #3a485f); margin: 0 var(--sp-1); }
+  .bt-row { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-7); flex-wrap: var(--flexwrap-wrap); }
+
+  .bt-btn {
+    font: var(--font-inherit); font-size: var(--fs-md); font-weight: var(--w-med); padding: var(--sp-3) var(--sp-6);
+    min-height: var(--sp-23); touch-action: var(--touch-manipulation);
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-body); cursor: var(--cur-pointer);
+  }
+  .bt-btn:hover:not(:disabled) { border-color: var(--accent, #34e5b4); }
+  .bt-btn:disabled { opacity: var(--op-faint); cursor: var(--cur-not-allowed); }
+  .bt-btn[aria-pressed="true"] {
+    background: var(--accent, #34e5b4); color: var(--bg, #0a0d13);
+    border-color: var(--accent, #34e5b4); font-weight: var(--w-bold);
+  }
+  .bt-btn--small { font-size: var(--fs-sm); padding: var(--sp-1h) var(--sp-4); min-height: var(--sp-20); }
+
+  .bt-num {
+    font: var(--font-inherit); font-size: var(--fs-md); width: var(--sp-em-46); padding: var(--sp-2) var(--sp-3); text-align: var(--ta-right);
+    min-height: var(--sp-20); touch-action: var(--touch-manipulation);
+    font-variant-numeric: var(--num-tabular); color: var(--text, #f2f6fc);
+    background: var(--bg, #0a0d13); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-ctl);
+  }
+  .bt-num--narrow { width: var(--sp-em-32); }
+  .bt-sel {
+    font: var(--font-inherit); font-size: var(--fs-md); padding: var(--sp-2) var(--sp-3); color: var(--text, #f2f6fc);
+    min-height: var(--sp-20); touch-action: var(--touch-manipulation);
+    background: var(--bg, #0a0d13); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-ctl);
+  }
+  .bt-range { accent-color: var(--accent, #34e5b4); width: var(--sp-60); touch-action: var(--touch-manipulation); }
+
+  .bt-readout {
+    font-variant-numeric: var(--num-tabular); font-weight: var(--w-bold); color: var(--accent, #34e5b4);
+    font-size: var(--fs-xl); letter-spacing: var(--track-title); min-width: var(--sp-em-62); text-align: var(--ta-center);
+  }
+  .bt-readout[data-counting="true"] { color: var(--warn, #ff7a1a); }
+  .bt-readout__sub { display: var(--disp-block); font-size: var(--fs-xs); font-weight: var(--w-normal); letter-spacing: var(--track-label);
+    color: var(--text-dim, #93a1b8); text-transform: var(--tt-label); }
+
+  /* Time signature: two digits, stacked. No bottom symbol. */
+  .bt-timesig {
+    display: var(--disp-inline-flex); flex-direction: var(--flexdir-column); align-items: var(--align-center); line-height: var(--lh-none);
+    font-variant-numeric: var(--num-tabular); font-weight: var(--w-bold); font-size: var(--fs-lg);
+    color: var(--text, #f2f6fc); padding: 0 var(--sp-1);
+  }
+  .bt-timesig span + span { border-top: var(--bw) solid var(--line, #3a485f); margin-top: var(--sp-hair); padding-top: var(--sp-hair); }
+
+  .bt-error {
+    padding: var(--sp-8); border: var(--bw) solid var(--meter-hot, #ff3b30); border-radius: var(--r-panel);
+    background: var(--panel, #1b2332); color: var(--text, #f2f6fc); white-space: var(--ws-prewrap);
+    font-family: var(--font-mono); font-size: var(--fs-md);
+  }
+
+  .cbdaw-boot {
+    margin: var(--sp-0); padding: var(--sp-12); font-family: var(--font-ui);
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+  }
+  .cbdaw-boot code { color: var(--accent, #34e5b4); }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="cbdaw-boot">
+    This tool is a Web Audio instrument and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+// ——— IMPORTS ————————————————————————————————————————————————————————————————
+import { toolsForLayout, createFileMenu, createCpuMeter, acquireShellStyle, releaseShellStyle } from '../../src/ui/shell.js';
+
+import { ctx, unlock, createChannel, releaseChannel } from '../../src/core/audio.js';
+import { input } from '../../src/core/input.js';
+import { clock, fromTicks, ticksPerBar } from '../../src/core/clock.js';
+import StepGrid from '../../src/surfaces/step-grid.js';
+import DrumSynth from '../../src/instruments/drum-synth.js';
+
+// This page's layout.
+const LAYOUT = 'mobile';
+
+// ——— SMALL SHARED HELPERS ———————————————————————————————————————————————————
+
+/** Holds every DOM listener this page attaches, so teardown drops all of them and returns
+ *  the count. */
+function listenerBag() {
+  const bag = [];
+  return {
+    add(target, type, fn, opts) {
+      target.addEventListener(type, fn, opts);
+      bag.push({ target, type, fn, opts });
+    },
+    get size() { return bag.length; },
+    dropAll() {
+      const n = bag.length;
+      for (const { target, type, fn, opts } of bag) target.removeEventListener(type, fn, opts);
+      bag.length = 0;
+      return n;
+    },
+  };
+}
+
+function el(tag, className, html) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (html != null) node.innerHTML = html;
+  return node;
+}
+
+function panel(title, note) {
+  const p = el('section', 'cbdaw-panel');
+  const head = el('div', 'cbdaw-panel__head');
+  head.appendChild(el('h2', 'cbdaw-panel__title', title));
+  if (note) head.appendChild(el('span', 'cbdaw-panel__note', note));
+  p.appendChild(head);
+  return { el: p, head };
+}
+
+// ——— THE PAGE ———————————————————————————————————————————————————————————————
+
+class BeatPage {
+  constructor() {
+    this.root = null;
+    this.listeners = listenerBag();
+    this.busUnsubs = [];
+    this.channels = [];
+    this.synth = null;
+    this.grid = null;
+    this.menu = null;
+    this.cpu = null;
+    this.hosts = {};
+    this.raf = 0;
+    this.frames = 0;
+    /** Live DOM refs the rAF loop and the handlers write into, so the loop never queries. */
+    this.ui = {};
+    /** The tempo the scheduler is actually using, off the 'tick' payload. `clock.bpm` reads
+     *  back the requested tempo immediately; the commit lands one window later. */
+    this.committedBpm = clock.bpm;
+    this._onClockTick = (payload) => { this.committedBpm = payload.bpm; };
+    this._onClockState = () => this._syncTransport();
+    this._rafLoop = this._rafLoop.bind(this);
+    this.mounted = false;
+  }
+
+  /** Visual loop only. Reads clock state and writes DOM. Schedules nothing, calls no noteOn. */
+  _rafLoop() {
+    this.raf = requestAnimationFrame(this._rafLoop);
+    this.frames++;
+    this._syncTransport();
+  }
+
+  mount(host) {
+    // Shell chrome stylesheet, acquired.
+    acquireShellStyle();
+
+    const root = el('div', 'bt-page');
+    root.dataset.tool = 'beat';
+    this.root = root;
+
+    // ——— 1 · audio: one channel for the machine ————————————————————————————
+    // The instrument is handed (ctx, out). It never makes a context and never connects to
+    // ctx.destination; releaseChannel takes the channel back at teardown.
+    const synthChannel = createChannel();
+    this.channels.push(synthChannel);
+
+    this.synth = new DrumSynth(ctx, synthChannel);
+
+    // ——— 2 · top bar ————————————————————————————————————————————————————
+    const top = el('header', 'bt-bar');
+    const topWrap = el('div', 'bt-sticky bt-top');
+    topWrap.appendChild(top);
+
+    // Tool menu items for this layout.
+    const items = toolsForLayout(LAYOUT);
+    this.menu = createFileMenu({
+      items,
+      currentId: 'beat',
+      label: 'Tool',
+      onSelect: (item) => { if (item.href) window.location.href = item.href; },
+    });
+    top.appendChild(this.menu.el);
+
+    const titles = el('div', 'bt-titles');
+    titles.appendChild(el('h1', 'bt-title', 'Beat'));
+    titles.appendChild(el('p', 'bt-subtitle',
+      'Eight drums, one pattern. Play them from the pads or the home row, and the grid plays ' +
+      'them back.'));
+    top.appendChild(titles);
+    top.appendChild(el('div', 'bt-spacer'));
+
+    // The meter reads one property off what it is handed: instrument.cpuWeight.
+    this.cpu = createCpuMeter({ instrument: this.synth });
+    top.appendChild(this.cpu.el);
+
+    root.appendChild(topWrap);
+
+    // KNOWN, NOT FIXED HERE: governor.load (core/audio.js) times that module's own bookkeeping
+    // rather than a scheduler pass, so the CPU bar reads near zero under real load. Measured:
+    // 150 voices, cpuWeight 2277, load 0.00. The honest numbers are `voices` and `w`.
+    root.appendChild(el('p', 'bt-note',
+      '<b>Pushing it:</b> turn on <b>noCap</b> above and hold down pads. The <em>voices</em> ' +
+      'and <em>w</em> numbers are the honest ones — they climb without limit. The CPU bar reads ' +
+      '<code>governor.load</code>, which today times core/audio.js\'s own bookkeeping rather ' +
+      'than a scheduler pass, so it stays near zero even at 150 voices.'));
+
+    // ——— 2b · the transport ————————————————————————————————————————————
+    root.appendChild(this._buildTransport());
+
+    // ——— 3 · the grid ————————————————————————————————————————————————————
+    const gridPanel = panel(
+      'Step grid',
+      'eight rows, one per drum — tap a cell to turn a step on, press and drag it up ' +
+      'or down for velocity'
+    );
+    const gridHost = el('div');
+    gridPanel.el.appendChild(gridHost);
+    root.appendChild(gridPanel.el);
+
+    this.grid = new StepGrid(gridHost, clock);
+    // The grid reads two members off whatever it is bound to: Instrument.pieces and
+    // instrument.noteOn(note, velocity, atTime).
+    this.grid.bindInstrument(this.synth);
+
+    // ——— 3b · the live monitor ————————————————————————————————————————
+    this._wireLiveMonitoring();
+
+    // ——— 4 · the machine ————————————————————————————————————————————————
+    const machines = el('div', 'bt-machines');
+    machines.appendChild(this._machineColumn('synth', DrumSynth.label,
+      'built out of Web Audio math — no files, no network'));
+    root.appendChild(machines);
+
+    host.appendChild(root);
+
+    // ——— 5 · mount the expanded views, now that the DOM is in the document ————
+    // mountExpanded, never mountCompact — the compact view is P4's.
+    this.grid.mountExpanded(gridHost);
+    this.synth.mountExpanded(this.hosts.synth);
+
+    // Async gate. Nothing on this page awaits it; only sound waits.
+    if (typeof this.synth.ready === 'function') {
+      this.synth.ready().catch((err) => console.error('[beat.html] ready() failed:', err));
+    }
+
+    // Navigating away is the teardown a student performs. pagehide covers nav, reload, close.
+    this.listeners.add(window, 'pagehide', () => this.dispose());
+
+    this._syncTransport();
+    this.raf = requestAnimationFrame(this._rafLoop);
+
+    this.mounted = true;
+    return this;
+  }
+
+  // ——— THE TRANSPORT ————————————————————————————————————————————————————————
+  // Every control writes a public member of clock.js — bpm, timeSignature, countIn,
+  // metronome, loop — or calls play/stop/seek. This page keeps no transport state of its own.
+
+  _buildTransport() {
+    const wrap = el('div', 'bt-sticky bt-transport-wrap');
+    const bar = el('section', 'bt-bar');
+    wrap.appendChild(bar);
+    const L = this.listeners;
+    const ui = this.ui;
+
+    const group = (labelText) => {
+      const g = el('div', 'bt-ctl');
+      if (labelText) g.appendChild(el('span', 'bt-ctl__label', labelText));
+      bar.appendChild(g);
+      return g;
+    };
+    const rule = () => bar.appendChild(el('div', 'bt-ctl__rule'));
+
+    // ——— rewind · play · stop ————————————————————————————————————————————
+    const buttons = group(null);
+    // clock.stop() leaves the playhead where it stopped. ⏮ is the only way back to bar 1, and
+    // with the loop on, play() from a playhead past loop.endBar never enters the region.
+    ui.rewind = el('button', 'bt-btn', '⏮');
+    ui.rewind.title = 'Back to bar 1 · clock.seek(1, 1, 0)';
+    ui.play = el('button', 'bt-btn', '▶ Play');
+    ui.stop = el('button', 'bt-btn', '■ Stop');
+    for (const b of [ui.rewind, ui.play, ui.stop]) { b.type = 'button'; buttons.appendChild(b); }
+    L.add(ui.rewind, 'click', () => clock.seek(1, 1, 0));
+
+    // unlock() on the first real gesture. Idempotent, safe to call every time.
+    L.add(ui.play, 'click', () => { unlock(); clock.play(); });
+    L.add(ui.stop, 'click', () => { unlock(); clock.stop(); });
+
+    // ——— position — the one readout a class watches ————————————————————
+    const pos = group(null);
+    ui.position = el('div', 'bt-readout',
+      '<span data-pos>1 . 1 . 000</span><span class="bt-readout__sub" data-poslabel>bar · beat · tick</span>');
+    pos.appendChild(ui.position);
+    ui.positionValue = ui.position.querySelector('[data-pos]');
+    ui.positionLabel = ui.position.querySelector('[data-poslabel]');
+    rule();
+
+    // ——— TEMPO ————————————————————————————————————————————————————————
+    const tempo = group('Tempo');
+    ui.bpm = el('input');
+    ui.bpm.type = 'number';
+    ui.bpm.className = 'bt-num';
+    ui.bpm.min = '20'; ui.bpm.max = '300'; ui.bpm.step = '1';
+    ui.bpm.value = String(clock.bpm);
+    ui.bpmSlider = el('input');
+    ui.bpmSlider.type = 'range';
+    ui.bpmSlider.className = 'bt-range';
+    ui.bpmSlider.min = '40'; ui.bpmSlider.max = '220'; ui.bpmSlider.step = '1';
+    ui.bpmSlider.value = String(clock.bpm);
+    const setBpm = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= 0) return; // clock.bpm throws on these; never hand it one
+      clock.bpm = n;
+      if (document.activeElement !== ui.bpm) ui.bpm.value = String(n);
+      if (document.activeElement !== ui.bpmSlider) ui.bpmSlider.value = String(n);
+    };
+    L.add(ui.bpm, 'input', () => setBpm(ui.bpm.value));
+    L.add(ui.bpmSlider, 'input', () => setBpm(ui.bpmSlider.value));
+    tempo.appendChild(ui.bpm);
+    tempo.appendChild(el('span', null, 'BPM'));
+    tempo.appendChild(ui.bpmSlider);
+    // Honest about the one latency `clock.js` cannot remove: a tempo change commits at the
+    // next window boundary because Web Audio cannot un-schedule a node that already has a
+    // start time. This blinks for that ~130 ms instead of pretending it was instant.
+    ui.bpmCommit = el('span', 'bt-ctl__label', '');
+    tempo.appendChild(ui.bpmCommit);
+    rule();
+
+    // ——— TIME SIGNATURE — digits only, §13.4 ————————————————————————————
+    const ts = group('Meter');
+    const tsMinus = el('button', 'bt-btn bt-btn--small', '&minus;');
+    const tsPlus = el('button', 'bt-btn bt-btn--small', '+');
+    tsMinus.type = 'button'; tsPlus.type = 'button';
+    ui.tsDisplay = el('span', 'bt-timesig', '<span data-ts-top>4</span><span data-ts-bottom>4</span>');
+    ui.tsTop = ui.tsDisplay.querySelector('[data-ts-top]');
+    ui.tsBottom = ui.tsDisplay.querySelector('[data-ts-bottom]');
+    ui.tsBottomSel = el('select', 'bt-sel');
+    // §13.4's supported bottoms, and only those: "32 and any non-power-of-two are not
+    // supported." `clock.validateMeter` throws on anything else, so the control cannot offer
+    // one.
+    for (const b of [2, 4, 8, 16]) {
+      const o = el('option', null, String(b));
+      o.value = String(b);
+      if (b === clock.timeSignature.bottom) o.selected = true;
+      ui.tsBottomSel.appendChild(o);
+    }
+    const applyMeter = (top, bottom) => {
+      // Mutated in place, not replaced — `clock.js` re-reads `timeSignature` every pass and
+      // pushes a new segment when the geometry changes, and `step-grid.js`'s rAF loop notices
+      // the change and resizes every lane (§13.5's grow/shrink rule). Neither needs an event.
+      clock.timeSignature.top = Math.max(1, Math.min(16, Math.trunc(top)));
+      clock.timeSignature.bottom = bottom;
+      this._syncTransport();
+    };
+    L.add(tsMinus, 'click', () => applyMeter(clock.timeSignature.top - 1, clock.timeSignature.bottom));
+    L.add(tsPlus, 'click', () => applyMeter(clock.timeSignature.top + 1, clock.timeSignature.bottom));
+    L.add(ui.tsBottomSel, 'change', () => applyMeter(clock.timeSignature.top, Number(ui.tsBottomSel.value)));
+    ts.appendChild(tsMinus);
+    ts.appendChild(ui.tsDisplay);
+    ts.appendChild(tsPlus);
+    ts.appendChild(ui.tsBottomSel);
+    rule();
+
+    // ——— COUNT-IN and METRONOME ————————————————————————————————————————
+    const counting = group('Count-in');
+    ui.countIn = el('input');
+    ui.countIn.type = 'number';
+    ui.countIn.className = 'bt-num bt-num--narrow';
+    ui.countIn.min = '0'; ui.countIn.max = '4'; ui.countIn.step = '1';
+    ui.countIn.value = String(clock.countIn);
+    L.add(ui.countIn, 'input', () => {
+      clock.countIn = Math.max(0, Math.min(4, Math.trunc(Number(ui.countIn.value) || 0)));
+    });
+    counting.appendChild(ui.countIn);
+    counting.appendChild(el('span', null, 'bars'));
+
+    const metro = group(null);
+    ui.metroBtn = el('button', 'bt-btn bt-btn--small', 'Metronome');
+    ui.metroBtn.type = 'button';
+    ui.metroBtn.setAttribute('aria-pressed', String(clock.metronome));
+    L.add(ui.metroBtn, 'click', () => {
+      unlock();
+      clock.metronome = !clock.metronome;
+      ui.metroBtn.setAttribute('aria-pressed', String(clock.metronome));
+    });
+    metro.appendChild(ui.metroBtn);
+    rule();
+
+    // ——— LOOP REGION ————————————————————————————————————————————————————
+    // `clock.loop.endBar` is EXCLUSIVE — `clock.js`'s own LOOP GEOMETRY note and §7's example
+    // `{startBar: 1, endBar: 5}` are a FOUR-bar loop. Nobody should have to remember that, so
+    // the control takes a start bar and a LENGTH IN BARS and does the arithmetic itself. The
+    // readout says "bars 1–4", which is what a student would say out loud.
+    const loop = group('Loop');
+    ui.loopBtn = el('button', 'bt-btn bt-btn--small', 'Loop');
+    ui.loopBtn.type = 'button';
+    ui.loopBtn.setAttribute('aria-pressed', String(clock.loop.on));
+    L.add(ui.loopBtn, 'click', () => {
+      clock.loop.on = !clock.loop.on;
+      this._syncTransport();
+    });
+    ui.loopStart = el('input');
+    ui.loopStart.type = 'number';
+    ui.loopStart.className = 'bt-num bt-num--narrow';
+    ui.loopStart.min = '1'; ui.loopStart.step = '1';
+    ui.loopStart.value = String(clock.loop.startBar);
+    ui.loopBars = el('input');
+    ui.loopBars.type = 'number';
+    ui.loopBars.className = 'bt-num bt-num--narrow';
+    ui.loopBars.min = '1'; ui.loopBars.step = '1';
+    ui.loopBars.value = String(clock.loop.endBar - clock.loop.startBar);
+    const applyLoop = () => {
+      const start = Math.max(1, Math.trunc(Number(ui.loopStart.value) || 1));
+      const len = Math.max(1, Math.trunc(Number(ui.loopBars.value) || 1));
+      clock.loop.startBar = start;
+      clock.loop.endBar = start + len; // exclusive, per clock.js's LOOP GEOMETRY
+      this._syncTransport();
+    };
+    L.add(ui.loopStart, 'input', applyLoop);
+    L.add(ui.loopBars, 'input', applyLoop);
+    ui.loopFit = el('button', 'bt-btn bt-btn--small', '= pattern');
+    ui.loopFit.type = 'button';
+    ui.loopFit.title = 'Set the loop length to the grid pattern length';
+    L.add(ui.loopFit, 'click', () => {
+      ui.loopStart.value = '1';
+      ui.loopBars.value = String(this.grid ? this.grid.bars : 1);
+      applyLoop();
+    });
+    loop.appendChild(ui.loopBtn);
+    loop.appendChild(el('span', null, 'from bar'));
+    loop.appendChild(ui.loopStart);
+    loop.appendChild(el('span', null, 'for'));
+    loop.appendChild(ui.loopBars);
+    loop.appendChild(el('span', null, 'bars'));
+    loop.appendChild(ui.loopFit);
+    ui.loopReadout = el('span', 'bt-ctl__label', '');
+    loop.appendChild(ui.loopReadout);
+    rule();
+
+    // clock.on() is a bare Set.add with no unsubscribe closure; both come off with
+    // clock.off(event, fn) at teardown.
+    clock.on('tick', this._onClockTick);
+    clock.on('statechange', this._onClockState);
+
+    return wrap;
+  }
+
+  // ——— LIVE MONITORING ————————————————————————————————————————————————————
+  // The one path from the input bus to sound. Every surface — the machine's own pads, the
+  // home-row keys, a MIDI drum pad — emits on the bus and plays nothing itself; this is what
+  // hears the bus and calls noteOn. Nothing else on this page may call noteOn from a gesture,
+  // or a hit would double.
+  //
+  // noteOn is called with NO atTime, so a live hit sounds at ctx.currentTime.
+  // Velocity is whatever arrived on the bus; input.js applies its own default when a surface
+  // sends none.
+
+  /** Wires the bus to the machine. Held for teardown in busUnsubs. */
+  _wireLiveMonitoring() {
+    this.busUnsubs.push(
+      input.on('noteon', (e) => {
+        unlock();
+        this.synth.noteOn(e.note, e.velocity);
+      })
+    );
+    this.busUnsubs.push(
+      input.on('noteoff', (e) => {
+        this.synth.noteOff(e.note);
+      })
+    );
+    // A tab-away must not leave a note held on the bus. allNotesOff emits real note-off
+    // events, so nothing downstream needs to know why.
+    this.listeners.add(window, 'blur', () => input.allNotesOff());
+  }
+
+  /** Everything in the transport that reflects state rather than sets it. Called from the
+   *  rAF loop (cheap property writes only) and from the handlers that change state. */
+  _syncTransport() {
+    const ui = this.ui;
+    if (!ui.position) return;
+    const state = clock.state;
+
+    ui.play.setAttribute('aria-pressed', String(state === 'playing'));
+    ui.stop.disabled = state === 'stopped';
+
+    // During a count-in the position is pinned at the start point, so the bars remaining is
+    // shown instead. The `ticks < 0` half of the test covers the window where countingIn has
+    // already flipped false but clock.position still reports the audible now, which is still
+    // on the negative side. Without it the readout shows bar zero for about a tenth of a
+    // second at the top of every count-in.
+    const ticks = clock.positionTicks;
+    if (clock.countingIn || ticks < 0) {
+      const remaining = clock.countingIn
+        ? clock.countInRemainingBars
+        : -ticks / ticksPerBar(clock.timeSignature);
+      ui.positionValue.textContent = remaining.toFixed(1);
+      ui.positionLabel.textContent = 'bars of count-in left';
+      ui.position.dataset.counting = 'true';
+    } else {
+      const p = fromTicks(ticks, clock.timeSignature);
+      ui.positionValue.textContent =
+        `${p.bar} . ${p.beat} . ${String(p.tick).padStart(3, '0')}`;
+      ui.positionLabel.textContent = 'bar · beat · tick';
+      ui.position.dataset.counting = 'false';
+    }
+
+    ui.tsTop.textContent = String(clock.timeSignature.top);
+    ui.tsBottom.textContent = String(clock.timeSignature.bottom);
+
+    const requested = clock.bpm;
+    const committing = Math.round(requested) !== Math.round(this.committedBpm) && clock.state !== 'stopped';
+    ui.bpmCommit.textContent = committing ? `→ ${Math.round(this.committedBpm)} committing…` : '';
+
+    ui.loopBtn.setAttribute('aria-pressed', String(clock.loop.on));
+    const lastBar = clock.loop.endBar - 1; // endBar is exclusive
+    if (!clock.loop.on) {
+      ui.loopReadout.textContent = 'off';
+      ui.loopReadout.style.color = '';
+    } else {
+      const range = lastBar > clock.loop.startBar
+        ? `bars ${clock.loop.startBar}–${lastBar}`
+        : `bar ${clock.loop.startBar}`;
+      // Said, not silently seeked. clock.play() from a playhead past loop.endBar never enters
+      // the region.
+      const tpBar = ticksPerBar(clock.timeSignature);
+      const outside = ticks >= (clock.loop.endBar - 1) * tpBar || ticks < (clock.loop.startBar - 1) * tpBar;
+      ui.loopReadout.textContent = outside ? `${range} — playhead is outside, press ⏮` : range;
+      ui.loopReadout.style.color = outside ? 'var(--warn, #ff7a1a)' : '';
+    }
+  }
+
+  /** The machine's column: a titled panel and a scrolling host. The instrument paints inside
+   *  the host; this page never reaches in. */
+  _machineColumn(key, label, note) {
+    this.hosts = this.hosts || {};
+    const wrap = el('section', 'cbdaw-panel bt-machine');
+    wrap.dataset.machine = key;
+
+    const head = el('div', 'cbdaw-panel__head');
+    head.appendChild(el('h2', 'cbdaw-panel__title', label));
+    head.appendChild(el('span', 'cbdaw-panel__note', note));
+    wrap.appendChild(head);
+
+    wrap.appendChild(el('p', 'bt-note',
+      '<b>Works with the network off.</b> Every piece is built out of oscillators, noise and ' +
+      'filters at trigger time — this machine never fetches anything.'));
+
+    const host = el('div', 'bt-machine__host');
+    wrap.appendChild(host);
+    this.hosts[key] = host;
+    return wrap;
+  }
+
+  // ——— TEARDOWN ————————————————————————————————————————————————————————————
+  // Order matters. Each step stops something that would otherwise reach into what the next
+  // step takes apart:
+  //   1 · the page's rAF     — stops writing clock state into DOM that is about to go
+  //   2 · the input bus      — stops new notes, then releases everything sounding
+  //   3 · the clock's subs   — stops the transport reaching this page
+  //   4 · the grid           — its 'tick' handler is the only scheduler-side caller of noteOn
+  //   5 · the machine        — frees every voice, disconnects every node
+  //   6 · the channel        — handed back to core/audio.js
+  //   7 · the shell's chrome — the CPU meter's rAF, the file menu's document listeners
+  //   8 · this page's listeners, by count
+  //
+  // NOT disposed: core/audio.js, core/input.js, core/clock.js. Document-lifetime singletons —
+  // one AudioContext, one bus, one transport. clock.dispose() would clear the module's 25 ms
+  // interval for the whole document. The transport is STOPPED, not disposed.
+
+  dispose() {
+    if (!this.mounted) return { alreadyDisposed: true };
+    const report = {};
+
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    report.pageRafCancelled = true;
+    clock.stop(); // see above — stopped, never disposed
+
+    for (const off of this.busUnsubs) off();
+    report.busUnsubs = this.busUnsubs.length;
+    this.busUnsubs = [];
+    report.notesReleased = input.allNotesOff();
+
+    clock.off('tick', this._onClockTick);
+    clock.off('statechange', this._onClockState);
+    report.clockSubscriptionsDropped = 2;
+
+    if (this.grid) { report.grid = this.grid.dispose(); this.grid = null; }
+    if (this.synth) { report.synth = this.synth.dispose(); this.synth = null; }
+
+    for (const ch of this.channels) releaseChannel(ch);
+    report.channelsReleased = this.channels.length;
+    this.channels = [];
+
+    if (this.cpu) { report.cpu = this.cpu.dispose(); this.cpu = null; }
+    if (this.menu) { report.menu = this.menu.dispose(); this.menu = null; }
+    releaseShellStyle();
+
+    report.listenersDropped = this.listeners.dropAll();
+    this.root?.remove();
+    this.root = null;
+    this.mounted = false;
+    return report;
+  }
+}
+
+// ——— BOOT ———————————————————————————————————————————————————————————————————
+// An on-page error instead of a blank screen. `window.cbdawBeat` is the handle for calling
+// dispose() and counting what came down.
+
+const page = new BeatPage();
+try {
+  page.mount(document.body);
+} catch (err) {
+  const box = el('pre', 'bt-error');
+  box.textContent = `beat.html failed to mount:\n\n${err && err.stack ? err.stack : err}`;
+  document.body.appendChild(box);
+  console.error('[beat.html] mount failed:', err);
+}
+window.cbdawBeat = page;
+</script>
+
+</body>
+</html>

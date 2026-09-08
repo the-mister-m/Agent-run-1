@@ -2,13 +2,11 @@
  * vis/scope.js — the oscilloscope. **Overtone Synth's visual, and only Overtone Synth's.**
  * Built by `scopes`, P1/S3.
  *
- * THE INVERSION (PHASE.md, and the whole point of P1):
- *   Overtone Synth lets you stack FREQUENCIES and shows you the SHAPE they add up to.
- *   Wave Synth lets you pick a SHAPE and shows you the frequencies inside it.
- *   Each synth shows the view it is not letting you touch. Do not "fix" this by giving
- *   either synth both. This file enforces its half mechanically: it binds to
- *   `getAnalyser('scope')` and nothing else, and an instrument that returns `null` for that
- *   tap (Wave Synth does, per CONTRACTS §11.4) cannot be wired to this visual.
+ * The inversion:
+ *   Overtone Synth stacks FREQUENCIES and shows the SHAPE they add up to.
+ *   A shape-picking synth shows the frequencies inside it.
+ *   This file binds to getAnalyser('scope') only. An instrument returning null for that
+ *   tap, as the spectrum-tap synths do, cannot be wired to this visual.
  *
  * WHAT THE CURRICULUM ASKS FOR, exactly: "what gain of a sound wave looks like over the
  * course of ONE REPETITION." That is the hard requirement in this file and it is why more
@@ -123,8 +121,7 @@ export default class Scope {
    *   legible, and say so on screen with a "×N" so the boost is never a lie.
    * @param {number} [options.height]  override the mode's canvas height in CSS px
    *
-   * @throws if the instrument does not offer the 'scope' tap. Wave Synth returns `null`
-   *   here by contract (§11.4) and therefore cannot be given an oscilloscope.
+   * @throws if the instrument does not offer the 'scope' tap.
    */
   constructor(instrument, options = {}) {
     if (!instrument || typeof instrument.getAnalyser !== 'function') {

@@ -1,0 +1,54 @@
+ROW 1: desktop 1366x768 loaded, shot=R01-desktop-1366.png
+ROW 2: 1024 wide, body overflow 0px, doc overflow 0px, shot=R02-resize-1024.png
+ROW 2: 1280 wide, body overflow 0px, doc overflow 0px, shot=R03-resize-1280.png
+ROW 2: 1366 wide, body overflow 0px, doc overflow 0px, shot=R04-resize-1366.png
+ROW 2: 1600 wide, body overflow 0px, doc overflow 0px, shot=R05-resize-1600.png
+ROW 2: 1920 wide, body overflow 0px, doc overflow 0px, shot=R06-resize-1920.png
+ROW 6: 48 dials + 8 envelope faders, 3 real pointer drags, 264 value moves, patch mismatches 1 [voice.unison dial 1 vs patch 2], console errors 0, shots=R07-dial-drag.png,R08-knob-sweep.png
+ROW 7: mono: after note 1 count=1, after overlapping note 2 count=1, held notes=[67] voice freq=[392] Hz (G4 is 392), shot=R09-mono.png
+ROW 8: pulse width 0.1, spectrum shot=R10-pw-01.png
+ROW 8: pulse width 0.5, spectrum shot=R11-pw-05.png
+ROW 8: pulse width 0.9, spectrum shot=R12-pw-09.png
+ROW 1: desktop page errors total 0
+ROW 4: unison 1: 4 notes held -> voicePool.count=4 (expect 4), after release+0.5s count=0 (expect 0), shot=R13-unison-1.png
+ROW 4: unison 2: 4 notes held -> voicePool.count=8 (expect 8), after release+0.5s count=0 (expect 0), shot=R14-unison-2.png
+ROW 4: unison 4: 4 notes held -> voicePool.count=16 (expect 16), after release+0.5s count=0 (expect 0), shot=R15-unison-4.png
+ROW 5: nine notes: voicePool.count=8 (expect 8), held notes=[61,62,63,64,65,66,67,68], first note 60 still held=false (expect false), shot=R16-poly-cap.png
+ROW 5: page errors 0
+ROW 1: mobile 390x844 loaded, errors 0, shot=R17-mobile-390.png
+ROW 3: mobile doc overflow 0px, --tap-min=46px, dials=48 at 46px (below tap-min: 0), envelope faders=8 at 56px tall, shot=R18-mobile-keyboard.png
+ROW 3: controls with a layout box: 56 of 56
+ROW 9: DAW track: instrumentType=wave-synth kind=pitched mounted instrument id=null; play {"ok":false,"why":"no live instrument on the track"}; page errors 0, shots=R19-daw-track.png,R20-daw-play.png
+ROW 10: /tools/desktop/simple-synth.html id=simple-synth, count idle=0 holding 3 notes=3 after release=0, errors=0, shot=R21-simple-desktop.png
+ROW 10: /tools/mobile/simple-synth.html id=simple-synth, count idle=0 holding 3 notes=3 after release=0, errors=0, shot=R22-simple-mobile.png
+ROW 11: /tools/desktop/simple-synth.html home-row chord (KeyA/KeyD/KeyG/KeyK) held=4 (expect 4), released=0 (expect 0), errors=0, shots=R23-row11-hold-desktop.png,R24-row11-release-desktop.png
+ROW 11: /tools/mobile/simple-synth.html home-row chord (KeyA/KeyD/KeyG/KeyK) held=4 (expect 4), released=0 (expect 0), errors=0, shots=R25-row11-hold-mobile.png,R26-row11-release-mobile.png
+ROW 12: buttons=[Simple Synth, Wave Synth, Overtone Synth, off, CHORD RUN, HELD CHORD, RELEASE], Wave Synth picked, #chordRun clicked, count before=0 during=32 after=0 (expect >0 then back to 0), errors=0, shots=R27-lab-picker.png,R28-lab-wave-picked.png,R29-lab-chord-run.png
+
+================ SUMMARY ================
+ROW 1 | desktop 1366x768 loaded, shot=R01-desktop-1366.png
+ROW 2 | 1024 wide, body overflow 0px, doc overflow 0px, shot=R02-resize-1024.png
+ROW 2 | 1280 wide, body overflow 0px, doc overflow 0px, shot=R03-resize-1280.png
+ROW 2 | 1366 wide, body overflow 0px, doc overflow 0px, shot=R04-resize-1366.png
+ROW 2 | 1600 wide, body overflow 0px, doc overflow 0px, shot=R05-resize-1600.png
+ROW 2 | 1920 wide, body overflow 0px, doc overflow 0px, shot=R06-resize-1920.png
+ROW 6 | 48 dials + 8 envelope faders, 3 real pointer drags, 264 value moves, patch mismatches 1 [voice.unison dial 1 vs patch 2], console errors 0, shots=R07-dial-drag.png,R08-knob-sweep.png
+ROW 7 | mono: after note 1 count=1, after overlapping note 2 count=1, held notes=[67] voice freq=[392] Hz (G4 is 392), shot=R09-mono.png
+ROW 8 | pulse width 0.1, spectrum shot=R10-pw-01.png
+ROW 8 | pulse width 0.5, spectrum shot=R11-pw-05.png
+ROW 8 | pulse width 0.9, spectrum shot=R12-pw-09.png
+ROW 1 | desktop page errors total 0
+ROW 4 | unison 1: 4 notes held -> voicePool.count=4 (expect 4), after release+0.5s count=0 (expect 0), shot=R13-unison-1.png
+ROW 4 | unison 2: 4 notes held -> voicePool.count=8 (expect 8), after release+0.5s count=0 (expect 0), shot=R14-unison-2.png
+ROW 4 | unison 4: 4 notes held -> voicePool.count=16 (expect 16), after release+0.5s count=0 (expect 0), shot=R15-unison-4.png
+ROW 5 | nine notes: voicePool.count=8 (expect 8), held notes=[61,62,63,64,65,66,67,68], first note 60 still held=false (expect false), shot=R16-poly-cap.png
+ROW 5 | page errors 0
+ROW 1 | mobile 390x844 loaded, errors 0, shot=R17-mobile-390.png
+ROW 3 | mobile doc overflow 0px, --tap-min=46px, dials=48 at 46px (below tap-min: 0), envelope faders=8 at 56px tall, shot=R18-mobile-keyboard.png
+ROW 3 | controls with a layout box: 56 of 56
+ROW 9 | DAW track: instrumentType=wave-synth kind=pitched mounted instrument id=null; play {"ok":false,"why":"no live instrument on the track"}; page errors 0, shots=R19-daw-track.png,R20-daw-play.png
+ROW 10 | /tools/desktop/simple-synth.html id=simple-synth, count idle=0 holding 3 notes=3 after release=0, errors=0, shot=R21-simple-desktop.png
+ROW 10 | /tools/mobile/simple-synth.html id=simple-synth, count idle=0 holding 3 notes=3 after release=0, errors=0, shot=R22-simple-mobile.png
+ROW 11 | /tools/desktop/simple-synth.html home-row chord (KeyA/KeyD/KeyG/KeyK) held=4 (expect 4), released=0 (expect 0), errors=0, shots=R23-row11-hold-desktop.png,R24-row11-release-desktop.png
+ROW 11 | /tools/mobile/simple-synth.html home-row chord (KeyA/KeyD/KeyG/KeyK) held=4 (expect 4), released=0 (expect 0), errors=0, shots=R25-row11-hold-mobile.png,R26-row11-release-mobile.png
+ROW 12 | buttons=[Simple Synth, Wave Synth, Overtone Synth, off, CHORD RUN, HELD CHORD, RELEASE], Wave Synth picked, #chordRun clicked, count before=0 during=32 after=0 (expect >0 then back to 0), errors=0, shots=R27-lab-picker.png,R28-lab-wave-picked.png,R29-lab-chord-run.png

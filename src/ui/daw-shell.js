@@ -18,12 +18,13 @@ import Arrangement, { INSTRUMENT_OPTIONS } from './arrangement.js';
 import { createStrips } from '../mixer/strip.js';
 import Graph from '../mixer/graph.js';
 import { createAutomationRack } from '../mixer/automation.js';
+import SimpleSynth from '../instruments/simple-synth.js';
 import WaveSynth from '../instruments/wave-synth.js';
 import OvertoneSynth from '../instruments/overtone-synth.js';
-import ChordModule from '../instruments/chord-module.js';
+import ChordModule from '../../Archive/chord-module.js';
 import PatchSynth from '../instruments/patch-synth.js';
 import DrumSynth from '../instruments/drum-synth.js';
-import DrumSampler from '../instruments/drum-sampler.js';
+import DrumSampler from '../../Archive/drum-sampler.js';
 import { spellingOf } from '../theory/scale.js';
 import { PLACEHOLDER_LETTERS } from '../surfaces/keyboard.js';
 import {
@@ -38,6 +39,7 @@ let styleRefs = 0;
 
 /** instrumentType -> constructor. Every one is `constructor(ctx, out)` + `dispose()`. */
 const INSTRUMENTS = {
+  'simple-synth': SimpleSynth,
   'wave-synth': WaveSynth,
   'overtone-synth': OvertoneSynth,
   'chord-module': ChordModule,
@@ -285,77 +287,7 @@ function releaseStyle() {
   document.getElementById(STYLE_ID)?.remove();
 }
 
-function stripMarkup(id, isMaster) {
-  const cls = isMaster
-    ? 'cbdaw-daw-shell__strip cbdaw-daw-shell__strip--master'
-    : 'cbdaw-daw-shell__strip';
-  return `<div class="${cls}" data-mount="${MOUNTS.strip(id)}" data-channel="${id}"></div>`;
-}
-
-/**
- * → `{ root, header, transport, arrangement, nodeGraph, automationLanes, devicePopout,
- *      mixer, strips: {…live track ids, master}, unmount() }`.
- *
- * Builds the DAW frame into `host` and appends it. Every element named here is an empty
- * mount point — this function instantiates no instrument, no device, no surface, and binds
- * no store. `unmount()` removes the frame and releases the injected stylesheet.
- */
-export function mountDawShell(host = document.body) {
-  acquireStyle();
-
-  const root = document.createElement('div');
-  root.className = 'cbdaw-daw-shell';
-  root.dataset.mount = 'daw-root';
-  root.innerHTML = `
-    <header class="cbdaw-daw-shell__header" data-mount="${MOUNTS.header}"></header>
-    <div class="cbdaw-daw-shell__playing-surface" data-mount="${MOUNTS.playingSurface}"></div>
-    <div class="cbdaw-daw-shell__body">
-      <div class="cbdaw-daw-shell__workspace">
-        <div class="cbdaw-daw-shell__pane cbdaw-daw-shell__arrangement" data-mount="${MOUNTS.arrangement}"></div>
-        <div class="cbdaw-daw-shell__pane cbdaw-daw-shell__graph" data-mount="${MOUNTS.nodeGraph}"></div>
-        <div class="cbdaw-daw-shell__pane cbdaw-daw-shell__automation" data-mount="${MOUNTS.automationLanes}"></div>
-      </div>
-      <div class="cbdaw-daw-shell__mixer" data-mount="mixer">
-        <div class="cbdaw-daw-shell__strips-scroll" data-mount="strips-scroll">
-          ${tracks.all.map((t) => stripMarkup(t.id, false)).join('')}
-        </div>
-        ${stripMarkup('master', true)}
-      </div>
-    </div>
-    <div class="cbdaw-daw-shell__popout" data-mount="${MOUNTS.devicePopout}" hidden>
-      <div class="cbdaw-daw-shell__popout-panel"></div>
-    </div>
-  `;
-
-  host.appendChild(root);
-
-  const strips = {};
-  for (const id of [...tracks.all.map((t) => t.id), 'master']) {
-    strips[id] = root.querySelector(`[data-mount="${MOUNTS.strip(id)}"]`);
-  }
-
-  return {
-    root,
-    header: root.querySelector(`[data-mount="${MOUNTS.header}"]`),
-    playingSurface: root.querySelector(`[data-mount="${MOUNTS.playingSurface}"]`),
-    arrangement: root.querySelector(`[data-mount="${MOUNTS.arrangement}"]`),
-    nodeGraph: root.querySelector(`[data-mount="${MOUNTS.nodeGraph}"]`),
-    automationLanes: root.querySelector(`[data-mount="${MOUNTS.automationLanes}"]`),
-    devicePopout: root.querySelector(`[data-mount="${MOUNTS.devicePopout}"]`),
-    /** the strip rail itself — master lives here, pinned outside the scroll area */
-    mixer: root.querySelector('[data-mount="mixer"]'),
-    /** the scrollable strip row — non-master strip slots are inserted into it */
-    stripsScroll: root.querySelector('[data-mount="strips-scroll"]'),
-    strips,
-    /** Removes the frame from the DOM and releases the stylesheet ref. */
-    unmount() {
-      root.remove();
-      releaseStyle();
-    },
-  };
-}
-
-// Fills mountDawShell()'s mount points: header, playing surface, one instrument.
+// Mount-point fillers: header, playing surface, one instrument.
 
 function listenerBag() {
   const bag = [];
@@ -606,13 +538,14 @@ export function mountPlayingSurface(el, { kind = 'pitch' } = {}) {
   };
 }
 
-/** Wires every mountDawShell() mount point: header, playing surface, mixer strips, routing
+/** Wires every DAW frame mount point on `handle`: header, mixer strips, routing
  *  graph, arrangement, automation lanes — and holds the track lifecycle: add, instrument
  *  assignment, remove. A track's channel, strip and graph node belong to the track and
  *  survive an instrument swap; only the instance is torn down and rebuilt. */
 export function wireDawShell(handle, opts = {}) {
   const header = mountProjectHeader(handle.header, { instrument: null });
-  const surface = mountPlayingSurface(handle.playingSurface);
+  // no playing-surface host: the frame carries no surface pane
+  if (handle.playingSurface) mountPlayingSurface(handle.playingSurface);
 
   // the strip head's instrument picker — the same list and hook the lane head uses
   const stripPicker = {
@@ -788,7 +721,6 @@ export function wireDawShell(handle, opts = {}) {
 
   return {
     header,
-    surface,
     mixer,
     graph,
     arrangement,
@@ -816,10 +748,7 @@ export function wireDawShell(handle, opts = {}) {
       automationRack.dispose();
       graph.dispose();
       mixer.dispose();
-      surface.dispose();
       header.dispose();
     },
   };
 }
-
-export default mountDawShell;

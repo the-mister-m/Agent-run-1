@@ -1,0 +1,72 @@
+{
+  "phase": "before",
+  "counts": {
+    "load": 0,
+    "step1": 0,
+    "step2": 0,
+    "step3": 1,
+    "step4": 2,
+    "step5": 1,
+    "step6": 1
+  },
+  "notes": {
+    "track": {
+      "id": "trk1",
+      "addButton": "+ TRACK"
+    },
+    "surfaceChipPresent": true,
+    "surfaceKeys": 18,
+    "probe": {
+      "input": 1,
+      "buses": 0,
+      "instrument": 0
+    },
+    "dupesTrack": {
+      "id": "trk1",
+      "addButton": "+ TRACK"
+    },
+    "keyboardChip": 1,
+    "surfaceTypeAfterChip": "keyboard",
+    "step2Stop": {
+      "bar": 3,
+      "beat": 1,
+      "tick": 170,
+      "state": "recording"
+    },
+    "step3Region": "r1",
+    "step3EditorOpen": false,
+    "step3Stop": {
+      "bar": 3,
+      "beat": 1,
+      "tick": 165,
+      "state": "recording"
+    },
+    "step4Region": "r2",
+    "step4EditorOpen": false,
+    "afterRemoveCount": 0,
+    "step5Track": {
+      "id": "trk2",
+      "addButton": "+ TRACK"
+    },
+    "step5Region": "r3",
+    "step5EditorOpen": false,
+    "step6Stop": {
+      "bar": 2,
+      "beat": 3,
+      "tick": 172,
+      "state": "recording"
+    },
+    "finalRegions": [
+      {
+        "id": "r3",
+        "lane": "trk2",
+        "startBar": 5,
+        "len": 1,
+        "notes": 0
+      }
+    ],
+    "trackCount": 1,
+    "devSplashMaster": "no master strip element found — viewport shot"
+  },
+  "errors": []
+}

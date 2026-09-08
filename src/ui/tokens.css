@@ -165,6 +165,10 @@
   --z-raise-1:  1;    /* local keyboard-key stacking, lower */
   --z-behind:  -1;    /* behind, e.g. glow pulse */
 
+  /* --- ORDER — flex/grid order, mobile reflow --------------------------------------- */
+  --order-raise-2: -2;   /* moves first: shell top bar, mobile layout */
+  --order-raise-1: -1;   /* moves second: playing surface, mobile layout */
+
   --op-faint: 0.40;   /* absorbs 0.35 / 0.40 / 0.45 */
   --op-dim:   0.55;   /* absorbs 0.50 / 0.55        */
   --op-mid:   0.65;
@@ -212,6 +216,7 @@
   --flexwrap-nowrap: nowrap;
   --ov-hidden: hidden;
   --ov-visible: visible;
+  --ov-auto: auto;
   --justify-center: center;
   --justify-flex-end: flex-end;
   --justify-space-between: space-between;
@@ -251,6 +256,7 @@
   --pct-100: 100%;
   --pct-0: 0%;
   --vh-100: 100vh;
+  --vh-60: 60vh;
   --pct-62: 62%;
   --dropdown-offset: calc(100% + 6px);
 
@@ -268,6 +274,7 @@
   --touch-none: none;
   --touch-manipulation: manipulation;
   --usel-none: none;
+  --tap-min: var(--sp-23);   /* touch target minimum, mobile layout */
 
   /* --- TEXT BEHAVIOR — new axis ------------------------------------------------------ */
   --num-tabular: tabular-nums;
@@ -284,6 +291,7 @@
   --dominant-baseline-central: central;
 
   /* --- LINE STYLE — new axis: border-style, border-left-style ----------------------- */
+  --cap-round: round;
   --line-dashed: dashed;
   --line-solid: solid;
   --line-dotted: dotted;
@@ -386,6 +394,7 @@
   --stroke-semi:  calc(var(--stroke-w) * 1.6);   /* note-on ring                */
   --stroke-bold:  calc(var(--stroke-w) * 1.8);   /* +/- control, focus          */
   --stroke-heavy: calc(var(--stroke-w) * 2);     /* zone focus, waveform glyph  */
+  --stroke-arc:   calc(var(--stroke-w) * 3.5);   /* knob value arc              */
 
   /* --- LINE WEIGHT — extends --bw, no derived scale existed before this write -------- */
   --bw-2: calc(var(--bw) * 2);   /* 2px */

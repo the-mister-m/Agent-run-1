@@ -480,6 +480,7 @@ const STYLE_TEXT = `
 /* §13.5's off-grid mark, the same [data-off-grid] convention step-grid.js already ships:
    a captured hit that did not land on the grid is KEPT at its true tick and shown as such. */
 .cbdaw-roll__note[data-off-grid="true"] { box-shadow: inset 0 0 0 2px var(--warn); }
+.cbdaw-roll__note[data-dim="true"] { opacity: var(--op-faint); }
 /* the length handle */
 .cbdaw-roll__note-handle {
   position: var(--pos-absolute);
@@ -573,6 +574,9 @@ export default class PianoRoll {
 
     // song tick this roll's bar 1 sits on. 0 for the standalone, a region's start in the DAW
     this._originTick = 0;
+
+    // tick past which a note draws dim. 0 = none
+    this._activeTicks = 0;
 
     /** The track bus this roll auditions through. null = silent, and the roll still edits. */
     this._bus = null;
@@ -835,6 +839,15 @@ export default class PianoRoll {
    *  stay region-local. */
   setOriginTick(tick) {
     this._originTick = Number.isFinite(tick) ? tick : 0;
+    return this;
+  }
+
+  /** Ticks at or past this draw dim. 0 or absent clears it. */
+  setActiveTicks(n) {
+    const next = Number.isFinite(n) && n > 0 ? n : 0;
+    if (next === this._activeTicks) return this;
+    this._activeTicks = next;
+    if (this.mounted) this._renderNotes();
     return this;
   }
 
@@ -1311,6 +1324,7 @@ export default class PianoRoll {
       el.dataset.inkey = String(inKey);
       el.dataset.offGrid = String(this._isOffGrid(note));
       el.dataset.selected = String(this._selected === note);
+      el.dataset.dim = String(this._activeTicks > 0 && note.tick >= this._activeTicks);
       el.style.left = `${this._pct(note.tick)}%`;
       el.style.width = `${Math.max(this._pct(note.length), 0.4)}%`;
       // A note whose pitch is outside the drawn range is parked at the nearest edge rather

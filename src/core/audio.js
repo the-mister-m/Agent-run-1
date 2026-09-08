@@ -193,7 +193,7 @@ function sweepRegistry() {
 // gain(0) = 1. A channel created without a synthVoiceId is skipped and holds gain 1.
 // Ducks are written instantly at the new voice's start time; recovery is smoothed.
 
-const normState = { mode: 'per-instrument', exponent: 0.8, responseMs: .05 };
+const normState = { mode: 'per-instrument', exponent: 0.8, responseMs: .05, voiceLayer: true };
 
 function clamp(v, lo, hi) {
   const n = Number(v);
@@ -239,13 +239,16 @@ function renormalize(when) {
   }
 }
 
-/** Per-voice output gain. Set once at creation, never written again. */
+/** Per-voice output gain. Set once at creation, never written again. Skips the duck
+ *  entirely when voiceLayer is off, so the node holds gain 1 for its whole life. */
 export function createVoiceOut(instrumentId, dest) {
   const node = ctx.createGain();
 
-  let n = 1;
-  for (const meta of registry.values()) if (meta.instrumentId === instrumentId) n++;
-  node.gain.value = Math.pow(n, -normState.exponent);
+  if (normState.voiceLayer) {
+    let n = 1;
+    for (const meta of registry.values()) if (meta.instrumentId === instrumentId) n++;
+    node.gain.value = Math.pow(n, -normState.exponent);
+  }
 
   node.connect(dest);
   return node;
@@ -281,6 +284,14 @@ export const synthVoiceNorm = {
     normState.responseMs = n;
   },
 
+  /** Per-voice duck at birth, on by default. Off leaves every createVoiceOut node at gain 1. */
+  get voiceLayer() {
+    return normState.voiceLayer;
+  },
+  set voiceLayer(v) {
+    normState.voiceLayer = !!v;
+  },
+
   /** Snapshot for the dev box readout: [{ id, voices, gain }], one per normalizing
    *  channel on this page. Empty array means no channel opted in. */
   readout() {
@@ -295,6 +306,44 @@ export const synthVoiceNorm = {
     return rows;
   },
 };
+
+// ---------------------------------------------------------------------------------------
+// 4b · MASTER LIMITER
+// ---------------------------------------------------------------------------------------
+// One DynamicsCompressorNode, insertable between masterGain and masterAnalyser. Off by
+// default and absent from the graph until switched on, so every page that never calls this
+// keeps the plain masterGain -> masterAnalyser link it has always had.
+
+let masterLimiterNode = null;
+
+/** Inserts or removes the limiter node. Idempotent. Default off. */
+export function setMasterLimiter(on) {
+  const isOn = masterLimiterNode !== null;
+  if (on === isOn) return;
+
+  if (on) {
+    masterGain.disconnect(masterAnalyser);
+    const node = ctx.createDynamicsCompressor();
+    node.threshold.value = -1;
+    node.knee.value = 0;
+    node.ratio.value = 20;
+    node.attack.value = 0.001;
+    node.release.value = 0.05;
+    masterGain.connect(node);
+    node.connect(masterAnalyser);
+    masterLimiterNode = node;
+  } else {
+    masterGain.disconnect(masterLimiterNode);
+    masterLimiterNode.disconnect();
+    masterLimiterNode = null;
+    masterGain.connect(masterAnalyser);
+  }
+}
+
+/** The live limiter node, or null when off. Read `.reduction` for the meter. */
+export function getMasterLimiter() {
+  return masterLimiterNode;
+}
 
 export const voicePool = {
   /** Called by an instrument's noteOn, after governor.request(cost) grants the
@@ -331,7 +380,7 @@ export const voicePool = {
    *  waiting for the stolen voice's own async 5 ms fade to finish and call free().
    *  Without it, `count` was still stale when the caller's immediate retry checked it, and
    *  a synchronous burst of noteOn calls walked straight past the 32-voice cap (measured:
-   *  40 voices in Wave Synth, 39 in Overtone Synth — test-p1, P1/S5).
+   *  40 voices in Simple Synth, 39 in Overtone Synth).
    *
    *  The returned voice is unchanged in every other way: the caller still calls
    *  `.steal(atTime)` on it to run the real 5 ms audio fade. That fade no longer has
@@ -499,6 +548,12 @@ export function dispose() {
   masterGain.disconnect();
   masterAnalyser.disconnect();
   nodesDisconnected += 2;
+
+  if (masterLimiterNode) {
+    masterLimiterNode.disconnect();
+    masterLimiterNode = null;
+    nodesDisconnected++;
+  }
 
   for (const evt of GESTURE_EVENTS) {
     window.removeEventListener(evt, gestureHandler);

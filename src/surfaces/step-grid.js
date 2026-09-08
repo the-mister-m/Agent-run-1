@@ -76,6 +76,9 @@ import {
  *  fifth. A step created by a tap (not a drag) is written at this velocity. */
 const DEFAULT_VELOCITY = 0.8;
 
+/** The source id a pad audition carries. */
+const PREVIEW_SOURCE = 'mouse';
+
 /** §13.2's table: every `division` that divides PPQ=480 with zero remainder. This file
  *  exposes only the two CONTRACTS names a syllable set exists for — 4 (16ths, default) and
  *  3 (triplets) — as the two one-tap presets; the rest are reachable through the same
@@ -137,6 +140,12 @@ export function stepLabel(step, division) {
 // -----------------------------------------------------------------------------------------
 // 3 · PURE HELPERS
 // -----------------------------------------------------------------------------------------
+
+/** → the piece at `index` on an instrument, or null. Shared with core/roll-scheduler.js. */
+export function pieceFor(instrument, index) {
+  const pieces = instrument?.constructor?.pieces;
+  return Array.isArray(pieces) ? pieces[index] || null : null;
+}
 
 /** True modulo — same reason clock.js carries its own: JS `%` returns negative for a
  *  negative left operand, and a pattern-relative tick can be. */
@@ -352,6 +361,13 @@ const STYLE_TEXT = `
 }
 .cbdaw-grid[data-variant="compact"] .cbdaw-grid__ruler-cell { font-size: var(--fs-micro); padding: var(--sp-hair) 0; }
 .cbdaw-grid__ruler-cell[data-beat="true"] { color: var(--grid-text); font-weight: var(--w-bold); }
+.cbdaw-grid__ruler-bar {
+  display: var(--disp-block);
+  font-size: var(--fs-tiny);
+  font-weight: var(--w-med);
+  color: var(--grid-accent);
+  line-height: var(--lh-tight);
+}
 .cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell { font-size: var(--fs-2xl); padding: var(--sp-2) 0; }
 .cbdaw-grid[data-variant="expanded"] .cbdaw-grid__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
 
@@ -378,6 +394,7 @@ const STYLE_TEXT = `
   opacity: var(--op-soft);
 }
 .cbdaw-grid__cell[data-off-grid="true"] { box-shadow: inset 0 0 0 1px var(--grid-warn); }
+.cbdaw-grid__cell[data-dim="true"] { opacity: var(--op-faint); }
 .cbdaw-grid__cell.is-playing { border-color: var(--grid-accent); }
 
 .cbdaw-grid__playhead {
@@ -431,6 +448,21 @@ export default class StepGrid {
      *  read only as `instrument.constructor.pieces` and `instrument.noteOn(...)`. */
     this.instrument = null;
 
+    // song tick this grid's bar 1 sits on. 0 for the standalone, a region's start in the DAW
+    this._originTick = 0;
+
+    // tick past which a step draws dim. 0 = none
+    this._activeTicks = 0;
+
+    // the piece roles used for labels and pad notes when no instrument is bound
+    this._pieces = null;
+
+    // the track bus a pad auditions through. null = silent
+    this._bus = null;
+
+    // the note a pad is holding down, released on pointer up
+    this._previewNote = null;
+
     /** §6: `'none' | 'syllable'`, per-instance, no global setting. */
     this._overlay = 'syllable';
 
@@ -482,8 +514,60 @@ export default class StepGrid {
   }
 
   _pieceFor(index) {
-    const pieces = this.instrument?.constructor?.pieces;
-    return Array.isArray(pieces) ? pieces[index] || null : null;
+    if (Array.isArray(this._pieces)) return this._pieces[index] || null;
+    return pieceFor(this.instrument, index);
+  }
+
+  /** The eight piece roles, without binding an instrument. Labels and pad notes read them. */
+  setPieces(pieces) {
+    this._pieces = Array.isArray(pieces) ? pieces.slice() : null;
+    if (this.mounted) this._renderLaneLabels();
+    return this;
+  }
+
+  // =========================================================================================
+  // THE TIMELINE SEAMS — origin, active length, audition bus
+  // =========================================================================================
+
+  /** Places this grid's bar 1 on the song timeline. Only the playhead and ruler read it. */
+  setOriginTick(tick) {
+    this._originTick = Number.isFinite(tick) ? tick : 0;
+    if (this.mounted) this._renderRuler();
+    return this;
+  }
+
+  /** Ticks at or past this draw dim. 0 or absent clears it. */
+  setActiveTicks(n) {
+    const next = Number.isFinite(n) && n > 0 ? n : 0;
+    if (next === this._activeTicks) return this;
+    this._activeTicks = next;
+    if (this.mounted) this._renderGrid();
+    return this;
+  }
+
+  /** Swaps the bus a pad auditions through. Releases whatever the old one is holding. */
+  setBus(bus) {
+    if (bus === this._bus) return this;
+    this._previewOff();
+    this._bus = bus || null;
+    return this;
+  }
+
+  get bus() { return this._bus; }
+
+  /** Holds one pad note down. Replaces any note already held, so the pads are monophonic. */
+  _previewOn(note) {
+    if (!Number.isFinite(note)) return;
+    this._previewOff();
+    if (!this._bus) return;
+    this._bus.emitNoteOn({ note, velocity: DEFAULT_VELOCITY, source: PREVIEW_SOURCE });
+    this._previewNote = note;
+  }
+
+  _previewOff() {
+    if (this._previewNote === null) return;
+    this._bus?.emitNoteOff({ note: this._previewNote, source: PREVIEW_SOURCE });
+    this._previewNote = null;
   }
 
   // =========================================================================================
@@ -511,6 +595,13 @@ export default class StepGrid {
     };
     if (this.mounted) this._renderGrid();
     return true;
+  }
+
+  /** Replaces the pattern with an empty one `bars` long. */
+  resetPattern(bars) {
+    this._pattern = makePattern(bars, this._clock.timeSignature.top, DEFAULT_DIVISION);
+    if (this.mounted) this._renderGrid();
+    return this;
   }
 
   get bars() {
@@ -621,6 +712,7 @@ export default class StepGrid {
     this._rafHandle = null;
     if (this._tickSubscribed) this._clock.off('tick', this._onTick);
     this._tickSubscribed = false;
+    this._previewOff();
     this._detachInteraction();
     this.el?.remove();
     this.el = null;
@@ -730,11 +822,13 @@ export default class StepGrid {
     const ts = this._clock.timeSignature;
     const division = this._rulerDivision;
     const bars = this._pattern.bars;
+    // song bar of this grid's bar 1; 1 while the origin is 0
+    const startBar = Math.round(this._originTick / ticksPerBar(ts)) + 1;
     for (let bar = 0; bar < bars; bar++) {
       for (let b = 0; b < ts.top; b++) {
         const group = document.createElement('div');
         group.className = 'cbdaw-grid__beat';
-        group.dataset.bar = String(bar + 1);
+        group.dataset.bar = String(startBar + bar);
         for (let c = 0; c < division; c++) {
           const inBarStep = b * division + c;                       // §13.3's `step`
           const cell = document.createElement('div');
@@ -743,6 +837,13 @@ export default class StepGrid {
           cell.dataset.step = String((bar * ts.top + b) * division + c);
           cell.textContent =
             this._overlay === 'syllable' || c === 0 ? stepLabel(inBarStep, division) : '';
+          if (b === 0 && c === 0 && this._originTick > 0) {
+            const barTag = document.createElement('span');
+            barTag.className = 'cbdaw-grid__ruler-bar';
+            barTag.dataset.bar = String(startBar + bar);
+            barTag.textContent = String(startBar + bar);
+            cell.appendChild(barTag);
+          }
           group.appendChild(cell);
         }
         beats.appendChild(group);
@@ -812,6 +913,7 @@ export default class StepGrid {
     // the full-pattern index — only the DOM stopped at one bar, so at `bars = 2` the second
     // bar sounded, could not be seen and could not be clicked.
     const ts = this._clock.timeSignature;
+    const tps = ticksPerStep(lane.division, ts);
     row.beats.textContent = '';
     for (let bar = 0; bar < this._pattern.bars; bar++) {
       for (let b = 0; b < ts.top; b++) {
@@ -820,19 +922,20 @@ export default class StepGrid {
         group.dataset.bar = String(bar + 1);
         for (let c = 0; c < lane.division; c++) {
           const step = (bar * ts.top + b) * lane.division + c;
-          group.appendChild(this._buildCell(index, step, lane));
+          group.appendChild(this._buildCell(index, step, lane, tps));
         }
         row.beats.appendChild(group);
       }
     }
   }
 
-  _buildCell(laneIndex, stepIndex, lane) {
+  _buildCell(laneIndex, stepIndex, lane, tps) {
     const cell = document.createElement('div');
     cell.className = 'cbdaw-grid__cell';
     cell.dataset.lane = String(laneIndex);
     cell.dataset.step = String(stepIndex);
     cell.dataset.beat = String(stepIndex % lane.division === 0);
+    cell.dataset.dim = String(this._activeTicks > 0 && stepIndex * tps >= this._activeTicks);
     const fill = document.createElement('div');
     fill.className = 'cbdaw-grid__cell-fill';
     cell.appendChild(fill);
@@ -896,6 +999,10 @@ export default class StepGrid {
       wasOn: !!lane.steps[stepIndex],
     };
 
+    // pad audition through the bus, held for the gesture
+    const piece = this._pieceFor(lane.piece);
+    if (this._bus && piece) this._previewOn(piece.note);
+
     this._addWindowDragListeners();
   }
 
@@ -934,6 +1041,7 @@ export default class StepGrid {
       this._paintCell(drag.cell, lane.steps[drag.stepIndex]);
     }
 
+    this._previewOff();
     try { drag.cell.releasePointerCapture(drag.pointerId); } catch { /* already released */ }
     this._drag = null;
   };
@@ -1032,7 +1140,8 @@ export default class StepGrid {
 
     const patternTicks = this._pattern.bars * ticksPerBar(ts);
     if (!(patternTicks > 0)) return;
-    const pos = mod(this._clock.positionTicks ?? 0, patternTicks);
+    const local = (this._clock.positionTicks ?? 0) - this._originTick;
+    const pos = mod(local, patternTicks);
     const pct = (pos / patternTicks) * 100;
     if (this.nodes.playhead) this.nodes.playhead.style.left = `${pct}%`;
 

@@ -1,0 +1,287 @@
+{
+  "drumTrack": "trk1",
+  "probe": {
+    "found": true,
+    "pieces": 8
+  },
+  "regionA": "r1",
+  "t2_region": {
+    "startBar": 3,
+    "lengthBars": 2,
+    "loop": false,
+    "loopBars": null,
+    "patternBars": 2,
+    "onSteps": []
+  },
+  "t2_gridInPane": 1,
+  "t2_rulerBars": [
+    "3",
+    "4"
+  ],
+  "t2_rows": 8,
+  "t2_afterSteps": {
+    "startBar": 3,
+    "lengthBars": 2,
+    "loop": false,
+    "loopBars": null,
+    "patternBars": 2,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "t2_counts": {
+    "perBar": {
+      "3": 2,
+      "4": 1
+    },
+    "total": 3
+  },
+  "t4_afterGrow": {
+    "startBar": 3,
+    "lengthBars": 4,
+    "loop": false,
+    "loopBars": null,
+    "patternBars": 4,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "t4_rulerGrown": [
+    "3",
+    "4",
+    "5",
+    "6"
+  ],
+  "t4_growCounts": {
+    "perBar": {
+      "3": 2,
+      "4": 1
+    },
+    "total": 3
+  },
+  "t4_afterShrink": {
+    "startBar": 3,
+    "lengthBars": 1,
+    "loop": false,
+    "loopBars": null,
+    "patternBars": 4,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "t4_rulerShrunk": [
+    "3",
+    "4",
+    "5",
+    "6"
+  ],
+  "t4_dimCells": 384,
+  "t4_dimOnCells": 1,
+  "t4_liveCells": 128,
+  "t4_shrinkCounts": {
+    "perBar": {
+      "3": 2
+    },
+    "total": 2
+  },
+  "t4_restored": {
+    "startBar": 3,
+    "lengthBars": 2,
+    "loop": false,
+    "loopBars": null,
+    "patternBars": 4,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "t5_afterLoopClick": {
+    "startBar": 3,
+    "lengthBars": 2,
+    "loop": true,
+    "loopBars": 2,
+    "patternBars": 4,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "t5_afterLoopDrag": {
+    "startBar": 3,
+    "lengthBars": 6,
+    "loop": true,
+    "loopBars": 2,
+    "patternBars": 6,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "t5_counts": {
+    "perBar": {
+      "3": 2,
+      "4": 1,
+      "5": 2,
+      "6": 1,
+      "7": 2,
+      "8": 1
+    },
+    "total": 9
+  },
+  "t3_regionAReset": {
+    "startBar": 3,
+    "lengthBars": 2,
+    "loop": false,
+    "loopBars": 2,
+    "patternBars": 6,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "regionB": "r2",
+  "t3_regionB": {
+    "startBar": 6,
+    "lengthBars": 1,
+    "loop": false,
+    "loopBars": null,
+    "patternBars": 1,
+    "onSteps": [
+      [
+        2,
+        [
+          4,
+          12
+        ]
+      ]
+    ]
+  },
+  "t3_counts": {
+    "perBar": {
+      "3": 2,
+      "4": 1,
+      "6": 2
+    },
+    "total": 5
+  },
+  "t3_regionA": {
+    "startBar": 3,
+    "lengthBars": 2,
+    "loop": false,
+    "loopBars": 2,
+    "patternBars": 6,
+    "onSteps": [
+      [
+        0,
+        [
+          0,
+          16
+        ]
+      ],
+      [
+        1,
+        [
+          8
+        ]
+      ]
+    ]
+  },
+  "t6_armed": false,
+  "t6_busAndPieces": {
+    "bus": true,
+    "pieces": 8
+  },
+  "t6_hits": 1,
+  "t7_roll": 1,
+  "t7_gridLeft": 0,
+  "t7_backGrid": 1,
+  "t7_rollLeft": 0,
+  "t9": {
+    "floatingBefore": 0,
+    "floatingAfter": 0,
+    "selected": 1,
+    "gridsInPage": 1,
+    "paneGrid": 1
+  },
+  "errors": []
+}

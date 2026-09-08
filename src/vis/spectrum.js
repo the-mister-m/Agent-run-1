@@ -1,15 +1,12 @@
 /**
- * vis/spectrum.js — the spectrum analyzer. **Wave Synth's visual, and only Wave Synth's.**
- * Built by `scopes`, P1/S3.
+ * vis/spectrum.js — the spectrum analyzer. The visual for instruments that expose the
+ * spectrum tap.
  *
- * THE INVERSION (PHASE.md, and the whole point of P1):
- *   Wave Synth lets you pick a shape and shows you the FREQUENCIES in it  → spectrum.
- *   Overtone Synth lets you pick frequencies and shows you the SHAPE      → oscilloscope.
- *   Each synth shows the view it is not letting you touch. Do not "fix" this by giving
- *   either synth both. This file enforces its half mechanically: it binds to
- *   `getAnalyser('spectrum')` and nothing else, and an instrument that returns `null` for
- *   that tap (Overtone Synth does, per CONTRACTS §11.5) cannot be wired to this visual —
- *   the constructor refuses.
+ * The inversion:
+ *   A shape-picking synth shows the FREQUENCIES in it   → spectrum.
+ *   Overtone Synth stacks frequencies and shows the SHAPE → oscilloscope.
+ *   This file binds to getAnalyser('spectrum') only. An instrument returning null for
+ *   that tap is refused in the constructor.
  *
  * Owns: CONTRACTS §1's `vis/spectrum.js` layout entry. Reads §2's `getAnalyser(which)`
  * amendment and §11.6's placement of that node. Draws with §9's tokens only.
@@ -150,9 +147,7 @@ export default class Spectrum {
       const id = instrument.constructor?.id ?? instrument.id ?? 'this instrument';
       throw new Error(
         `Spectrum: ${id} returned null for getAnalyser('spectrum'), so it does not offer ` +
-          'the spectrum tap and must not be given a spectrum analyzer. This is the P1 ' +
-          'teaching inversion (PHASE.md): the spectrum analyzer belongs to Wave Synth ' +
-          'ONLY. Overtone Synth\'s visual is the oscilloscope — use vis/scope.js.'
+          'the spectrum tap. Overtone Synth\'s visual is the oscilloscope — use vis/scope.js.'
       );
     }
 

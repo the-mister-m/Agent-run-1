@@ -6,7 +6,7 @@
 <title>DEV SPLASH</title>
 <link rel="icon" href="data:,">
 
-<link rel="stylesheet" href="../src/ui/tokens.css">
+<link rel="stylesheet" href="../../src/ui/tokens.css">
 <style>
   /* page chrome only — dsp- prefix, never touches cbdaw- piece styles */
   html, body {
@@ -586,37 +586,37 @@
 
 <script type="module">
 
-import { ctx, unlock } from '../src/core/audio.js';
-import { clock } from '../src/core/clock.js';
-import { state } from '../src/core/state.js';
-import { input } from '../src/core/input.js';
-import { createStrips } from '../src/mixer/strip.js';
-import Graph from '../src/mixer/graph.js';
-import { createChannelAutomation } from '../src/mixer/automation.js';
+import { ctx, unlock } from '../../src/core/audio.js';
+import { clock } from '../../src/core/clock.js';
+import { state } from '../../src/core/state.js';
+import { input } from '../../src/core/input.js';
+import { createStrips } from '../../src/mixer/strip.js';
+import Graph from '../../src/mixer/graph.js';
+import { createChannelAutomation } from '../../src/mixer/automation.js';
 import { mountProjectHeader, mountPlayingSurface }
-  from '../src/ui/daw-shell.js';
-import Keyboard from '../src/surfaces/keyboard.js';
-import DiatonicKeys from '../src/surfaces/diatonic-keys.js';
-import ScaleCircle from '../src/surfaces/scale-circle.js';
-import PianoRoll from '../src/surfaces/piano-roll.js';
-import StepGrid from '../src/surfaces/step-grid.js';
-import CompBuilder from '../src/surfaces/comp-builder.js';
-import Arrangement from '../src/ui/arrangement.js';
-import Gate from '../src/devices/gate.js';
-import Compressor from '../src/devices/compressor.js';
-import EQ from '../src/devices/eq.js';
-import Reverb from '../src/devices/reverb.js';
-import Delay from '../src/devices/delay.js';
-import WaveSynth from '../src/instruments/wave-synth.js';
-import OvertoneSynth from '../src/instruments/overtone-synth.js';
-import DrumSynth from '../src/instruments/drum-synth.js';
-import DrumSampler from '../src/instruments/drum-sampler.js';
-import PatchSynth from '../src/instruments/patch-synth.js';
-import Spectrum from '../src/vis/spectrum.js';
-import Scope from '../src/vis/scope.js';
-import Meter from '../src/vis/meter.js';
-import { createGovernorMeter } from '../src/ui/cpu-meter.js';
-import '../src/ui/devbox.js';
+  from '../../src/ui/daw-shell.js';
+import Keyboard from '../../src/surfaces/keyboard.js';
+import DiatonicKeys from '../../src/surfaces/diatonic-keys.js';
+import ScaleCircle from '../../src/surfaces/scale-circle.js';
+import PianoRoll from '../../src/surfaces/piano-roll.js';
+import StepGrid from '../../src/surfaces/step-grid.js';
+import CompBuilder from '../../src/surfaces/comp-builder.js';
+import Arrangement from '../../src/ui/arrangement.js';
+import Gate from '../../src/devices/gate.js';
+import Compressor from '../../src/devices/compressor.js';
+import EQ from '../../src/devices/eq.js';
+import Reverb from '../../src/devices/reverb.js';
+import Delay from '../../src/devices/delay.js';
+import SimpleSynth from '../../src/instruments/simple-synth.js';
+import OvertoneSynth from '../../src/instruments/overtone-synth.js';
+import DrumSynth from '../../src/instruments/drum-synth.js';
+import DrumSampler from '../../Archive/drum-sampler.js';
+import PatchSynth from '../../src/instruments/patch-synth.js';
+import Spectrum from '../../src/vis/spectrum.js';
+import Scope from '../../src/vis/scope.js';
+import Meter from '../../src/vis/meter.js';
+import { createGovernorMeter } from '../../src/ui/cpu-meter.js';
+import '../../src/ui/devbox.js';
 
 // dev page's own fixed demo channels — not read from any track store
 const CHANNEL_IDS = ['ch1', 'ch2', 'ch3', 'ch4', 'ch5', 'ch6'];
@@ -1004,7 +1004,7 @@ const CATALOG = [
   devicePiece('reverb', 'Reverb', Reverb),
   devicePiece('delay', 'Delay', Delay),
 
-  instrumentPiece('wave-synth', 'Wave Synth', WaveSynth),
+  instrumentPiece('simple-synth', 'Simple Synth', SimpleSynth),
   instrumentPiece('overtone-synth', 'Overtone Synth', OvertoneSynth),
   instrumentPiece('drum-synth', 'Drum Synth', DrumSynth),
   instrumentPiece('drum-sampler', 'Drum Sampler', DrumSampler),
@@ -1069,7 +1069,7 @@ const TOKEN_ATTRIBUTION = {
   "eq": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-pointer", "--knob-track", "--sp-em-46"], shared: ["--bw-2", "--cur-ew-resize", "--flex-0-0-auto", "--flex-1", "--fs-md", "--fs-xs", "--justify-space-between", "--pct-0", "--popout-ground", "--r-pill", "--sp-em-16", "--ta-right", "--tr-background", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med"] },
   "reverb": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-track"], shared: ["--fs-xs", "--popout-ground", "--sp-16", "--tr-color"], global: ["--bw", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--text", "--text-dim", "--w-med"] },
   "delay": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-track"], shared: ["--fs-xs", "--popout-ground", "--sp-16", "--tr-color"], global: ["--bw", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--text", "--text-dim", "--w-med"] },
-  "wave-synth": { own: ["--anim-pulse", "--color-current", "--content-empty", "--r-lg", "--r-xl", "--scale-pulse-peak", "--scale-pulse-rest", "--sp-11", "--sp-65", "--sp-em-17", "--sp-em-35", "--stroke-heavy", "--z-behind"], shared: ["--accent", "--disp-none", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-micro", "--fs-xl", "--fs-xs", "--lh-none", "--op-faint", "--op-soft", "--sp-10", "--sp-12", "--sp-13", "--sp-16", "--sp-20", "--sp-30", "--sp-39", "--sp-7", "--sp-8", "--sp-9", "--sp-em-16", "--sp-em-36", "--ta-right", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--r-sm", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--w-bold"] },
+  "simple-synth": { own: ["--anim-pulse", "--color-current", "--content-empty", "--r-lg", "--r-xl", "--scale-pulse-peak", "--scale-pulse-rest", "--sp-11", "--sp-65", "--sp-em-17", "--sp-em-35", "--stroke-heavy", "--z-behind"], shared: ["--accent", "--disp-none", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-micro", "--fs-xl", "--fs-xs", "--lh-none", "--op-faint", "--op-soft", "--sp-10", "--sp-12", "--sp-13", "--sp-16", "--sp-20", "--sp-30", "--sp-39", "--sp-7", "--sp-8", "--sp-9", "--sp-em-16", "--sp-em-36", "--ta-right", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--r-sm", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--w-bold"] },
   "overtone-synth": { own: ["--tr-shadow"], shared: ["--accent", "--flex-1", "--flexwrap-wrap", "--meter-ok", "--sp-60"], global: ["--align-center", "--box-border-box", "--bw", "--disp-flex", "--flexdir-column", "--font-ui", "--line", "--ov-hidden", "--panel", "--pct-100", "--r-ctl", "--sp-1", "--sp-4", "--sp-5", "--text", "--text-dim"] },
   "drum-synth": { own: ["--dur-fast", "--fs-em-65", "--fs-em-75", "--fs-em-85", "--grid-repeat4-1fr", "--r-xl", "--sp-18", "--sp-em-38"], shared: ["--accent", "--align-flex-start", "--disp-grid", "--disp-none", "--ease", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-xl", "--justify-center", "--sp-14", "--sp-30", "--sp-7", "--sp-8", "--sp-9", "--sp-em-36", "--ta-right", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--panel", "--pct-100", "--r-body", "--r-ctl", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med"] },
   "drum-sampler": { own: ["--anim-hit-flash", "--anim-miss-flash", "--fs-em-75", "--fs-em-85", "--grid-repeat4-1fr", "--grid-repeat4-minmax90", "--touch-manipulation"], shared: ["--accent", "--disp-grid", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-xl", "--justify-center", "--line-dashed", "--op-dim", "--sp-16", "--sp-20", "--sp-9", "--track-title"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--panel", "--pct-100", "--pos-relative", "--r-body", "--r-ctl", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim", "--w-bold", "--w-med", "--warn"] },

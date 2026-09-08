@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simple Synth — Chromebook DAW</title>
+
+<!--
+  /tools/mobile/simple-synth.html — the Simple Synth standalone page, mobile.
+  Twin: /tools/desktop/simple-synth.html. Same modules, different layout flag.
+
+  layout: 'mobile' gives one column, document scroll, touch-sized controls, and the
+  playing surface above the instrument panel.
+
+      python3 -m http.server 8000
+      http://127.0.0.1:8000/tools/mobile/simple-synth.html
+
+-->
+
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+  html, body { margin: var(--sp-0); padding: var(--sp-0); background: var(--bg, #0a0d13); }
+  .cbdaw-boot {
+    margin: var(--sp-0); padding: var(--sp-12);
+    font-family: var(--font-ui);
+    color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
+  }
+  .cbdaw-boot code { color: var(--accent, #34e5b4); }
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="cbdaw-boot">
+    This tool is a Web Audio instrument and needs JavaScript enabled.
+  </p>
+</noscript>
+
+<script type="module">
+  import { mountStandaloneTool } from '../../src/ui/shell.js';
+  import SimpleSynth from '../../src/instruments/simple-synth.js';
+  import Spectrum from '../../src/vis/spectrum.js';
+
+  // One visual: the spectrum tap. The scope tap is null on this instrument.
+  mountStandaloneTool({
+    toolId: 'simple-synth',
+    layout: 'mobile',
+    Instrument: SimpleSynth,
+    Visual: Spectrum,
+    tap: 'spectrum',
+    lesson:
+      'Pick a shape and see how many frequencies are in it. ' +
+      'Smoother wave = fewer overtones.',
+    visualTitle: 'Spectrum analyzer',
+    visualNote:
+      'every frequency in the sound right now — the fundamental is the lowest and ' +
+      'loudest, everything above it is an overtone (×2, ×3, ×4 …)',
+  });
+</script>
+
+</body>
+</html>

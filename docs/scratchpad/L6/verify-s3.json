@@ -1,0 +1,77 @@
+{
+  "errors": [],
+  "before_A": [],
+  "barAtStop_A": 2,
+  "after_A": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 2,
+      "len": 1,
+      "notes": 3
+    }
+  ],
+  "commits_A": [
+    {
+      "kind": "record",
+      "noteCount": 3
+    }
+  ],
+  "barAtStop_B": 2,
+  "after_B": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 2,
+      "len": 1,
+      "notes": 5
+    }
+  ],
+  "editorRegion": "r2",
+  "editorOpen_C": true,
+  "barAtStop_C": 2,
+  "after_C": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 2,
+      "len": 1,
+      "notes": 5
+    },
+    {
+      "id": "r2",
+      "lane": "trk1",
+      "startBar": 9,
+      "len": 1,
+      "notes": 2
+    }
+  ],
+  "after_C_closed": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 2,
+      "len": 1,
+      "notes": 5
+    },
+    {
+      "id": "r2",
+      "lane": "trk1",
+      "startBar": 9,
+      "len": 1,
+      "notes": 0
+    }
+  ],
+  "railDump": [
+    "dsp-rail__group|▸FRAME",
+    "dsp-rail__group|▸SURFACES",
+    "dsp-rail__group|▸SEQUENCING",
+    "dsp-rail__group|▸MIXER",
+    "dsp-rail__group|▸DEVICES",
+    "dsp-rail__group|▸INSTRUMENTS",
+    "dsp-rail__group|▸VIS"
+  ],
+  "groupClick": "clicked dsp-rail__group",
+  "masterPick": "clicked Strip / master",
+  "devSplashMasterCount": 1
+}

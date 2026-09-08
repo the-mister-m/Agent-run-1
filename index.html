@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Run 1</title>
+<script>
+  // route: stored pick wins, else screen shape
+  var pick = null;
+  try { pick = localStorage.getItem('cbdaw-nav'); } catch (e) {}
+  if (pick !== 'desktop' && pick !== 'mobile') {
+    pick = matchMedia('(max-width: 820px), (pointer: coarse)').matches ? 'mobile' : 'desktop';
+  }
+  location.replace(pick + '.html');
+</script>
+<noscript><meta http-equiv="refresh" content="0; url=desktop.html"></noscript>
+</head>
+<body></body>
+</html>

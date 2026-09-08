@@ -6,92 +6,25 @@
 <title>Patch Synth — Chromebook DAW</title>
 
 <!--
-  /tools/patch-synth.html — the Patch Synth standalone page.
+  /tools/desktop/patch-synth.html — the Patch Synth standalone page, desktop layout.
 
   Serve the PROJECT ROOT over static HTTP. ES modules do not load from file://.
 
       python3 -m http.server 8000
-      http://127.0.0.1:8000/tools/patch-synth.html
+      http://127.0.0.1:8000/tools/desktop/patch-synth.html
 
   ASSEMBLES
     core/audio.js ................ context, channel, unlock
     core/input.js ................ the note bus every surface emits on
     surfaces/keyboard.js ......... the 12-note keyboard that plays it
     instruments/patch-synth.js ... the instrument this page drives
-    ui/shell.js .................. file menu, CPU meter
+    ui/shell.js .................. file menu, CPU meter, shared shell stylesheet
 -->
 
-<link rel="stylesheet" href="../src/ui/tokens.css">
+<link rel="stylesheet" href="../../src/ui/tokens.css">
 <style>
-  /* 1 · SHELL CHROME — copied from shell.js's STYLE_TEXT, for the classes createFileMenu and
-     createCpuMeter emit. shell.js injects that stylesheet only from ToolShell.mount(), which
-     this page does not call. This is a duplicate and it drifts. */
-
-  .cbdaw-panel {
-    background: var(--panel, #1b2332);
-    border: var(--bw) solid var(--line, #3a485f);
-    border-radius: var(--r-panel);
-    padding: var(--sp-6) var(--sp-7);
-  }
-  .cbdaw-panel__head {
-    display: var(--disp-flex); align-items: var(--align-baseline); gap: var(--sp-5); flex-wrap: var(--flexwrap-wrap); margin-bottom: var(--sp-5);
-  }
-  .cbdaw-panel__title {
-    font-size: var(--fs-md); font-weight: var(--w-bold); letter-spacing: var(--track-label); text-transform: var(--tt-label);
-    color: var(--text, #f2f6fc); margin: var(--sp-0);
-  }
-  .cbdaw-panel__note { font-size: var(--fs-base); color: var(--text-dim, #93a1b8); }
-
-  .cbdaw-menu { position: var(--pos-relative); }
-  .cbdaw-menu__button {
-    font: var(--font-inherit); font-weight: var(--w-med); display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-4);
-    padding: var(--sp-3h) var(--sp-6); color: var(--text, #f2f6fc); background: var(--bg, #0a0d13);
-    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-body); cursor: var(--cur-pointer);
-  }
-  .cbdaw-menu__button:hover, .cbdaw-menu__button:focus-visible { border-color: var(--accent, #34e5b4); }
-  .cbdaw-menu__caret { color: var(--text-dim, #93a1b8); font-size: var(--fs-sm); }
-  .cbdaw-menu__list {
-    position: var(--pos-absolute); top: var(--dropdown-offset); left: var(--sp-0); z-index: var(--z-popover); min-width: 260px;
-    margin: var(--sp-0); padding: var(--sp-3); list-style: var(--ls-none); background: var(--panel, #1b2332);
-    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-panel);
-    box-shadow: var(--shadow-raised);
-  }
-  .cbdaw-menu[data-open="false"] .cbdaw-menu__list { display: var(--disp-none); }
-  .cbdaw-menu__item {
-    display: var(--disp-flex); align-items: var(--align-baseline); justify-content: var(--justify-space-between); gap: var(--sp-7);
-    width: var(--pct-100); font: var(--font-inherit); text-align: var(--ta-left); padding: var(--sp-4) var(--sp-5);
-    color: var(--text, #f2f6fc); background: var(--color-transparent); border: var(--sp-0); border-radius: var(--r-ctl);
-    cursor: var(--cur-pointer);
-  }
-  .cbdaw-menu__item:hover:not(:disabled) { background: var(--bg, #0a0d13); }
-  .cbdaw-menu__item[aria-current="true"] { color: var(--accent, #34e5b4); font-weight: var(--w-bold); }
-  .cbdaw-menu__item:disabled { color: var(--text-dim, #93a1b8); cursor: var(--cur-not-allowed); opacity: var(--op-mid); }
-  .cbdaw-menu__tag { font-size: var(--fs-sm); color: var(--text-dim, #93a1b8); letter-spacing: var(--track-label); }
-
-  .cbdaw-status { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-7); flex-wrap: var(--flexwrap-wrap); font-size: var(--fs-base); }
-  .cbdaw-status__group { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); color: var(--text-dim, #93a1b8); }
-  .cbdaw-status__value { color: var(--text, #f2f6fc); font-variant-numeric: var(--num-tabular); }
-  .cbdaw-cpu__track {
-    position: var(--pos-relative); width: var(--sp-60); height: var(--sp-5); background: var(--bg, #0a0d13);
-    border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-ctl); overflow: var(--ov-hidden);
-  }
-  .cbdaw-cpu__fill {
-    height: var(--pct-100); width: var(--pct-0); background: var(--meter-ok, #6ee05a); transition: var(--tr-width);
-  }
-  .cbdaw-cpu__fill[data-band="warn"] { background: var(--warn, #ff7a1a); }
-  .cbdaw-cpu__fill[data-band="hot"] { background: var(--meter-hot, #ff3b30); }
-  .cbdaw-nocap { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); cursor: var(--cur-pointer); user-select: var(--usel-none); }
-  .cbdaw-nocap input { accent-color: var(--warn, #ff7a1a); }
-  .cbdaw-nocap[data-on="true"] { color: var(--warn, #ff7a1a); font-weight: var(--w-bold); }
-  .cbdaw-shell__unlock {
-    font: var(--font-inherit); font-weight: var(--w-bold); padding: var(--sp-3) var(--sp-6); color: var(--bg, #0a0d13);
-    background: var(--accent, #34e5b4); border: var(--sp-0); border-radius: var(--r-body); cursor: var(--cur-pointer);
-  }
-  .cbdaw-shell__unlock[hidden] { display: var(--disp-none); }
-
-  /* 2 · PAGE LAYOUT — `pt-` prefix, this file only. The instrument paints its own graph
-     inside .pt-patch__host under its own `ps-` classes; nothing here reaches into them.
-     Every value is a token off ui/tokens.css; colour fallbacks match that file. */
+  /* PAGE LAYOUT — `pt-` prefix, desktop layout. */
+  /* Shell chrome classes: cbdaw-panel, cbdaw-menu, cbdaw-status, cbdaw-cpu, cbdaw-nocap, cbdaw-shell__unlock. */
 
   html, body { margin: var(--sp-0); padding: var(--sp-0); background: var(--bg, #0a0d13); }
   body {
@@ -158,12 +91,15 @@
 
 <script type="module">
 // ——— IMPORTS ————————————————————————————————————————————————————————————————
-import { TOOLS, createFileMenu, createCpuMeter } from '../src/ui/shell.js';
+import { toolsForLayout, createFileMenu, createCpuMeter, acquireShellStyle, releaseShellStyle } from '../../src/ui/shell.js';
 
-import { ctx, unlock, createChannel, releaseChannel } from '../src/core/audio.js';
-import { input } from '../src/core/input.js';
-import Keyboard from '../src/surfaces/keyboard.js';
-import PatchSynth from '../src/instruments/patch-synth.js';
+import { ctx, unlock, createChannel, releaseChannel } from '../../src/core/audio.js';
+import { input } from '../../src/core/input.js';
+import Keyboard from '../../src/surfaces/keyboard.js';
+import PatchSynth from '../../src/instruments/patch-synth.js';
+
+// This page's layout.
+const LAYOUT = 'desktop';
 
 // ——— SMALL SHARED HELPERS ———————————————————————————————————————————————————
 
@@ -219,6 +155,9 @@ class PatchSynthPage {
   }
 
   mount(host) {
+    // Shell chrome stylesheet, acquired.
+    acquireShellStyle();
+
     const root = el('div', 'pt-page');
     root.dataset.tool = 'patch-synth';
     this.root = root;
@@ -236,9 +175,8 @@ class PatchSynthPage {
     const topWrap = el('div', 'pt-sticky pt-top');
     topWrap.appendChild(top);
 
-    // shell.js's TOOLS table still marks the Patch Synth row unavailable, so the menu is
-    // handed a copy with this page's own row flipped. shell.js is not edited.
-    const items = TOOLS.map((t) => (t.id === 'patch-synth' ? { ...t, available: true } : { ...t }));
+    // Tool menu items for this layout.
+    const items = toolsForLayout(LAYOUT);
     this.menu = createFileMenu({
       items,
       currentId: 'patch-synth',
@@ -378,6 +316,7 @@ class PatchSynthPage {
 
     if (this.cpu) { report.cpu = this.cpu.dispose(); this.cpu = null; }
     if (this.menu) { report.menu = this.menu.dispose(); this.menu = null; }
+    releaseShellStyle();
 
     report.listenersDropped = this.listeners.dropAll();
     this.root?.remove();

@@ -1,41 +1,22 @@
 /**
- * instruments/wave-synth.js — the simple synth. Pick a standard waveform, hear it, see
- * its spectrum. Teaches that a wave's *shape* determines how many frequencies are in it.
- * Built by `wave-voice`, P1/S3.
+ * instruments/simple-synth.js — one oscillator, one envelope, spectrum tap.
  *
- * Owns: CONTRACTS §2's module contract (every method, including the four §2 amendment
- * additions) · §11.1/§11.1a's Voice class and its exact node shape (osc + gain, cpuWeight
- * 10) · §11.2's allocate/steal sequence, driven through `core/audio.js`'s `voicePool` and
- * `governor` (frozen, imported, never redefined here) · §11.3's four env.* paths · §11.4's
- * exact four-control surface (`osc.wave`, `osc.octave`, `out.gain`, plus env.*) · §11.6's
- * analysis tap, wired to `getAnalyser('spectrum')` only — `getAnalyser('scope')` is null,
- * completing PHASE.md's teaching inversion (Wave Synth shows spectrum, not scope).
- *
- * Does NOT own: `core/audio.js` (frozen, S2) · the oscilloscope or spectrum *drawing*
- * (`vis/spectrum.js`, `vis/scope.js` — `scopes`' lane) · `/src/ui/tokens.css` (`scopes`
- * creates it; this file only *reads* its custom properties, with fallbacks, since it may
- * not be loaded when this module runs) · any HTML page.
- *
- * Two named, no-fallback OscillatorType details worth flagging up front (logged again in
- * the receipt): (1) the contract's `osc.wave` enum value `'saw'` is not a valid native
- * `OscillatorNode.type` string — Web Audio's real type is `'sawtooth'`; this file maps
- * `'saw' -> 'sawtooth'` internally and nowhere else. (2) the curriculum's on-screen label
- * for `'square'` is "Square (Pulse)" (seat question 1) — there is no separate `'pulse'`
- * waveform; `'pulse'` is display text only, paired with `'square'`, exactly as §11.4's
- * four-value enum and this seat's brief both require.
+ * Controls: osc.wave, osc.octave, out.gain, env.attack/decay/sustain/release.
+ * Voices: shared voicePool and governor from core/audio.js.
+ * Analyser: spectrum only; scope returns null.
+ * Wave value 'saw' maps to the native type 'sawtooth'.
  */
 
 import { voicePool, governor, createVoiceOut } from '../core/audio.js';
 
 // ---------------------------------------------------------------------------------------
-// CONSTANTS  (seat question 1 — waveforms and their on-screen names)
+// CONSTANTS
 // ---------------------------------------------------------------------------------------
 
-/** Exactly the four values CONTRACTS §11.4 names. Order is display order. */
+/** The four wave values, in display order. */
 const WAVE_TYPES = ['sine', 'triangle', 'square', 'saw'];
 
-/** On-screen labels — the curriculum's own words, "pulse" alongside "square" verbatim
- *  (seat question 1 / A-wave-voice.md). Used in both mountCompact and mountExpanded. */
+/** On-screen labels for each wave value. */
 const WAVE_LABELS = {
   sine: 'Sine',
   triangle: 'Triangle',
@@ -43,7 +24,7 @@ const WAVE_LABELS = {
   saw: 'Saw',
 };
 
-/** Contract value -> native OscillatorType. Only `saw` differs. */
+/** Wave value to native OscillatorType. */
 const WAVE_TO_OSC_TYPE = {
   sine: 'sine',
   triangle: 'triangle',
@@ -51,9 +32,7 @@ const WAVE_TO_OSC_TYPE = {
   saw: 'sawtooth',
 };
 
-/** Small representative waveform glyphs, viewBox 0 0 40 20. Decorative UI icons only —
- *  drawn once from the selected wave *type*, never from analyser data. This is not the
- *  spectrum/scope visual (that stays `scopes`' lane, seat question 6). */
+/** Decorative wave glyph paths, viewBox 0 0 40 20. */
 const WAVE_ICON_PATH = {
   sine: 'M0,10 C5,0 15,0 20,10 C25,20 35,20 40,10',
   triangle: 'M0,15 L10,5 L20,15 L30,5 L40,15',
@@ -108,16 +87,12 @@ function formatParamValue(key, value) {
 }
 
 // ---------------------------------------------------------------------------------------
-// VOICE  (seat question 3 — CONTRACTS §11.1 / §11.1a / §11.2, exact)
+// VOICE
 // ---------------------------------------------------------------------------------------
-// Never exported. "An instrument owns a pool of voices; it never exposes them outside
-// itself" (§11.1). `voicePool` (imported, frozen, owned by core/audio.js) is the only
-// external system a Voice talks to, and only from trigger()/free() — never from
-// WaveSynth reaching into a voice's internals.
+// One oscillator plus one gain. Private to this file.
 
 class Voice {
-  /** @param out — the point in the instrument's own chain this voice connects to,
-   *  upstream of getAnalyser() (§11.1). Always this instrument's `_mixGain` here. */
+  /** @param out — this instrument's mix bus, upstream of the analyser. */
   constructor(ctx, out, cpuWeight) {
     this.ctx = ctx;
     this.out = out;
@@ -131,13 +106,7 @@ class Voice {
     this._releaseT0 = 0; // when the key actually came up — the release ramp anchors here
     this._timers = [];
     this._freeTimer = null;
-    /** Set by the owning instrument right after construction. Not part of §11.1's
-     *  documented 3-arg signature — an assignable hook, not a constructor param, so a
-     *  Voice built here and later stolen by a *different* instrument (§11.2: "a Wave
-     *  Synth note can steal an Overtone Synth voice and the reverse") can still tell its
-     *  true owner to drop it from that owner's own live-voice bookkeeping when it frees,
-     *  regardless of which instrument called .steal() on it. voicePool.release() (the
-     *  contract-defined deregistration) always fires from free() regardless of this. */
+    /** Owner callback, fired from free(). Assigned after construction. */
     this.onFree = null;
   }
 
@@ -149,13 +118,8 @@ class Voice {
     return this._state;
   }
 
-  /** trigger(note, velocity, atTime) per §11.1. A 4th `opts` argument carries the
-   *  wave/octave/envelope this voice type needs — §11.1's Voice is instrument-agnostic and
-   *  cannot itself define what "wave shape" means; that is this file's own addition,
-   *  exactly as the constructor's `onFree` hook is.
-   *
-   *  WAVE AND OCTAVE are still snapshotted at trigger: a held note keeps the shape it was
-   *  struck with. THE ENVELOPE IS NOT — see updateEnv() and CONTRACTS §11.7c. */
+  /** Starts this voice. opts carries wave, octave shift, and the four envelope values.
+   *  Wave and octave are snapshotted here; the envelope stays live. */
   trigger(note, velocity, atTime, opts) {
     const { wave, octaveShift, attack, decay, sustain, release } = opts;
     const t0 = atTime ?? this.ctx.currentTime;
@@ -168,8 +132,7 @@ class Voice {
     this.gain = this.ctx.createGain();
     this.gain.gain.setValueAtTime(0, t0);
 
-    // The two facts every later reschedule is anchored to: when this note actually began,
-    // and how loud its peak is. Envelope *shape* is mutable (§11.7c); these are not.
+    // Anchors for every later reschedule: note start time and peak level.
     this._t0 = t0;
     this._peak = clamp(velocity, 0, 1);
     this._envelope = { attack, decay, sustain, release };
@@ -178,8 +141,7 @@ class Voice {
     this.gain.connect(this.out);
     this.osc.start(t0);
 
-    // four-stage envelope on the single GainNode's .gain AudioParam (§11.1a: "The
-    // envelope is four-stage automation on that single GainNode's .gain AudioParam").
+    // Four-stage envelope on the gain node's .gain param.
     this._scheduleAttackDecay(t0, 0);
   }
 
@@ -188,10 +150,8 @@ class Voice {
     return this._peak * clamp(this._envelope.sustain, 0, 1);
   }
 
-  /** The gain this voice's scheduled automation reaches at absolute time `t`. Used when a
-   *  stage is scheduled ahead of the clock, where reading `gain.gain.value` returns the
-   *  present value and not the one at `t`. Follows the same branch the automation took:
-   *  release ramp while 'releasing', otherwise attack -> decay -> sustain. */
+  /** The scheduled gain at absolute time t. Release branch while releasing, else
+   *  attack, decay, sustain. */
   _gainAt(t) {
     if (this._state === 'releasing') {
       const start = this._releaseT0;
@@ -209,21 +169,13 @@ class Voice {
     return sustain;
   }
 
-  /** Writes (or REwrites) the attack + decay ramps onto this voice's gain, anchored to the
-   *  note's real start time `_t0`, and re-arms the attacking→sustaining state timer.
-   *  Called once from trigger() and again from updateEnv() every time the student moves an
-   *  envelope control while this voice is sounding.
-   *
-   *  `fromTime`/`fromValue` are where the new automation picks up: at trigger that is
-   *  (t0, 0); on a live edit it is (now, the value the ramp has actually reached), so the
-   *  gain never jumps — it re-aims from wherever it currently is. If a stage's deadline is
-   *  already in the past for the new shape, the voice moves to where the new envelope says
-   *  it should already be, over a 1 ms ramp rather than a discontinuity. */
+  /** Writes the attack and decay ramps, anchored to _t0, and re-arms the stage timer.
+   *  fromTime and fromValue are where the new automation picks up. */
   _scheduleAttackDecay(fromTime, fromValue) {
     const g = this.gain.gain;
     const attackEnd = this._t0 + this._envelope.attack;
     const decayEnd = attackEnd + this._envelope.decay;
-    const MIN = 0.001; // never schedule a zero-length ramp — that is a click
+    const MIN = 0.001; // minimum ramp length
 
     g.cancelScheduledValues(fromTime);
     g.setValueAtTime(fromValue, fromTime);
@@ -236,9 +188,7 @@ class Voice {
       g.linearRampToValueAtTime(this._sustainLevel(), fromTime + MIN);
     }
 
-    // §11.1's state enum has no separate "decaying" state — decay is folded into
-    // 'attacking' until the envelope reaches sustain, matching the five-state list
-    // exactly ('attacking' | 'sustaining' | 'releasing' | 'stealing' | 'free').
+    // Decay is folded into the 'attacking' state until the envelope reaches sustain.
     this._clearAttackTimers();
     if (decayEnd > fromTime) {
       this._state = 'attacking';
@@ -253,22 +203,8 @@ class Voice {
     }
   }
 
-  /** [FIXED 2026-08-23, Troubleshooter-directed, `redpen-p1` D-4 / CONTRACTS §11.7c]
-   *  LIVE ENVELOPE. This Voice used to snapshot the envelope at trigger and read nothing
-   *  afterwards, so an `env.*` edit could not be heard until the NEXT note; the Overtone
-   *  Synth propagated the same edit to sounding voices, and two §2 instruments taught the
-   *  envelope differently. §11.7c rules for live: "a held note is the one moment a turned
-   *  knob's effect is directly audible against a reference, which is worth more here than
-   *  in most synths, since these two tools exist to teach what a parameter does."
-   *
-   *  This goes one step past `overtone-synth.js`'s `updateEnv` (which stores the new shape
-   *  for the next stage boundary): it also REWRITES the automation already scheduled on
-   *  this voice's gain, so raising attack mid-attack, or dropping sustain mid-sustain, is
-   *  audible immediately on the note being held rather than at the next stage. Called only
-   *  by the owning instrument's `_propagateEnv()`; never exposed outside this file.
-   *
-   *  Wave and octave are deliberately NOT live — §11.7c rules on `env.*` only, and a held
-   *  note keeping the shape it was struck with is the behaviour both synths already had. */
+  /** Live envelope edit. Stores the new shape and rewrites the automation already
+   *  scheduled on this voice's gain. Wave and octave are not live. */
   updateEnv(env) {
     this._envelope = {
       attack: env.attack,
@@ -282,18 +218,16 @@ class Voice {
     if (this._state === 'attacking' || this._state === 'sustaining') {
       this._scheduleAttackDecay(now, this.gain.gain.value);
     } else if (this._state === 'releasing') {
-      // a release already in flight re-aims at the new release time, measured from when
-      // the key actually came up — the same "anchored to the real event" rule as above.
+      // A release in flight re-aims at the new release time, anchored to _releaseT0.
       this._scheduleRelease(now, this.gain.gain.value);
     }
   }
 
-  /** release(atTime) per §11.1: starts the release stage; voice stays alive until the
-   *  release ramp completes, then calls free() itself. */
+  /** Starts the release stage. The voice frees itself when the ramp completes. */
   release(atTime) {
     if (this._state === 'free' || this._state === 'stealing') return;
     const t0 = atTime ?? this.ctx.currentTime;
-    // read before the state moves to 'releasing' — _gainAt branches on it
+    // Read before the state moves to 'releasing'.
     const currentVal = t0 > this.ctx.currentTime ? this._gainAt(t0) : this.gain.gain.value;
 
     this._clearTimers();
@@ -302,15 +236,13 @@ class Voice {
     this._scheduleRelease(t0, currentVal);
   }
 
-  /** Writes (or REwrites) the release ramp, anchored to `_releaseT0` — when the key
-   *  actually came up — and re-arms the self-free timer. Split out of release() so
-   *  updateEnv() can re-aim a release that is already running (§11.7c). */
+  /** Writes the release ramp, anchored to _releaseT0, and re-arms the self-free timer. */
   _scheduleRelease(fromTime, fromValue) {
     const g = this.gain.gain;
     const MIN = 0.001;
     const end = Math.max(this._releaseT0 + this._envelope.release, fromTime + MIN);
 
-    // where the release ramp starts, so _gainAt can follow it
+    // Where the release ramp starts, read back by _gainAt.
     this._releaseFrom = fromValue;
 
     g.cancelScheduledValues(fromTime);
@@ -321,16 +253,15 @@ class Voice {
       clearTimeout(this._freeTimer);
       this._freeTimer = null;
     }
-    const freeMs = Math.max(0, (end - this.ctx.currentTime) * 1000) + 5; // +5ms so it lands
+    const freeMs = Math.max(0, (end - this.ctx.currentTime) * 1000) + 5; // 5ms landing margin
     this._freeTimer = setTimeout(() => this.free(), freeMs);
   }
 
-  /** steal(atTime) per §10-A / §11.1: forced release, linear fade to 0 over 5ms, then
-   *  free() — never an abrupt stop. */
+  /** Forced release: linear fade to 0 over 5ms, then free(). */
   steal(atTime) {
     if (this._state === 'free') return;
     const t0 = atTime ?? this.ctx.currentTime;
-    // read before the state moves to 'stealing' — _gainAt branches on it
+    // Read before the state moves to 'stealing'.
     const currentVal = t0 > this.ctx.currentTime ? this._gainAt(t0) : this.gain.gain.value;
 
     this._clearTimers();
@@ -344,8 +275,7 @@ class Voice {
     this._freeTimer = setTimeout(() => this.free(), freeMs);
   }
 
-  /** free() per §11.1: disconnects every node this voice owns, deregisters from
-   *  voicePool (§11.2), drops the voice from the instrument's pool (via onFree). */
+  /** Disconnects this voice's nodes, deregisters from voicePool, fires onFree. */
   free() {
     if (this._state === 'free') return;
     this._clearTimers();
@@ -353,7 +283,7 @@ class Voice {
     try {
       this.osc.stop();
     } catch (e) {
-      // already stopped — harmless
+      // already stopped
     }
     try {
       this.osc.disconnect();
@@ -369,8 +299,7 @@ class Voice {
     if (typeof this.onFree === 'function') this.onFree();
   }
 
-  /** Clears only the attack/decay stage timers, leaving any pending self-free timer alone.
-   *  Needed because an envelope edit re-arms the stage timer without touching the release. */
+  /** Clears the attack and decay stage timers, leaving the self-free timer alone. */
   _clearAttackTimers() {
     for (const t of this._timers) clearTimeout(t);
     this._timers = [];
@@ -386,29 +315,18 @@ class Voice {
 }
 
 // ---------------------------------------------------------------------------------------
-// STYLES  (seat question 5 — read /src/ui/tokens.css custom properties, §9)
+// STYLES
 // ---------------------------------------------------------------------------------------
-// Injected once per document, shared by every WaveSynth instance/mount — a <style> tag is
-// not an AudioNode or a listener, so it is not part of the "zero leaked nodes/listeners"
-// dispose() count (seat question 7); logged as a design decision in the receipt.
-//
-// [FIXED 2026-08-23, Troubleshooter-directed, `redpen-p1` D-7] Every `var(--token, X)`
-// fallback below is now byte-identical to the value `ui/tokens.css` defines for that
-// token. They previously carried this seat's own provisional colours, which made them a
-// second, divergent palette in a second location — exactly what §9 ("one palette… no
-// drift") forbids, and it meant a one-line edit to `tokens.css` silently did not reach
-// this file. The fallbacks exist ONLY so the module renders in a page that has not linked
-// `tokens.css`; they are not a palette and MUST be kept identical to `tokens.css` if a
-// value there changes. Same pattern `vis/spectrum.js`, `vis/scope.js` and `ui/shell.js`
-// already use.
+// Injected once per document, shared by every SimpleSynth mount.
+// Each var() fallback matches the value ui/tokens.css defines for that token.
 
 let styleRefs = 0;
 
 function acquireStyle() {
   styleRefs++;
-  if (document.getElementById('wave-synth-styles')) return;
+  if (document.getElementById('simple-synth-styles')) return;
   const style = document.createElement('style');
-  style.id = 'wave-synth-styles';
+  style.id = 'simple-synth-styles';
   style.textContent = `
 .ws-root { box-sizing: var(--box-border-box); font-family: var(--font-ui); color: var(--text, #f2f6fc); background: var(--panel, #1b2332); border: var(--bw) solid var(--line, #3a485f); border-radius: var(--r-body); position: var(--pos-relative); }
 .ws-root *, .ws-root *::before, .ws-root *::after { box-sizing: var(--box-border-box); }
@@ -445,20 +363,19 @@ function acquireStyle() {
 
 function releaseStyle() {
   styleRefs = Math.max(0, styleRefs - 1);
-  if (styleRefs === 0) document.getElementById('wave-synth-styles')?.remove();
+  if (styleRefs === 0) document.getElementById('simple-synth-styles')?.remove();
 }
 
 // ---------------------------------------------------------------------------------------
-// INSTRUMENT  (CONTRACTS §2, method for method)
+// INSTRUMENT
 // ---------------------------------------------------------------------------------------
 
-export default class WaveSynth {
-  static id = 'wave-synth';
-  static label = 'Wave Synth';
+export default class SimpleSynth {
+  static id = 'simple-synth';
+  static label = 'Simple Synth';
   static playable = true;
 
-  // §2 amendment additions — no-op defaults this instrument states explicitly rather
-  // than inheriting silently, since there is no shared base class in this codebase today.
+  // No-op defaults, stated explicitly.
   static needsLoad = false;
   static pieces = null;
   static emitsNotes = false;
@@ -469,17 +386,13 @@ export default class WaveSynth {
 
     this._params = { ...DEFAULT_PARAMS };
 
-    /** Live voices this instrument owns. Never exposed outside this class (§11.1). */
+    /** Live voices this instrument owns. Private to this class. */
     this._voices = new Set();
-    /** note -> Set<Voice>, so noteOff(note) releases every voice currently sounding that
-     *  note (handles the same key retriggered before release). */
+    /** note -> Set<Voice>, so noteOff releases every voice sounding that note. */
     this._noteToVoices = new Map();
 
-    // §11.6: "One AnalyserNode per instrument, created once at construction, not
-    // per-voice. It sits after every live voice's output is summed and before `out`."
-    // `_mixGain` is both the voice-summing bus AND the out.gain control point (§11.4) —
-    // one node serving two roles the contract never separates. The analyser therefore
-    // sees the instrument's real final mix, gain included, exactly what a student hears.
+    // One analyser per instrument, after the voice sum and before out.
+    // _mixGain is both the voice-summing bus and the out.gain control point.
     this._mixGain = ctx.createGain();
     this._mixGain.gain.value = this._params.gain;
 
@@ -494,9 +407,9 @@ export default class WaveSynth {
     this._domListenersByMount = { compact: [], expanded: [] };
   }
 
-  // ---- async ready (§2 amendment 1) ----
+  // ---- async ready ----
   async ready() {
-    // Wave Synth makes sound synchronously from construction — nothing to await.
+    // Sound is available from construction; nothing to await.
     return;
   }
 
@@ -505,29 +418,17 @@ export default class WaveSynth {
     const t0 = atTime ?? this.ctx.currentTime;
     const cost = VOICE_COST;
 
-    // §11.2 allocate sequence: (1) look up fixed cpuWeight — done above. (2) ask the
-    // governor. (3) granted -> construct/trigger/register. (4) refused -> steal the
-    // DAW's longest-released (or longest-held) voice, retry once.
-    //
-    // §11.2a [2026-08-23]: voicePool.steal() now deregisters its chosen voice
-    // synchronously, in that same call, so the retry below is checking a count that has
-    // actually changed in this same tick — it is a meaningful check, not a formality, and
-    // it reliably succeeds. §10-A still holds absolutely: a note is never refused, so the
-    // defensive branch allocates anyway if the retry somehow still refuses.
+    // Allocate: ask the governor, steal the pool's oldest on refusal, retry once.
     if (!governor.request(cost)) {
       const stolen = voicePool.steal();
-      if (stolen) stolen.steal(t0); // real 5ms audio fade; the count already dropped
+      if (stolen) stolen.steal(t0); // 5ms audio fade; the count already dropped
       if (!governor.request(cost)) {
-        // should not occur: steal() drops voicePool.count by exactly one, synchronously,
-        // in a single-threaded registry. Never drop a note — allocate anyway and say so.
-        console.warn(
-          '[wave-synth] governor still refused after one steal-retry; allocating anyway ' +
-            'per §10-A ("a note is never refused").'
-        );
+        // Allocate anyway rather than drop the note.
+        console.warn('[simple-synth] governor refused after one steal-retry; allocating anyway.');
       }
     }
 
-    const voice = new Voice(this.ctx, createVoiceOut(WaveSynth.id, this._mixGain), cost);
+    const voice = new Voice(this.ctx, createVoiceOut(SimpleSynth.id, this._mixGain), cost);
     voice.onFree = () => {
       this._voices.delete(voice);
       const set = this._noteToVoices.get(note);
@@ -547,7 +448,7 @@ export default class WaveSynth {
       release: this._params.release,
     });
 
-    voicePool.register(voice, WaveSynth.id, t0);
+    voicePool.register(voice, SimpleSynth.id, t0);
     this._voices.add(voice);
     if (!this._noteToVoices.has(note)) this._noteToVoices.set(note, new Set());
     this._noteToVoices.get(note).add(voice);
@@ -567,15 +468,15 @@ export default class WaveSynth {
     for (const voice of Array.from(this._voices)) voice.release(t0);
   }
 
-  // ---- note emission (§2 amendment 4) — no-op, emitsNotes is false ----
+  // ---- note emission — no-op, emitsNotes is false ----
   onNoteOut(_fn) {
-    // Wave Synth only consumes notes; it never drives another instrument.
+    // No-op.
   }
   offNoteOut(_fn) {
-    // matches onNoteOut — no-op.
+    // No-op.
   }
 
-  // ---- params — CONTRACTS §11.4's exact four controls plus §11.3's inherited env.* ----
+  // ---- params ----
   setParam(path, value) {
     switch (path) {
       case 'osc.wave':
@@ -606,17 +507,13 @@ export default class WaveSynth {
         this._propagateEnv();
         break;
       default:
-        return; // unknown path — silently ignored, §2 gives no error contract
+        return; // unknown path, ignored
     }
     this._syncUI();
   }
 
-  /** [FIXED 2026-08-23, Troubleshooter-directed, `redpen-p1` D-4 / CONTRACTS §11.7c]
-   *  Pushes the current `env.*` values into EVERY currently-sounding voice, so an envelope
-   *  edit is heard on the note being held, not only on the next one. §11.7c makes this
-   *  binding on every instrument; `overtone-synth.js` already did it via its own
-   *  `_propagateEnv()`/`Voice.updateEnv()` pair, and this is the matching half.
-   *  `osc.wave` / `osc.octave` are NOT propagated — §11.7c rules on `env.*` only. */
+  /** Pushes the current env values into every sounding voice. Wave and octave are
+   *  not propagated. */
   _propagateEnv() {
     if (this._voices.size === 0) return;
     const env = {
@@ -649,9 +546,9 @@ export default class WaveSynth {
     }
   }
 
-  // ---- state — lossless JSON round-trip (seat question 2) ----
+  // ---- state — JSON round-trip ----
   getState() {
-    // plain, JSON-safe, no functions/nodes/undefined — §2, §7's own round-trip rule.
+    // Plain JSON-safe values only.
     return {
       wave: this._params.wave,
       octave: this._params.octave,
@@ -674,27 +571,25 @@ export default class WaveSynth {
     if (Number.isFinite(obj.release)) this.setParam('env.release', obj.release);
   }
 
-  // ---- governor reporting — honest, live (seat question 4) ----
+  // ---- governor reporting ----
   get voiceCount() {
     return this._voices.size;
   }
 
   get cpuWeight() {
-    // Live voices' fixed cost + this instrument's always-on AnalyserNode (§11.6: "the
-    // instrument's cpuWeight getter must include this AnalyserNode in its total, not
-    // just its live voices").
+    // Live voice cost plus the always-on analyser.
     let total = ANALYSER_COST;
     for (const v of this._voices) total += v.cpuWeight;
     return total;
   }
 
-  // ---- analysis tap (seat question 6) — §2 amendment 2 / §11.6 ----
+  // ---- analysis tap ----
   getAnalyser(which) {
     if (which === 'spectrum') return this._analyser;
-    return null; // 'scope' — Wave Synth's visual is the spectrum analyzer only (§11.4)
+    return null; // scope tap is not offered
   }
 
-  // ---- mounting (seat question 5) ----
+  // ---- mounting ----
   mountCompact(el) {
     acquireStyle();
     this._mounts.compact = el;
@@ -722,14 +617,12 @@ export default class WaveSynth {
     return listenersDropped;
   }
 
-  // ---- teardown (seat question 7) ----
+  // ---- teardown ----
   dispose() {
     let nodesDisconnected = 0;
     const listenersDropped = this.unmount();
 
-    // Teardown, not a musical note-off: free every live voice immediately rather than
-    // running its release ramp, so no orphaned setTimeout can fire against nodes this
-    // instrument is about to disconnect. free() is idempotent and self-guards re-entry.
+    // Free every live voice immediately rather than running its release ramp.
     for (const voice of Array.from(this._voices)) voice.free();
     this._voices.clear();
     this._noteToVoices.clear();
@@ -751,7 +644,7 @@ export default class WaveSynth {
   }
 
   // ---------------------------------------------------------------------------------
-  // internal — DOM painting / syncing. Not part of CONTRACTS §2; private to this file.
+  // internal — DOM painting and syncing
   // ---------------------------------------------------------------------------------
 
   _listen(which, el, type, fn) {
@@ -764,8 +657,7 @@ export default class WaveSynth {
     this._domListenersByMount[which] = [];
   }
 
-  /** Full DOM build. Runs once per mount() call — never from setParam (see _syncUI),
-   *  so a slider mid-drag is never destroyed out from under the student's pointer. */
+  /** Full DOM build. Runs once per mount call. */
   _paint(which) {
     const el = this._mounts[which];
     if (!el) return;
@@ -774,14 +666,11 @@ export default class WaveSynth {
 
     const expanded = which === 'expanded';
     const root = document.createElement('div');
-    // Compact is the DAW view: tight, still, no animation (brief, seat q5) — the
-    // ws-playing modifier that drives the glow keyframe is only ever toggled on the
-    // expanded root; see _reflectActivity(). Expanded: room to breathe, animated,
-    // projector-legible.
+    // Compact is the DAW view, still. The ws-playing glow is toggled on expanded only.
     root.className = `ws-root ws-glow ${expanded ? 'ws-expanded' : 'ws-compact'}`;
 
     root.innerHTML = `
-      <div class="ws-title">Wave Synth</div>
+      <div class="ws-title">Simple Synth</div>
       <div class="ws-row">
         <span class="ws-label">Wave</span>
         <div class="ws-waves">
@@ -840,9 +729,8 @@ export default class WaveSynth {
     this._syncUI();
   }
 
-  /** Targeted updates only — active-button state, octave readout, slider values/readouts.
-   *  Never rebuilds DOM, so it is safe to call on every setParam(). Skips writing into a
-   *  range input the student is actively dragging (document.activeElement guard). */
+  /** Targeted updates: active button, octave readout, slider values. No DOM rebuild.
+   *  Skips a range input that currently has focus. */
   _syncUI() {
     for (const which of ['compact', 'expanded']) {
       const el = this._mounts[which];
@@ -870,9 +758,7 @@ export default class WaveSynth {
     }
   }
 
-  /** Toggles the expanded view's decorative glow while any voice is live. Compact never
-   *  animates (seat q5: "tight, still, no animation") — gated by `which === 'expanded'`
-   *  even though this loop touches both mount points for symmetry. */
+  /** Toggles the expanded view's glow while any voice is live. Compact stays still. */
   _reflectActivity() {
     const active = this._voices.size > 0;
     for (const which of ['compact', 'expanded']) {

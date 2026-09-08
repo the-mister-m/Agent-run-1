@@ -14,9 +14,9 @@
 </style>
 </head>
 <body>
-<h3>wave-synth (P1/S3) — throwaway verification page</h3>
+<h3>simple-synth (P1/S3) — throwaway verification page</h3>
 <p>Imports <code>/src/core/audio.js</code> (frozen) and
-   <code>/src/instruments/wave-synth.js</code>. Click to run: this click is the real user
+   <code>/src/instruments/simple-synth.js</code>. Click to run: this click is the real user
    gesture the autoplay-unlock test needs.</p>
 <button id="run">Run Test</button>
 <div id="results"></div>
@@ -27,7 +27,7 @@
 
 <script type="module">
 import { ctx, audio, createChannel, releaseChannel, voicePool, governor } from '../../../src/core/audio.js';
-import WaveSynth from '../../../src/instruments/wave-synth.js';
+import SimpleSynth from '../../../src/instruments/simple-synth.js';
 
 const results = [];
 const el = document.getElementById('results');
@@ -61,13 +61,13 @@ async function run() {
   log('unlock-on-gesture', ctx.state === 'running', `audio.state after unlock() = "${ctx.state}"`);
 
   const channel = createChannel();
-  const synth = new WaveSynth(ctx, channel);
+  const synth = new SimpleSynth(ctx, channel);
 
   // ---- §2 static surface ----
-  log('static-id-label-playable', WaveSynth.id === 'wave-synth' && WaveSynth.label === 'Wave Synth' && WaveSynth.playable === true,
-    `id="${WaveSynth.id}" label="${WaveSynth.label}" playable=${WaveSynth.playable}`);
-  log('static-amendment-fields', WaveSynth.needsLoad === false && WaveSynth.pieces === null && WaveSynth.emitsNotes === false,
-    `needsLoad=${WaveSynth.needsLoad} pieces=${WaveSynth.pieces} emitsNotes=${WaveSynth.emitsNotes}`);
+  log('static-id-label-playable', SimpleSynth.id === 'simple-synth' && SimpleSynth.label === 'Simple Synth' && SimpleSynth.playable === true,
+    `id="${SimpleSynth.id}" label="${SimpleSynth.label}" playable=${SimpleSynth.playable}`);
+  log('static-amendment-fields', SimpleSynth.needsLoad === false && SimpleSynth.pieces === null && SimpleSynth.emitsNotes === false,
+    `needsLoad=${SimpleSynth.needsLoad} pieces=${SimpleSynth.pieces} emitsNotes=${SimpleSynth.emitsNotes}`);
 
   const readyResult = await synth.ready();
   log('ready-resolves-immediately', readyResult === undefined, 'ready() resolved with no error, synchronously available');
@@ -76,7 +76,7 @@ async function run() {
   const analyser = synth.getAnalyser('spectrum');
   log('getAnalyser-spectrum-not-null', analyser !== null, 'getAnalyser("spectrum") returned an AnalyserNode');
   log('getAnalyser-scope-is-null', synth.getAnalyser('scope') === null,
-    'getAnalyser("scope") returned null — Wave Synth is spectrum-only, §11.4');
+    'getAnalyser("scope") returned null — Simple Synth is spectrum-only, §11.4');
 
   const waves = ['sine', 'triangle', 'square', 'saw'];
   for (const w of waves) {

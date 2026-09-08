@@ -541,8 +541,8 @@ class Voice {
 }
 
 // ---------------------------------------------------------------------------------------
-// STYLES — read `/src/ui/tokens.css` custom properties (§9), fallbacks byte-identical to
-// that file's own values, same pattern `wave-synth.js`/`overtone-synth.js` already use. A
+// STYLES — read /src/ui/tokens.css custom properties, fallbacks byte-identical to
+// that file's own values, same pattern simple-synth.js and overtone-synth.js use. A
 // <style> tag is not an AudioNode or a listener, so it is not part of dispose()'s "zero
 // leaked nodes/listeners" count (seat question 7).
 // ---------------------------------------------------------------------------------------
@@ -632,7 +632,7 @@ export default class DrumSynth {
     this._masterGain.connect(this._analyser);
     this._analyser.connect(this.out);
 
-    this._gain = 1.0; // out.gain — this file's own addition, matching wave-synth's pattern
+    this._gain = 1.0; // out.gain, matching simple-synth's pattern
 
     this._noteToIndex = new Map(PIECE_DEFS.map((d) => [d.note, d.index]));
     this._params = PIECE_DEFS.map((d) => defaultParamsFor(d));
@@ -695,7 +695,7 @@ export default class DrumSynth {
     const v = clamp(velocity, 0, 1);
     const cost = def.weight;
 
-    // §11.2's allocate/steal-retry sequence, identical in shape to wave-synth.js/
+    // Allocate and steal-retry sequence, identical in shape to simple-synth.js and
     // overtone-synth.js: steal() (§11.2a) deregisters synchronously, so the retry below is
     // checking a count that has actually changed in this same tick.
     if (!governor.request(cost)) {
@@ -747,7 +747,7 @@ export default class DrumSynth {
   }
 
   // ---- params — `piece.<index>.<key>` per-piece (this file's own addition, see PIECE_DEFS
-  // comment) plus `out.gain` (matching wave-synth's own pattern). §11.7b's error convention,
+  // comment) plus out.gain, matching simple-synth's pattern. Error convention,
   // applied here as this seat's consistent choice: unrecognized path -> silent no-op /
   // undefined, never a throw — §7's automation and P5's preset loader call these
   // programmatically, at scheduled times, on user-authored data. ----
@@ -770,8 +770,8 @@ export default class DrumSynth {
     this._syncUI();
     // No live-voice propagation: every hit's envelope/pitch/filter automation is already
     // fully scheduled at trigger time (file header, NOTE ON NOTE-OFF) — a param edit shapes
-    // the NEXT hit, exactly like Wave Synth's `osc.wave`/`osc.octave` (§11.7c rules live
-    // propagation for `env.*` only; this instrument exposes no `env.*` surface at all).
+    // the NEXT hit, like Simple Synth's osc.wave and osc.octave. This instrument
+    // exposes no env surface at all.
   }
 
   getParam(path) {
@@ -825,9 +825,8 @@ export default class DrumSynth {
   }
 
   get cpuWeight() {
-    // Live one-shot voices' fixed cost + this instrument's always-on AnalyserNode, matching
-    // wave-synth.js's/overtone-synth.js's own "must include the analyser, not just live
-    // voices" reading of §11.6.
+    // Live one-shot voice cost plus the always-on analyser, matching simple-synth.js
+    // and overtone-synth.js.
     let total = ANALYSER_COST;
     for (const v of this._voices) total += v.cpuWeight;
     return total;
@@ -1210,9 +1209,8 @@ export default class DrumSynth {
     return 2;
   }
 
-  /** Targeted updates only — param readouts and slider values. Never rebuilds DOM, so it is
-   *  safe to call on every setParam(). Skips writing into a range input the student is
-   *  actively dragging (document.activeElement guard), same pattern wave-synth.js uses. */
+  /** Targeted updates: param readouts and slider values. No DOM rebuild. Skips a range
+   *  input that currently has focus, the same pattern simple-synth.js uses. */
   _syncUI() {
     for (const which of ['compact', 'expanded']) {
       const el = this._mounts[which];

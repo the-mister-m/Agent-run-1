@@ -1,0 +1,1322 @@
+
+
+import { ctx, unlock } from '../../src/core/audio.js';
+import { clock } from '../../src/core/clock.js';
+import { state } from '../../src/core/state.js';
+import { input } from '../../src/core/input.js';
+import { createStrips } from '../../src/mixer/strip.js';
+import Graph from '../../src/mixer/graph.js';
+import { createChannelAutomation } from '../../src/mixer/automation.js';
+import { mountProjectHeader, mountPlayingSurface }
+  from '../../src/ui/daw-shell.js';
+import Keyboard from '../../src/surfaces/keyboard.js';
+import DiatonicKeys from '../../src/surfaces/diatonic-keys.js';
+import ScaleCircle from '../../src/surfaces/scale-circle.js';
+import PianoRoll from '../../src/surfaces/piano-roll.js';
+import StepGrid from '../../src/surfaces/step-grid.js';
+import CompBuilder from '../../src/surfaces/comp-builder.js';
+import Arrangement from '../../src/ui/arrangement.js';
+import Gate from '../../src/devices/gate.js';
+import Compressor from '../../src/devices/compressor.js';
+import EQ from '../../src/devices/eq.js';
+import Reverb from '../../src/devices/reverb.js';
+import Delay from '../../src/devices/delay.js';
+import SimpleSynth from '../../src/instruments/simple-synth.js';
+import OvertoneSynth from '../../src/instruments/overtone-synth.js';
+import DrumSynth from '../../src/instruments/drum-synth.js';
+import DrumSampler from '../../Archive/drum-sampler.js';
+import PatchSynth from '../../src/instruments/patch-synth.js';
+import Spectrum from '../../src/vis/spectrum.js';
+import Scope from '../../src/vis/scope.js';
+import Meter from '../../src/vis/meter.js';
+import { createGovernorMeter } from '../../src/ui/cpu-meter.js';
+import '../../src/ui/devbox.js';
+
+// dev page's own fixed demo channels — not read from any track store
+const CHANNEL_IDS = ['ch1', 'ch2', 'ch3', 'ch4', 'ch5', 'ch6'];
+
+// rig: audio + strips + graph + automation, built once, shared by every view
+const mixer = createStrips(ctx, CHANNEL_IDS.map((id) => ({ id, label: id })));
+const graph = new Graph(ctx, { strips: mixer.strips });
+
+const automation = {};
+for (const id of [...CHANNEL_IDS, 'master']) {
+  automation[id] = createChannelAutomation(mixer.strips[id]);
+}
+
+const rig = {
+  ctx, clock, state, input, mixer, graph, automation,
+  instruments: Object.fromEntries(CHANNEL_IDS.map((id) => [id, null])),
+};
+window.dsp = rig;
+
+// note bus -> whatever instrument is currently on ch1
+input.on('noteon', (e) => {
+  unlock();
+  rig.instruments.ch1?.noteOn(e.note, e.velocity);
+});
+input.on('noteoff', (e) => rig.instruments.ch1?.noteOff(e.note));
+window.addEventListener('blur', () => input.allNotesOff());
+
+// audio starts suspended in Chrome — first gesture unlocks, listener drops itself
+document.addEventListener('pointerdown', function onFirstGesture() {
+  document.removeEventListener('pointerdown', onFirstGesture);
+  unlock();
+}, { once: false });
+
+// tab switch — both roots stay in DOM, inactive one hidden
+const TABS = {
+  pieces: { btn: document.getElementById('dsp-tab-pieces'), pane: document.getElementById('dsp-pane-pieces') },
+  matrix: { btn: document.getElementById('dsp-tab-matrix'), pane: document.getElementById('dsp-pane-matrix') },
+};
+
+function showTab(name) {
+  for (const [key, t] of Object.entries(TABS)) {
+    const on = key === name;
+    t.btn.setAttribute('aria-selected', String(on));
+    t.pane.hidden = !on;
+  }
+}
+
+for (const [key, t] of Object.entries(TABS)) {
+  t.btn.addEventListener('click', () => showTab(key));
+}
+
+showTab('pieces');
+
+
+// ---- tone generator -------------------------------------------------------------
+
+const toneOsc = ctx.createOscillator();
+const toneGain = ctx.createGain();
+toneGain.gain.value = 0;
+toneOsc.type = 'sine';
+toneOsc.frequency.value = 220;
+toneOsc.connect(toneGain);
+toneOsc.start();
+
+const tone = {
+  on: false,
+  level: 0.15,
+  routeId: 'master',
+  target: null,
+  devices: new Map(),
+};
+
+const TONE_EL = {
+  box: document.getElementById('dsp-tone'),
+  handle: document.getElementById('dsp-tone-handle'),
+  caret: document.getElementById('dsp-tone-caret'),
+  on: document.getElementById('dsp-tone-on'),
+  wave: document.getElementById('dsp-tone-wave'),
+  freq: document.getElementById('dsp-tone-freq'),
+  freqVal: document.getElementById('dsp-tone-freq-val'),
+  gain: document.getElementById('dsp-tone-gain'),
+  gainVal: document.getElementById('dsp-tone-gain-val'),
+  route: document.getElementById('dsp-tone-route'),
+};
+
+// slider 0..1000 maps log 40..2000 Hz
+const FREQ_MIN = 40, FREQ_MAX = 2000;
+const sliderToHz = (v) => FREQ_MIN * Math.pow(FREQ_MAX / FREQ_MIN, v / 1000);
+const hzToSlider = (hz) => Math.round(1000 * Math.log(hz / FREQ_MIN) / Math.log(FREQ_MAX / FREQ_MIN));
+
+// disconnect first, then connect the new target; device targets chain to master
+function setToneRoute(id) {
+  tone.routeId = id;
+  try { toneGain.disconnect(); } catch (e) { /* not connected */ }
+  const dev = tone.devices.get(id);
+  if (dev) {
+    tone.target = dev.input;
+    try { dev.output.disconnect(mixer.strips.master.input); } catch (e) { /* not connected */ }
+    dev.output.connect(mixer.strips.master.input);
+  } else {
+    tone.target = mixer.strips[id]?.input ?? mixer.strips.master.input;
+  }
+  toneGain.connect(tone.target);
+}
+
+function applyToneGain() {
+  toneGain.gain.setTargetAtTime(tone.on ? tone.level : 0, ctx.currentTime, 0.01);
+}
+
+// rebuilds the route dropdown from channels + master + live standalone devices
+function refreshToneRoutes() {
+  const ids = [...CHANNEL_IDS, 'master', ...tone.devices.keys()];
+  TONE_EL.route.innerHTML = '';
+  for (const id of ids) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = tone.devices.has(id) ? `device: ${id}` : id;
+    TONE_EL.route.appendChild(opt);
+  }
+  if (!ids.includes(tone.routeId)) tone.routeId = 'master';
+  TONE_EL.route.value = tone.routeId;
+}
+
+// device rows call these when a standalone device mounts / unmounts
+function registerToneDevice(id, device) {
+  tone.devices.set(id, device);
+  refreshToneRoutes();
+}
+function unregisterToneDevice(id) {
+  const dev = tone.devices.get(id);
+  if (dev) {
+    try { dev.output.disconnect(mixer.strips.master.input); } catch (e) { /* not connected */ }
+  }
+  tone.devices.delete(id);
+  if (tone.routeId === id) setToneRoute('master');
+  refreshToneRoutes();
+}
+
+TONE_EL.handle.addEventListener('click', () => {
+  const open = TONE_EL.box.dataset.open !== 'true';
+  TONE_EL.box.dataset.open = String(open);
+  TONE_EL.caret.textContent = open ? '▾' : '▸';
+});
+document.getElementById('dsp-tone-toggle').addEventListener('click', () => TONE_EL.handle.click());
+
+TONE_EL.on.addEventListener('click', () => {
+  tone.on = !tone.on;
+  TONE_EL.on.dataset.on = String(tone.on);
+  TONE_EL.on.textContent = tone.on ? 'on' : 'off';
+  applyToneGain();
+});
+
+TONE_EL.wave.addEventListener('change', () => { toneOsc.type = TONE_EL.wave.value; });
+
+TONE_EL.freq.addEventListener('input', () => {
+  const hz = sliderToHz(Number(TONE_EL.freq.value));
+  toneOsc.frequency.setTargetAtTime(hz, ctx.currentTime, 0.01);
+  TONE_EL.freqVal.textContent = `${Math.round(hz)} Hz`;
+});
+
+TONE_EL.gain.addEventListener('input', () => {
+  tone.level = Number(TONE_EL.gain.value);
+  TONE_EL.gainVal.textContent = tone.level.toFixed(3);
+  applyToneGain();
+});
+
+TONE_EL.route.addEventListener('change', () => setToneRoute(TONE_EL.route.value));
+
+TONE_EL.freq.value = String(hzToSlider(220));
+refreshToneRoutes();
+setToneRoute('master');
+
+rig.tone = tone;
+
+
+// ---- piece catalog --------------------------------------------------------------
+// entry.mount(el, channel) returns a teardown function
+
+const STRIP_IDS = [...CHANNEL_IDS, 'master'];
+
+function stripLabel(id) {
+  return id === 'master' ? 'Master' : `Strip ${id}`;
+}
+
+function lanePiece(target, short) {
+  return {
+    id: `auto-${short}`,
+    label: `Automation: ${short}`,
+    group: 'MIXER',
+    channels: STRIP_IDS,
+    railChannels: ['ch1'],
+    keys: (ch) => [`lane:${ch}:${target}`],
+    make: (ch) => `AUTOMATION.${ch}.lane('${target}').mountCompact(el)`,
+    mount(el, ch) {
+      const lane = automation[ch].lane(target);
+      lane.mountCompact(el);
+      return () => lane.unmount();
+    },
+  };
+}
+
+// header / transport / surface-block return a handle with dispose() and no unmount()
+function framePiece(id, label, makeLine, fn) {
+  return {
+    id, label, group: 'FRAME',
+    make: () => makeLine,
+    mount(el) {
+      const handle = fn(el);
+      return () => handle.dispose();
+    },
+  };
+}
+
+// class-based views: construct, mount at a variant, unmount + dispose
+function viewPiece(id, label, group, makeLine, Ctor, args, mountFn) {
+  return {
+    id, label, group,
+    make: () => makeLine,
+    mount(el) {
+      const view = new Ctor(...args());
+      mountFn(view, el);
+      return () => { view.unmount(); view.dispose(); };
+    },
+  };
+}
+
+// standalone device: display-only instance, not in the graph; tone-gen can route into it
+function devicePiece(id, label, Ctor) {
+  return {
+    id, label, group: 'DEVICES',
+    make: () => `new ${Ctor.name}(ctx).mountCompact(el)`,
+    mount(el) {
+      const dev = new Ctor(ctx);
+      dev.mountCompact(el);
+      registerToneDevice(id, dev);
+      return () => {
+        unregisterToneDevice(id);
+        dev.unmount();
+        dev.dispose();
+      };
+    },
+  };
+}
+
+// one instrument per channel; a new one on the same channel disposes the old (§3)
+function setInstrument(ch, Ctor) {
+  const old = rig.instruments[ch];
+  if (old) {
+    try { old.unmount(); } catch (e) { /* not mounted */ }
+    old.dispose();
+  }
+  const inst = new Ctor(ctx, mixer.strips[ch].input);
+  rig.instruments[ch] = inst;
+  if (Ctor.needsLoad && typeof inst.ready === 'function') {
+    inst.ready().catch((e) => console.warn('[dev-splash] ready()', Ctor.name, e));
+  }
+  return inst;
+}
+
+function instrumentPiece(id, label, Ctor) {
+  return {
+    id, label, group: 'INSTRUMENTS',
+    channels: CHANNEL_IDS,
+    railChannels: ['ch1'],
+    keys: (ch) => [`inst:${ch ?? 'ch1'}`],
+    make: (ch) => `new ${Ctor.name}(ctx, MIXER.strips.${ch}.input).mountExpanded(el)`,
+    mount(el, ch) {
+      const chan = ch ?? 'ch1';
+      const inst = setInstrument(chan, Ctor);
+      (inst.mountExpanded ? inst.mountExpanded(el) : inst.mountCompact(el));
+      return () => inst.unmount();
+    },
+  };
+}
+
+// spectrum / scope read the ch1 instrument's tap; both throw when that tap is null
+function visPiece(id, label, Ctor) {
+  return {
+    id, label, group: 'VIS',
+    make: () => `new ${Ctor.name}(INSTRUMENTS.ch1).mountExpanded(el)`,
+    mount(el) {
+      const inst = rig.instruments.ch1;
+      if (!inst) {
+        const note = document.createElement('div');
+        note.className = 'dsp-note';
+        note.textContent = 'mount an instrument first (INSTRUMENTS → any, ch1)';
+        el.appendChild(note);
+        return () => note.remove();
+      }
+      const vis = new Ctor(inst);
+      vis.mountExpanded(el);
+      return () => { vis.unmount(); vis.dispose(); };
+    },
+  };
+}
+
+const CATALOG = [
+  framePiece('header', 'Project Header',
+    'mountProjectHeader(el)',
+    (el) => mountProjectHeader(el)),
+  framePiece('surface-block', 'Playing Surface Block',
+    'mountPlayingSurface(el)',
+    (el) => mountPlayingSurface(el)),
+
+  viewPiece('keyboard', '12-Note Keyboard', 'SURFACES',
+    "new Keyboard(null, input).mount(el, 'expanded')",
+    Keyboard, () => [null, input], (v, el) => v.mount(el, 'expanded')),
+  viewPiece('diatonic', 'Diatonic Keys', 'SURFACES',
+    "new DiatonicKeys(null, input).mount(el, 'expanded')",
+    DiatonicKeys, () => [null, input], (v, el) => v.mount(el, 'expanded')),
+  viewPiece('circle', 'Scale Circle', 'SURFACES',
+    "new ScaleCircle(null, input, state).mount(el, 'expanded')",
+    ScaleCircle, () => [null, input, state], (v, el) => v.mount(el, 'expanded')),
+  viewPiece('comp-builder', 'Comp Builder', 'SURFACES',
+    'new CompBuilder(state).mountExpanded(el)',
+    CompBuilder, () => [state], (v, el) => v.mountExpanded(el)),
+
+  viewPiece('piano-roll', 'Piano Roll', 'SEQUENCING',
+    "new PianoRoll(null, clock).mount(el, 'compact')",
+    PianoRoll, () => [null, clock], (v, el) => v.mount(el, 'compact')),
+  viewPiece('step-grid', 'Step Grid', 'SEQUENCING',
+    "new StepGrid(null, clock).mount(el, 'compact')",
+    StepGrid, () => [null, clock], (v, el) => v.mount(el, 'compact')),
+  viewPiece('arrangement', 'Arrangement', 'SEQUENCING',
+    'new Arrangement().mount(el)',
+    Arrangement, () => [], (v, el) => v.mount(el)),
+
+  {
+    id: 'strip',
+    label: 'Strip',
+    group: 'MIXER',
+    channels: STRIP_IDS,
+    railLabel: stripLabel,
+    keys: (ch) => [`strip:${ch}`],
+    make: (ch) => `MIXER.strips.${ch}.mountCompact(el)`,
+    mount(el, ch) {
+      const strip = mixer.strips[ch];
+      const box = document.createElement('div');
+      box.style.width = '132px';
+      box.style.height = '100%';
+      el.appendChild(box);
+      strip.mountCompact(box);
+      return () => { strip.unmount(); box.remove(); };
+    },
+  },
+  {
+    id: 'strips-all',
+    label: 'All 7 Strips',
+    group: 'MIXER',
+    keys: () => STRIP_IDS.map((id) => `strip:${id}`),
+    make: () => 'MIXER.strips[each].mountCompact(el) — flex row',
+    mount(el) {
+      const row = document.createElement('div');
+      row.className = 'dsp-strip-row';
+      el.appendChild(row);
+      for (const id of STRIP_IDS) {
+        const cell = document.createElement('div');
+        row.appendChild(cell);
+        mixer.strips[id].mountCompact(cell);
+      }
+      return () => {
+        for (const id of STRIP_IDS) mixer.strips[id].unmount();
+        row.remove();
+      };
+    },
+  },
+  {
+    id: 'graph',
+    label: 'Node Graph',
+    group: 'MIXER',
+    keys: () => ['graph'],
+    make: () => 'GRAPH.mountCompact(el)',
+    mount(el) {
+      graph.mountCompact(el);
+      return () => graph.unmount();
+    },
+  },
+  lanePiece('strip.gain', 'gain'),
+  lanePiece('strip.pan', 'pan'),
+  lanePiece('strip.mute', 'mute'),
+  lanePiece('strip.solo', 'solo'),
+  devicePiece('gate', 'Gate', Gate),
+  devicePiece('compressor', 'Compressor', Compressor),
+  devicePiece('eq', 'EQ', EQ),
+  devicePiece('reverb', 'Reverb', Reverb),
+  devicePiece('delay', 'Delay', Delay),
+
+  instrumentPiece('simple-synth', 'Simple Synth', SimpleSynth),
+  instrumentPiece('overtone-synth', 'Overtone Synth', OvertoneSynth),
+  instrumentPiece('drum-synth', 'Drum Synth', DrumSynth),
+  instrumentPiece('drum-sampler', 'Drum Sampler', DrumSampler),
+  instrumentPiece('patch-synth', 'Patch Synth', PatchSynth),
+
+  visPiece('spectrum', 'Spectrum (ch1 instrument)', Spectrum),
+  visPiece('scope', 'Scope (ch1 instrument)', Scope),
+  {
+    id: 'meter',
+    label: 'Meter (master tap)',
+    group: 'VIS',
+    make: () => 'new Meter(MIXER.strips.master.meterTap).mount(el)',
+    mount(el) {
+      const box = document.createElement('div');
+      box.className = 'dsp-meter-box';
+      el.appendChild(box);
+      const meter = new Meter(mixer.strips.master.meterTap);
+      meter.mount(box);
+      return () => { meter.unmount(); meter.dispose(); box.remove(); };
+    },
+  },
+  {
+    id: 'gov-meter',
+    label: 'Governor Meter',
+    group: 'VIS',
+    make: () => 'createGovernorMeter({ graph: GRAPH }).el',
+    mount(el) {
+      const gov = createGovernorMeter({ graph });
+      el.appendChild(gov.el);
+      return () => gov.dispose();
+    },
+  },
+];
+
+const CATALOG_BY_ID = new Map(CATALOG.map((e) => [e.id, e]));
+
+const GROUP_ORDER = ['FRAME', 'SURFACES', 'SEQUENCING', 'MIXER', 'DEVICES', 'INSTRUMENTS', 'VIS'];
+
+// per-entry var(--…) attribution, from docs/reports/receipt-devbar-token-attribution.md.
+// own = exclusive to this entry's group. shared = used by 2-4 of the 7 groups.
+// global = used by 5+ of the 7 groups (the 41-token GLOBAL set in that receipt).
+const TOKEN_ATTRIBUTION = {
+  "header": { own: ["--align-baseline", "--dropdown-offset", "--flex-0-1-auto", "--flex-1-1-240", "--grid-1-115", "--grid-minmax-0-1fr", "--ls-none", "--op-mid", "--shadow-lifted", "--shell-gap", "--sp-17", "--sp-33", "--tr-width", "--track-tight", "--vh-100", "--ws-prewrap", "--z-popover"], shared: ["--accent", "--align-flex-start", "--align-start", "--auto", "--cur-not-allowed", "--disp-grid", "--disp-none", "--flex-1-1-auto", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-md", "--fs-xl", "--justify-space-between", "--lh-base", "--meter-hot", "--meter-ok", "--op-dim", "--pct-0", "--r-panel", "--r-pill", "--shadow-raised", "--sp-13", "--sp-15", "--sp-2h", "--sp-3h", "--sp-60", "--sp-7", "--sp-8", "--ta-left", "--track-label", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "transport": { own: ["--align-baseline", "--dropdown-offset", "--flex-0-1-auto", "--flex-1-1-240", "--grid-1-115", "--grid-minmax-0-1fr", "--ls-none", "--op-mid", "--shadow-lifted", "--shell-gap", "--sp-17", "--sp-33", "--tr-width", "--track-tight", "--vh-100", "--ws-prewrap", "--z-popover"], shared: ["--accent", "--align-flex-start", "--align-start", "--auto", "--cur-not-allowed", "--disp-grid", "--disp-none", "--flex-1-1-auto", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-md", "--fs-xl", "--justify-space-between", "--lh-base", "--meter-hot", "--meter-ok", "--op-dim", "--pct-0", "--r-panel", "--r-pill", "--shadow-raised", "--sp-13", "--sp-15", "--sp-2h", "--sp-3h", "--sp-60", "--sp-7", "--sp-8", "--ta-left", "--track-label", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "surface-block": { own: ["--align-baseline", "--dropdown-offset", "--flex-0-1-auto", "--flex-1-1-240", "--grid-1-115", "--grid-minmax-0-1fr", "--ls-none", "--op-mid", "--shadow-lifted", "--shell-gap", "--sp-17", "--sp-33", "--tr-width", "--track-tight", "--vh-100", "--ws-prewrap", "--z-popover"], shared: ["--accent", "--align-flex-start", "--align-start", "--auto", "--cur-not-allowed", "--disp-grid", "--disp-none", "--flex-1-1-auto", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-md", "--fs-xl", "--justify-space-between", "--lh-base", "--meter-hot", "--meter-ok", "--op-dim", "--pct-0", "--r-panel", "--r-pill", "--shadow-raised", "--sp-13", "--sp-15", "--sp-2h", "--sp-3h", "--sp-60", "--sp-7", "--sp-8", "--ta-left", "--track-label", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "keyboard": { own: ["--kbd-accent", "--kbd-dim", "--kbd-line", "--kbd-text", "--key-border", "--pct-62"], shared: ["--accent", "--align-flex-end", "--flexwrap-wrap", "--fs-base", "--fs-lg", "--fs-md", "--fs-xs", "--justify-center", "--sp-13", "--sp-15", "--sp-28", "--sp-7", "--sp-84", "--tr-background", "--z-raise-1", "--z-raise-2"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--sp-0", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med", "--warn"] },
+  "diatonic": { own: ["--deg-altered", "--deg-aug", "--deg-dim", "--deg-major", "--deg-minor", "--filter-brighten", "--tr-filter"], shared: ["--accent", "--cur-default", "--flex-1-1-0", "--flexwrap-wrap", "--fs-lg", "--fs-md", "--fs-xs", "--justify-flex-end", "--lh-none", "--op-faint", "--sp-13", "--sp-15", "--sp-28", "--sp-7", "--sp-8", "--sp-84", "--sp-9"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--num-tabular", "--panel", "--pct-100", "--pe-none", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med"] },
+  "circle": { own: ["--dominant-baseline-central", "--op-full", "--sp-95", "--text-anchor-middle", "--tr-opacity-stroke", "--w-heavy"], shared: ["--accent", "--auto", "--disp-none", "--flexwrap-wrap", "--fs-md", "--justify-center", "--op-soft", "--ov-visible", "--sp-230", "--stroke-dash"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--panel", "--pct-100", "--pe-none", "--r-body", "--r-ctl", "--sp-0", "--sp-2", "--sp-4", "--sp-5", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med"] },
+  "comp-builder": { own: ["--aspect-square", "--cb-cell", "--font-style-italic", "--fs-chord", "--fs-em-62", "--fs-numeral", "--grid-1fr", "--grid-60-140", "--justify-flex-start", "--lh-loose", "--r-chip", "--ring-off", "--sp-4h", "--sp-5h", "--sp-7h", "--sp-em-14", "--sp-em-21", "--track-mid"], shared: ["--accent", "--align-flex-end", "--align-start", "--cur-default", "--cur-grab", "--cur-grabbing", "--disp-grid", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-lg", "--fs-md", "--fs-tiny", "--fs-xs", "--justify-center", "--justify-flex-end", "--lh-base", "--lh-none", "--line-dashed", "--op-faint", "--sp-20", "--sp-2h", "--sp-3h", "--sp-9", "--sp-em-36", "--sp-hair"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--panel", "--pct-100", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--ta-center", "--text", "--text-dim", "--w-bold", "--w-med", "--warn"] },
+  "piano-roll": { own: ["--align-stretch", "--bw-3", "--bw-5", "--fs-2xl", "--fs-3xl", "--line-dotted", "--line-double", "--line-groove", "--note-deg", "--roll-gutter", "--roll-row-h", "--row-deg", "--sp-23", "--sp-31", "--sp-ch-4", "--td-underline", "--wc-left"], shared: ["--accent", "--cur-ew-resize", "--cur-grab", "--cur-ns-resize", "--flex-0-0-auto", "--flex-1-1-0", "--flex-1-1-auto", "--flexwrap-wrap", "--fs-base", "--fs-lg", "--fs-micro", "--fs-xs", "--justify-flex-end", "--lh-none", "--line-dashed", "--line-solid", "--op-soft", "--pct-0", "--pe-auto", "--sp-12", "--sp-2h", "--sp-39", "--sp-9", "--sp-hair", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--none", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "step-grid": { own: ["--align-stretch", "--fs-2xl", "--fs-3xl", "--grid-accent", "--grid-bg", "--grid-dim", "--grid-line", "--grid-panel", "--grid-text", "--grid-warn", "--sp-23", "--sp-37", "--wc-left"], shared: ["--accent", "--bw-2", "--flex-0-0-auto", "--flex-1-1-0", "--flex-1-1-auto", "--flexwrap-wrap", "--fs-base", "--fs-micro", "--fs-tiny", "--fs-xs", "--lh-none", "--op-soft", "--pct-0", "--sp-13", "--sp-20", "--sp-7", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--none", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med", "--warn"] },
+  "arrangement": { own: ["--arm-on", "--arr-bar-w", "--arr-zoom", "--clip-fill", "--lane-head", "--lane-row", "--lane-row-alt", "--loop-region", "--playhead-line", "--pos-sticky", "--punch-region", "--ruler-ground", "--ruler-tick-bar", "--ruler-tick-beat", "--strip-sel", "--z-sticky"], shared: ["--btn-face", "--bw-2", "--cur-ew-resize", "--cur-grab", "--cur-grabbing", "--disp-grid", "--disp-none", "--flex-0-0-auto", "--flex-1-1-0", "--fs-base", "--fs-micro", "--fs-xs", "--justify-center", "--lh-none", "--op-faint", "--op-soft", "--popout-ground", "--raise", "--recess", "--sp-10", "--sp-14", "--sp-230", "--sp-28", "--sp-60", "--sp-84", "--ws-nowrap", "--z-raise-1", "--z-raise-2"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--ov-hidden", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none"] },
+  "strip": { own: ["--fader-fill", "--fader-thumb", "--fader-track", "--mute-on", "--pan-center", "--pan-thumb", "--pan-track", "--slot-empty", "--slot-face", "--slot-route", "--solo-on"], shared: ["--cur-default", "--cur-ew-resize", "--cur-ns-resize", "--flex-0-0-auto", "--flex-1", "--fs-micro", "--fs-tiny", "--raise", "--sp-30", "--sp-9", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--ov-hidden", "--pct-100", "--pos-absolute", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strips-all": { own: ["--fader-fill", "--fader-thumb", "--fader-track", "--mute-on", "--pan-center", "--pan-thumb", "--pan-track", "--slot-empty", "--slot-face", "--slot-route", "--solo-on"], shared: ["--cur-default", "--cur-ew-resize", "--cur-ns-resize", "--flex-0-0-auto", "--flex-1", "--fs-micro", "--fs-tiny", "--raise", "--sp-30", "--sp-9", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--ov-hidden", "--pct-100", "--pos-absolute", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--ta-center", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "graph": { own: ["--dur-med", "--stroke-med", "--tr-transform"], shared: ["--auto", "--btn-face", "--cable-drag", "--cur-grab", "--cur-grabbing", "--ease", "--edge-audio", "--edge-control", "--edge-hover", "--edge-refused", "--flex-0-0-auto", "--flex-1", "--fs-micro", "--graph-grid", "--graph-ground", "--justify-center", "--justify-space-between", "--lh-none", "--node-border", "--node-dimmed", "--node-dragging", "--node-fill", "--node-head", "--node-selected", "--op-dim", "--ov-visible", "--pe-auto", "--port-active", "--port-in", "--port-out", "--r-pill", "--shadow-raised", "--sp-60", "--sp-8", "--sp-hair", "--stroke-bold", "--stroke-dash", "--to-ellipsis", "--tr-stroke", "--ws-nowrap", "--z-drag", "--z-raise-1"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-5", "--sp-6", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.gain": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.pan": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.mute": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "strip.solo": { own: ["--lane-ground"], shared: ["--flex-0-0-auto", "--flex-1", "--fs-micro", "--justify-space-between", "--raise", "--sp-14", "--sp-hair", "--to-ellipsis", "--ws-nowrap"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--ov-hidden", "--pct-100", "--pos-relative", "--r-sm", "--sp-0", "--sp-1", "--sp-2", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "gate": { own: ["--bypass-off", "--bypass-on", "--device-head", "--gate-closed", "--gate-open", "--gate-threshold", "--knob-fill"], shared: ["--flex-1", "--fs-xs", "--r-pill", "--sp-30", "--sp-em-36", "--ta-right", "--tr-background"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--r-body", "--r-ctl", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim"] },
+  "compressor": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill"], shared: ["--flex-1", "--fs-xs", "--sp-30", "--sp-em-36", "--ta-right"], global: ["--align-center", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--num-tabular", "--pct-100", "--r-body", "--r-ctl", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim"] },
+  "eq": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-pointer", "--knob-track", "--sp-em-46"], shared: ["--bw-2", "--cur-ew-resize", "--flex-0-0-auto", "--flex-1", "--fs-md", "--fs-xs", "--justify-space-between", "--pct-0", "--popout-ground", "--r-pill", "--sp-em-16", "--ta-right", "--tr-background", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-0", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-6", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-bold", "--w-med"] },
+  "reverb": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-track"], shared: ["--fs-xs", "--popout-ground", "--sp-16", "--tr-color"], global: ["--bw", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--text", "--text-dim", "--w-med"] },
+  "delay": { own: ["--bypass-off", "--bypass-on", "--device-head", "--knob-fill", "--knob-track"], shared: ["--fs-xs", "--popout-ground", "--sp-16", "--tr-color"], global: ["--bw", "--font-inherit", "--font-ui", "--fs-sm", "--line", "--r-body", "--r-cell", "--r-ctl", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--text", "--text-dim", "--w-med"] },
+  "simple-synth": { own: ["--anim-pulse", "--color-current", "--content-empty", "--r-lg", "--r-xl", "--scale-pulse-peak", "--scale-pulse-rest", "--sp-11", "--sp-65", "--sp-em-17", "--sp-em-35", "--stroke-heavy", "--z-behind"], shared: ["--accent", "--disp-none", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-micro", "--fs-xl", "--fs-xs", "--lh-none", "--op-faint", "--op-soft", "--sp-10", "--sp-12", "--sp-13", "--sp-16", "--sp-20", "--sp-30", "--sp-39", "--sp-7", "--sp-8", "--sp-9", "--sp-em-16", "--sp-em-36", "--ta-right", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-ctl", "--r-sm", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--ta-center", "--text", "--text-dim", "--w-bold"] },
+  "overtone-synth": { own: ["--tr-shadow"], shared: ["--accent", "--flex-1", "--flexwrap-wrap", "--meter-ok", "--sp-60"], global: ["--align-center", "--box-border-box", "--bw", "--disp-flex", "--flexdir-column", "--font-ui", "--line", "--ov-hidden", "--panel", "--pct-100", "--r-ctl", "--sp-1", "--sp-4", "--sp-5", "--text", "--text-dim"] },
+  "drum-synth": { own: ["--dur-fast", "--fs-em-65", "--fs-em-75", "--fs-em-85", "--grid-repeat4-1fr", "--r-xl", "--sp-18", "--sp-em-38"], shared: ["--accent", "--align-flex-start", "--disp-grid", "--disp-none", "--ease", "--flex-1", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-xl", "--justify-center", "--sp-14", "--sp-30", "--sp-7", "--sp-8", "--sp-9", "--sp-em-36", "--ta-right", "--track-label", "--track-title", "--tt-label"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--none", "--num-tabular", "--panel", "--pct-100", "--r-body", "--r-ctl", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--text", "--text-dim", "--usel-none", "--w-bold", "--w-med"] },
+  "drum-sampler": { own: ["--anim-hit-flash", "--anim-miss-flash", "--fs-em-75", "--fs-em-85", "--grid-repeat4-1fr", "--grid-repeat4-minmax90", "--touch-manipulation"], shared: ["--accent", "--disp-grid", "--flexwrap-wrap", "--fs-base", "--fs-em-70", "--fs-xl", "--justify-center", "--line-dashed", "--op-dim", "--sp-16", "--sp-20", "--sp-9", "--track-title"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--cur-pointer", "--disp-block", "--disp-flex", "--flexdir-column", "--font-inherit", "--font-ui", "--line", "--panel", "--pct-100", "--pos-relative", "--r-body", "--r-ctl", "--sp-1", "--sp-1h", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim", "--w-bold", "--w-med", "--warn"] },
+  "patch-synth": { own: ["--angle-vertical", "--glow", "--math-group", "--stroke-heavy", "--stroke-semi", "--tr-bg-border"], shared: ["--accent", "--align-flex-end", "--cable-drag", "--cur-ew-resize", "--cur-grab", "--cur-grabbing", "--cur-not-allowed", "--disp-grid", "--disp-none", "--edge-audio", "--edge-control", "--edge-hover", "--edge-refused", "--flex-0-0-auto", "--flex-1-1-0", "--flexwrap-wrap", "--font-mono", "--fs-base", "--fs-micro", "--fs-xs", "--graph-grid", "--graph-ground", "--justify-space-between", "--lh-none", "--line-solid", "--node-border", "--node-dimmed", "--node-dragging", "--node-fill", "--node-head", "--node-selected", "--op-dim", "--op-faint", "--ov-visible", "--port-active", "--port-in", "--port-out", "--r-panel", "--r-pill", "--raise", "--recess", "--sp-10", "--sp-60", "--sp-hair", "--stroke-bold", "--stroke-dash", "--ta-left", "--to-ellipsis", "--tr-background", "--tr-color", "--tr-stroke", "--track-label", "--track-title", "--tt-label", "--ws-nowrap", "--z-drag", "--z-raise-1", "--z-raise-2"], global: ["--align-center", "--bg", "--box-border-box", "--bw", "--color-transparent", "--cur-pointer", "--disp-flex", "--flexdir-column", "--font-ui", "--fs-sm", "--line", "--none", "--num-tabular", "--ov-hidden", "--panel", "--pct-100", "--pe-none", "--pos-absolute", "--pos-relative", "--r-body", "--r-cell", "--r-ctl", "--sp-0", "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--text", "--text-dim", "--touch-none", "--usel-none", "--w-med"] },
+  "spectrum": { own: [], shared: [], global: ["--box-border-box", "--disp-block", "--pct-100", "--pos-relative"] },
+  "scope": { own: [], shared: [], global: ["--box-border-box", "--disp-block", "--pct-100", "--pos-relative"] },
+  "meter": { own: [], shared: [], global: ["--box-border-box", "--disp-block", "--ov-hidden", "--pct-100", "--pos-relative", "--r-cell"] },
+  "gov-meter": { own: [], shared: ["--edge-refused", "--meter-hot"], global: ["--align-center", "--bw", "--disp-flex", "--fs-sm", "--num-tabular", "--r-sm", "--sp-1", "--sp-2", "--sp-3", "--sp-5", "--sp-6", "--text", "--text-dim", "--w-bold", "--warn"] },
+};
+
+
+// ---- rig-object occupancy: one place at a time, later mount steals ----------------
+
+const HOLDERS = new Map();
+const TAB1 = { kind: 'tab1' };
+
+function keysFor(entry, channel) {
+  return entry?.keys ? entry.keys(channel) : [];
+}
+
+function evictHolder(holder) {
+  if (holder === TAB1) clearStage('stolen');
+  else stealFromSlot(holder);
+}
+
+function claim(keys, holder) {
+  const evicted = new Set();
+  for (const k of keys) {
+    const cur = HOLDERS.get(k);
+    if (cur && cur !== holder) evicted.add(cur);
+  }
+  for (const h of evicted) evictHolder(h);
+  for (const k of keys) HOLDERS.set(k, holder);
+}
+
+function release(keys, holder) {
+  for (const k of keys) if (HOLDERS.get(k) === holder) HOLDERS.delete(k);
+}
+
+
+// ---- tab 1 — rail + stage -------------------------------------------------------
+
+const RAIL = document.getElementById('dsp-rail');
+const HOST = document.getElementById('dsp-host');
+const STAGE_TITLE = document.getElementById('dsp-stage-title');
+const STAGE_MAKE = document.getElementById('dsp-stage-make');
+
+let shown = null;   // { entry, channel, teardown }
+
+// which GROUP_ORDER headers are expanded — collapsed by default, opened by selection
+const openGroups = new Set();
+// which entry rows have their token-tier detail expanded — key is `${id}::${channel ?? ''}`
+const openEntries = new Set();
+
+function railRows() {
+  const rows = [];
+  for (const entry of CATALOG) {
+    const chans = entry.channels ? (entry.railChannels ?? entry.channels) : [null];
+    for (const ch of chans) {
+      const label = entry.railLabel ? entry.railLabel(ch)
+        : ch ? `${entry.label} ${ch}` : entry.label;
+      rows.push({ entry, channel: ch, label });
+    }
+  }
+  return rows;
+}
+
+function entryKey(id, channel) {
+  return `${id}::${channel ?? ''}`;
+}
+
+function chipRow(tier, tokens) {
+  const wrap = document.createElement('div');
+  wrap.className = 'dsp-rail__chips';
+  for (const t of tokens) {
+    const chip = document.createElement('span');
+    chip.className = `dsp-rail__chip dsp-rail__chip--${tier}`;
+    chip.textContent = t;
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
+// OWN first and prominent, SHARED next, GLOBAL last and dimmed — per the brief
+function buildEntryDetail(entry) {
+  const attr = TOKEN_ATTRIBUTION[entry.id];
+  const detail = document.createElement('div');
+  detail.className = 'dsp-rail__detail';
+  if (!attr) {
+    const note = document.createElement('div');
+    note.className = 'dsp-rail__tier-label';
+    note.textContent = 'no token attribution on file';
+    detail.appendChild(note);
+    return detail;
+  }
+  for (const [tier, tierLabel, tokens] of [
+    ['own', 'OWN', attr.own],
+    ['shared', 'SHARED', attr.shared],
+    ['global', 'GLOBAL', attr.global],
+  ]) {
+    if (!tokens.length) continue;
+    const label = document.createElement('div');
+    label.className = 'dsp-rail__tier-label';
+    label.textContent = `${tierLabel} (${tokens.length})`;
+    detail.appendChild(label);
+    detail.appendChild(chipRow(tier, tokens));
+  }
+  return detail;
+}
+
+function buildRail() {
+  RAIL.innerHTML = '';
+  const rows = railRows();
+  for (const group of GROUP_ORDER) {
+    const inGroup = rows.filter((r) => r.entry.group === group);
+    if (!inGroup.length) continue;
+    const groupOpen = openGroups.has(group);
+
+    const head = document.createElement('button');
+    head.className = 'dsp-rail__group';
+    head.dataset.open = String(groupOpen);
+    const arrow = document.createElement('span');
+    arrow.className = 'dsp-rail__group-arrow';
+    arrow.textContent = '▸';
+    const text = document.createElement('span');
+    text.textContent = group;
+    head.append(arrow, text);
+    head.addEventListener('click', () => {
+      if (openGroups.has(group)) openGroups.delete(group); else openGroups.add(group);
+      buildRail();
+    });
+    RAIL.appendChild(head);
+
+    if (!groupOpen) continue;
+
+    for (const row of inGroup) {
+      const key = entryKey(row.entry.id, row.channel);
+      const entryOpen = openEntries.has(key);
+
+      const rowWrap = document.createElement('div');
+      rowWrap.className = 'dsp-rail__row';
+
+      const btn = document.createElement('button');
+      btn.className = 'dsp-rail__item';
+      btn.textContent = row.label;
+      btn.dataset.pieceId = row.entry.id;
+      btn.dataset.channel = row.channel ?? '';
+      if (shown && shown.entry.id === row.entry.id && (shown.channel ?? '') === (row.channel ?? '')) {
+        btn.setAttribute('aria-current', 'true');
+      }
+      btn.addEventListener('click', () => showPiece(row.entry, row.channel));
+      rowWrap.appendChild(btn);
+
+      const disclose = document.createElement('button');
+      disclose.className = 'dsp-rail__disclose';
+      disclose.textContent = entryOpen ? '−' : '+';
+      disclose.title = entryOpen ? 'hide tokens' : 'show tokens';
+      disclose.addEventListener('click', () => {
+        if (openEntries.has(key)) openEntries.delete(key); else openEntries.add(key);
+        buildRail();
+      });
+      rowWrap.appendChild(disclose);
+
+      RAIL.appendChild(rowWrap);
+      if (entryOpen) RAIL.appendChild(buildEntryDetail(row.entry));
+    }
+  }
+}
+
+function clearStage(reason) {
+  if (shown) {
+    try { shown.teardown(); } catch (e) { console.warn('[dev-splash] teardown', shown.entry.id, e); }
+    release(keysFor(shown.entry, shown.channel), TAB1);
+    shown = null;
+  }
+  HOST.innerHTML = '';
+  if (reason === 'stolen') {
+    STAGE_TITLE.textContent = 'nothing shown';
+    STAGE_MAKE.textContent = 'moved to a Matrix slot';
+  }
+  buildRail();
+}
+
+function showPiece(entry, channel) {
+  clearStage();
+  claim(keysFor(entry, channel), TAB1);
+  STAGE_TITLE.textContent = entry.railLabel ? entry.railLabel(channel)
+    : channel ? `${entry.label} ${channel}` : entry.label;
+  STAGE_MAKE.textContent = `${entry.id}${channel ? `/${channel}` : ''} — ${entry.make(channel)}`;
+  openGroups.add(entry.group);
+  try {
+    const teardown = entry.mount(HOST, channel);
+    shown = { entry, channel, teardown };
+  } catch (e) {
+    HOST.innerHTML = '';
+    const note = document.createElement('div');
+    note.className = 'dsp-note';
+    note.textContent = `BLOCKED — ${entry.id}: ${e}`;
+    HOST.appendChild(note);
+    console.error('[dev-splash] mount failed', entry.id, e);
+  }
+  buildRail();
+}
+
+buildRail();
+
+rig.catalog = CATALOG_BY_ID;
+rig.showPiece = (id, ch = null) => showPiece(CATALOG_BY_ID.get(id), ch);
+
+
+// ---- tab 2 — matrix -------------------------------------------------------------
+
+const TREE = document.getElementById('dsp-matrix-tree');
+const MATRIX_BAR = document.getElementById('dsp-matrix-bar');
+
+let slotSeq = 0;
+
+function makeSlot(piece = null, channel = null, zoom = 1, zmode = 'glass') {
+  return { kind: 'slot', key: `s${++slotSeq}`, piece, channel, zoom, zmode,
+           parent: null, el: null, body: null, view: null };
+}
+
+// zoom ladder shared by the − / + buttons; 1 is the identity rung
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+// token roots read once from :root — reflow zoom multiplies these two
+let ZOOM_ROOTS = null;
+function zoomRoots() {
+  if (!ZOOM_ROOTS) {
+    const cs = getComputedStyle(document.documentElement);
+    ZOOM_ROOTS = {
+      fs: parseFloat(cs.getPropertyValue('--fs-root')) || 12,
+      sp: parseFloat(cs.getPropertyValue('--sp-unit')) || 2,
+    };
+  }
+  return ZOOM_ROOTS;
+}
+
+/** glass — CSS `zoom` scales layout too, so the body scrolls like a magnifier.
+ *  reflow — retunes --fs-root / --sp-unit, the two roots every token derives from,
+ *  so the piece re-lays out at the new density instead of being magnified. */
+function applyZoom(node) {
+  const wrap = node.body;
+  if (!wrap) return;
+  const z = node.zoom ?? 1;
+  wrap.style.zoom = '';
+  wrap.style.removeProperty('--fs-root');
+  wrap.style.removeProperty('--sp-unit');
+  if (node.zmode === 'reflow') {
+    const { fs, sp } = zoomRoots();
+    wrap.style.setProperty('--fs-root', `${fs * z}px`);
+    wrap.style.setProperty('--sp-unit', `${sp * z}px`);
+  } else if (z !== 1) {
+    wrap.style.zoom = String(z);
+  }
+}
+
+function paintZoomUI(node) {
+  const label = node.el?.querySelector('.dsp-slot__zlabel');
+  if (label) label.textContent = `${Math.round((node.zoom ?? 1) * 100)}%`;
+  const modeBtn = node.el?.querySelector('[data-zmode]');
+  if (modeBtn) {
+    modeBtn.textContent = node.zmode === 'reflow' ? '⇔' : '⌕';
+    modeBtn.title = node.zmode === 'reflow'
+      ? 'reflow zoom — retunes token roots, panel re-lays out (click for magnifier)'
+      : 'magnifier zoom — scales pixels, panel scrolls (click for reflow)';
+  }
+}
+
+function setZoom(node, z, mode = node.zmode) {
+  node.zoom = Math.min(3, Math.max(0.5, z));
+  node.zmode = mode === 'reflow' ? 'reflow' : 'glass';
+  applyZoom(node);
+  paintZoomUI(node);
+  saveLayout();
+}
+
+function stepZoom(node, dir) {
+  const i = ZOOM_STEPS.findIndex((s) => Math.abs(s - (node.zoom ?? 1)) < 0.001);
+  const at = i === -1 ? ZOOM_STEPS.indexOf(1) : i;
+  const next = ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, at + dir))];
+  setZoom(node, next);
+}
+
+function makeSplit(dir, a, b, ratio = 0.5) {
+  const node = { kind: 'split', dir, ratio, a, b, parent: null, el: null };
+  a.parent = node;
+  b.parent = node;
+  return node;
+}
+
+let layout = makeSlot();
+
+function defaultChannel(entry) {
+  return entry?.channels ? (entry.railChannels?.[0] ?? entry.channels[0]) : null;
+}
+
+function slotTitle(node) {
+  const entry = CATALOG_BY_ID.get(node.piece);
+  if (!entry) return 'empty';
+  return entry.railLabel ? entry.railLabel(node.channel)
+    : node.channel ? `${entry.label} ${node.channel}` : entry.label;
+}
+
+// swaps one node for another in its parent, keeping DOM in step
+function replaceNode(oldNode, newNode) {
+  const parent = oldNode.parent;
+  newNode.parent = parent;
+  if (!parent) {
+    layout = newNode;
+    TREE.replaceChild(renderNode(newNode), oldNode.el);
+    return;
+  }
+  const side = parent.a === oldNode ? 'a' : 'b';
+  parent[side] = newNode;
+  parent.el.replaceChild(renderNode(newNode), oldNode.el);
+  applyRatio(parent);
+}
+
+function forEachSlot(node, fn) {
+  if (node.kind === 'slot') fn(node);
+  else { forEachSlot(node.a, fn); forEachSlot(node.b, fn); }
+}
+
+function unmountSlot(node) {
+  if (node.view) {
+    try { node.view.teardown(); } catch (e) { console.warn('[dev-splash] slot teardown', node.piece, e); }
+    release(keysFor(node.view.entry, node.view.channel), node);
+    node.view = null;
+  }
+  if (node.body) node.body.innerHTML = '';
+}
+
+// this slot's rig object was taken by tab 1 or another slot
+function stealFromSlot(node) {
+  unmountSlot(node);
+  node.stolen = true;
+  paintSlot(node);
+}
+
+function mountSlot(node) {
+  unmountSlot(node);
+  node.stolen = false;
+  const entry = CATALOG_BY_ID.get(node.piece);
+  if (!entry) { paintSlot(node); return; }
+  claim(keysFor(entry, node.channel), node);
+  if (!node.body) paintSlot(node);
+  try {
+    const teardown = entry.mount(node.body, node.channel);
+    node.view = { entry, channel: node.channel, teardown };
+  } catch (e) {
+    const note = document.createElement('div');
+    note.className = 'dsp-slot__moved';
+    note.textContent = `BLOCKED — ${entry.id}: ${e.message ?? e}`;
+    node.body.appendChild(note);
+    console.error('[dev-splash] slot mount failed', entry.id, e);
+  }
+}
+
+function pickerSelect(node) {
+  const sel = document.createElement('select');
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = 'pick a piece…';
+  sel.appendChild(blank);
+  for (const group of GROUP_ORDER) {
+    const inGroup = CATALOG.filter((e) => e.group === group);
+    if (!inGroup.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = group;
+    for (const entry of inGroup) {
+      const opt = document.createElement('option');
+      opt.value = entry.id;
+      opt.textContent = entry.label;
+      og.appendChild(opt);
+    }
+    sel.appendChild(og);
+  }
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    setSlotPiece(node, sel.value, defaultChannel(CATALOG_BY_ID.get(sel.value)));
+  });
+  return sel;
+}
+
+function setSlotPiece(node, pieceId, channel) {
+  node.piece = pieceId;
+  node.channel = channel ?? null;
+  paintSlot(node);
+  if (pieceId) mountSlot(node);
+  saveLayout();
+}
+
+function emptySlot(node) {
+  unmountSlot(node);
+  node.piece = null;
+  node.channel = null;
+  paintSlot(node);
+  saveLayout();
+}
+
+function splitSlot(node, dir) {
+  const moved = makeSlot(node.piece, node.channel, node.zoom, node.zmode);
+  const fresh = makeSlot();
+  const split = makeSplit(dir, moved, fresh);
+  // the old slot's mounted view is torn down and remounted in its new leaf
+  unmountSlot(node);
+  replaceNode(node, split);
+  if (moved.piece) mountSlot(moved);
+  saveLayout();
+}
+
+function mergeSplit(node) {
+  forEachSlot(node.b, unmountSlot);
+  const keep = node.a;
+  const rebuilt = makeSlot(keep.kind === 'slot' ? keep.piece : null,
+    keep.kind === 'slot' ? keep.channel : null,
+    keep.kind === 'slot' ? keep.zoom : 1,
+    keep.kind === 'slot' ? keep.zmode : 'glass');
+  if (keep.kind === 'slot') {
+    unmountSlot(keep);
+    replaceNode(node, rebuilt);
+    if (rebuilt.piece) mountSlot(rebuilt);
+  } else {
+    forEachSlot(keep, unmountSlot);
+    keep.parent = null;
+    replaceNode(node, keep);
+    forEachSlot(keep, (s) => { if (s.piece) mountSlot(s); });
+  }
+  saveLayout();
+}
+
+// slot chrome: empty picker, or header + mounted piece
+function paintSlot(node) {
+  const el = node.el;
+  el.innerHTML = '';
+  const filled = !!node.piece;
+  el.dataset.empty = String(!filled);
+
+  if (!filled) {
+    const wrap = document.createElement('div');
+    wrap.className = 'dsp-slot__empty';
+    wrap.appendChild(pickerSelect(node));
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '4px';
+    row.appendChild(splitBtn(node, 'row', 'split ⇆'));
+    row.appendChild(splitBtn(node, 'col', 'split ⇵'));
+    wrap.appendChild(row);
+    el.appendChild(wrap);
+    node.body = null;
+    return;
+  }
+
+  const entry = CATALOG_BY_ID.get(node.piece);
+
+  const head = document.createElement('div');
+  head.className = 'dsp-slot__head';
+
+  const grip = document.createElement('span');
+  grip.className = 'dsp-slot__grip';
+  grip.textContent = '⠿';
+  grip.title = 'drag onto another slot to swap';
+  grip.draggable = true;
+  grip.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', node.key);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  head.appendChild(grip);
+
+  const name = document.createElement('span');
+  name.className = 'dsp-slot__name';
+  name.textContent = slotTitle(node);
+  head.appendChild(name);
+
+  if (entry?.channels) {
+    const sel = document.createElement('select');
+    sel.className = 'dsp-slot__chan';
+    for (const ch of entry.channels) {
+      const opt = document.createElement('option');
+      opt.value = ch;
+      opt.textContent = ch;
+      sel.appendChild(opt);
+    }
+    sel.value = node.channel ?? entry.channels[0];
+    sel.addEventListener('change', () => setSlotPiece(node, node.piece, sel.value));
+    head.appendChild(sel);
+  }
+
+  const zmode = document.createElement('button');
+  zmode.className = 'dsp-slot__btn';
+  zmode.dataset.zmode = '1';
+  zmode.addEventListener('click', () =>
+    setZoom(node, node.zoom, node.zmode === 'reflow' ? 'glass' : 'reflow'));
+  head.appendChild(zmode);
+
+  const zout = document.createElement('button');
+  zout.className = 'dsp-slot__btn';
+  zout.textContent = '−';
+  zout.title = 'zoom out';
+  zout.addEventListener('click', () => stepZoom(node, -1));
+  head.appendChild(zout);
+
+  const zlabel = document.createElement('button');
+  zlabel.className = 'dsp-slot__zlabel';
+  zlabel.title = 'click to reset to 100%';
+  zlabel.addEventListener('click', () => setZoom(node, 1));
+  head.appendChild(zlabel);
+
+  const zin = document.createElement('button');
+  zin.className = 'dsp-slot__btn';
+  zin.textContent = '+';
+  zin.title = 'zoom in';
+  zin.addEventListener('click', () => stepZoom(node, 1));
+  head.appendChild(zin);
+
+  head.appendChild(splitBtn(node, 'row', '⇆'));
+  head.appendChild(splitBtn(node, 'col', '⇵'));
+  const clear = document.createElement('button');
+  clear.className = 'dsp-slot__btn';
+  clear.textContent = '✕';
+  clear.title = 'empty this slot';
+  clear.addEventListener('click', () => emptySlot(node));
+  head.appendChild(clear);
+  el.appendChild(head);
+
+  // body scrolls, wrap zooms — pieces mount into the wrap
+  const body = document.createElement('div');
+  body.className = 'dsp-slot__body';
+  const wrap = document.createElement('div');
+  wrap.className = 'dsp-slot__zoom';
+  body.appendChild(wrap);
+  el.appendChild(body);
+  node.body = wrap;
+  applyZoom(node);
+  paintZoomUI(node);
+
+  if (node.stolen) {
+    const back = document.createElement('button');
+    back.className = 'dsp-slot__moved';
+    back.textContent = 'moved — click to bring it back';
+    back.addEventListener('click', () => mountSlot(node));
+    body.appendChild(back);
+  }
+}
+
+// drop target: two slots trade piece + channel, both remount
+function acceptDrop(node, el) {
+  el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const key = e.dataTransfer.getData('text/plain');
+    if (!key || key === node.key) return;
+    let other = null;
+    forEachSlot(layout, (s) => { if (s.key === key) other = s; });
+    if (!other) return;
+    swapSlots(other, node);
+  });
+}
+
+function swapSlots(a, b) {
+  unmountSlot(a);
+  unmountSlot(b);
+  const tmp = { piece: a.piece, channel: a.channel };
+  a.piece = b.piece; a.channel = b.channel; a.stolen = false;
+  b.piece = tmp.piece; b.channel = tmp.channel; b.stolen = false;
+  paintSlot(a);
+  paintSlot(b);
+  if (a.piece) mountSlot(a);
+  if (b.piece) mountSlot(b);
+  saveLayout();
+}
+
+function splitBtn(node, dir, label) {
+  const b = document.createElement('button');
+  b.className = 'dsp-slot__btn';
+  b.textContent = label;
+  b.dataset.split = dir;
+  b.title = dir === 'row' ? 'split left/right' : 'split top/bottom';
+  b.addEventListener('click', () => splitSlot(node, dir));
+  return b;
+}
+
+function applyRatio(split) {
+  const pct = Math.round(split.ratio * 1000) / 10;
+  split.a.el.style.flex = `0 0 calc(${pct}% - 3px)`;
+  split.b.el.style.flex = '1 1 0';
+}
+
+function renderNode(node) {
+  if (node.kind === 'slot') {
+    const el = document.createElement('div');
+    el.className = 'dsp-slot';
+    el.dataset.slotKey = node.key;
+    node.el = el;
+    acceptDrop(node, el);
+    paintSlot(node);
+    return el;
+  }
+
+  const el = document.createElement('div');
+  el.className = 'dsp-split';
+  el.dataset.dir = node.dir;
+  node.el = el;
+  el.appendChild(renderNode(node.a));
+  el.appendChild(makeDivider(node));
+  el.appendChild(renderNode(node.b));
+  applyRatio(node);
+  return el;
+}
+
+// divider: drag to reflow (ratio clamped 0.1–0.9), merge button keeps side a
+function makeDivider(split) {
+  const div = document.createElement('div');
+  div.className = 'dsp-div';
+  div.dataset.dir = split.dir;
+
+  const merge = document.createElement('button');
+  merge.className = 'dsp-div__merge';
+  merge.textContent = 'merge';
+  merge.title = 'collapse this split, keep the first side';
+  div.appendChild(merge);
+
+  // pointer capture lives on the divider, so merge fires from a still press on its button
+  div.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const onMerge = e.target === merge;
+    const start = split.dir === 'row' ? e.clientX : e.clientY;
+    let dragged = false;
+    div.setPointerCapture(e.pointerId);
+    const onMove = (ev) => {
+      const now = split.dir === 'row' ? ev.clientX : ev.clientY;
+      if (Math.abs(now - start) > 3) dragged = true;
+      const box = split.el.getBoundingClientRect();
+      const raw = split.dir === 'row'
+        ? (ev.clientX - box.left) / box.width
+        : (ev.clientY - box.top) / box.height;
+      split.ratio = Math.min(0.9, Math.max(0.1, raw));
+      applyRatio(split);
+    };
+    const onUp = () => {
+      div.removeEventListener('pointermove', onMove);
+      div.removeEventListener('pointerup', onUp);
+      try { div.releasePointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+      if (onMerge && !dragged) mergeSplit(split);
+      else if (dragged) saveLayout();
+    };
+    div.addEventListener('pointermove', onMove);
+    div.addEventListener('pointerup', onUp);
+  });
+
+  return div;
+}
+
+
+// ---- matrix persistence, presets, bar --------------------------------------------
+
+const STORE_KEY = 'cbdaw-devsplash:layout';
+let saveArmed = false;
+
+// piece ids + channels + ratios only, never DOM or view handles
+function serializeNode(node) {
+  if (node.kind === 'slot') {
+    return { kind: 'slot', piece: node.piece, channel: node.channel,
+             zoom: node.zoom ?? 1, zmode: node.zmode === 'reflow' ? 'reflow' : 'glass' };
+  }
+  return {
+    kind: 'split', dir: node.dir, ratio: node.ratio,
+    a: serializeNode(node.a), b: serializeNode(node.b),
+  };
+}
+
+// unknown piece id or channel degrades to an empty slot
+function deserializeNode(raw) {
+  if (!raw || typeof raw !== 'object') return makeSlot();
+  if (raw.kind === 'split' && raw.a && raw.b) {
+    const dir = raw.dir === 'col' ? 'col' : 'row';
+    const ratio = Math.min(0.9, Math.max(0.1, Number(raw.ratio) || 0.5));
+    return makeSplit(dir, deserializeNode(raw.a), deserializeNode(raw.b), ratio);
+  }
+  const piece = CATALOG_BY_ID.has(raw.piece) ? raw.piece : null;
+  const entry = CATALOG_BY_ID.get(piece);
+  const channel = entry?.channels
+    ? (entry.channels.includes(raw.channel) ? raw.channel : defaultChannel(entry))
+    : null;
+  const zoom = Math.min(3, Math.max(0.5, Number(raw.zoom) || 1));
+  return makeSlot(piece, channel, zoom, raw.zmode === 'reflow' ? 'reflow' : 'glass');
+}
+
+function layoutJSON() {
+  return JSON.stringify(serializeNode(layout), null, 2);
+}
+
+// localStorage throws in a Chromebook guest profile
+function saveLayout() {
+  if (!saveArmed) return;
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(serializeNode(layout)));
+  } catch (e) {
+    console.warn('[dev-splash] layout save', e);
+  }
+}
+
+function readStoredLayout() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    console.warn('[dev-splash] layout read', e);
+    return null;
+  }
+}
+
+// tears the whole tree down, renders the new one, mounts every filled slot
+function setLayout(node) {
+  forEachSlot(layout, unmountSlot);
+  layout = node;
+  layout.parent = null;
+  TREE.innerHTML = '';
+  TREE.appendChild(renderNode(layout));
+  forEachSlot(layout, (s) => { if (s.piece) mountSlot(s); });
+  saveLayout();
+}
+
+const PRESETS = [
+  { id: '1x1', label: '1×1', build: () => makeSlot() },
+  {
+    id: '2x2',
+    label: '2×2',
+    build: () => makeSplit('col',
+      makeSplit('row', makeSlot(), makeSlot()),
+      makeSplit('row', makeSlot(), makeSlot())),
+  },
+  {
+    id: 'daw-ish',
+    label: 'DAW-ish',
+    build: () => makeSplit('col',
+      makeSplit('row', makeSlot('header'), makeSlot('transport')),
+      makeSplit('col',
+        makeSplit('row', makeSlot('surface-block'), makeSlot('strips-all')),
+        makeSplit('row', makeSlot('arrangement'), makeSlot('graph'))),
+      0.18),
+  },
+];
+
+const FLASH = document.createElement('span');
+FLASH.className = 'dsp-flash';
+
+let flashTimer = 0;
+function flash(msg) {
+  FLASH.textContent = msg;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { FLASH.textContent = ''; }, 1600);
+}
+
+// clipboard API needs a secure context; the textarea is the fallback
+async function copyJSON() {
+  const text = layoutJSON();
+  try {
+    await navigator.clipboard.writeText(text);
+    flash('JSON copied');
+    return;
+  } catch (e) { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand('copy');
+  ta.remove();
+  flash(ok ? 'JSON copied' : 'copy failed — see console');
+  if (!ok) console.log(text);
+}
+
+function barBtn(id, label, fn) {
+  const b = document.createElement('button');
+  b.className = 'dsp-btn';
+  b.id = id;
+  b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+
+function buildMatrixBar() {
+  MATRIX_BAR.innerHTML = '';
+
+  const sel = document.createElement('select');
+  sel.className = 'dsp-bar-select';
+  sel.id = 'dsp-preset';
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = 'preset…';
+  sel.appendChild(blank);
+  for (const p of PRESETS) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => {
+    const preset = PRESETS.find((p) => p.id === sel.value);
+    if (!preset) return;
+    setLayout(preset.build());
+    flash(`preset ${preset.label}`);
+    sel.value = '';
+  });
+  MATRIX_BAR.appendChild(sel);
+
+  MATRIX_BAR.appendChild(barBtn('dsp-save', 'save', () => {
+    saveLayout();
+    flash('saved');
+  }));
+  MATRIX_BAR.appendChild(barBtn('dsp-reset', 'reset', () => {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) { console.warn('[dev-splash] reset', e); }
+    setLayout(makeSlot());
+    flash('reset');
+  }));
+  MATRIX_BAR.appendChild(barBtn('dsp-copy', 'copy JSON', copyJSON));
+  MATRIX_BAR.appendChild(FLASH);
+}
+
+// boot: stored layout or one empty slot, then arm the auto-save
+const stored = readStoredLayout();
+layout = stored ? deserializeNode(stored) : makeSlot();
+TREE.appendChild(renderNode(layout));
+forEachSlot(layout, (s) => { if (s.piece) mountSlot(s); });
+saveArmed = true;
+buildMatrixBar();
+
+rig.matrix = {
+  get layout() { return layout; },
+  holders: HOLDERS,
+  json: layoutJSON,
+  setLayout,
+};
+

@@ -1,0 +1,52 @@
+{
+  "notesPlacedAt": [
+    2,
+    5,
+    8,
+    11
+  ],
+  "probe1_afterFourNotes": {
+    "id": "r1",
+    "lengthBars": 1,
+    "notes": 3,
+    "loop": false,
+    "loopBars": null
+  },
+  "figuresOnBlockBeforeLoop": 3,
+  "probe2_afterLoopClick": {
+    "loop": true,
+    "loopBars": 1,
+    "lengthBars": 1
+  },
+  "startBarAfterLoopClick": 1,
+  "probe3_afterLoopDragRight2Cycles": {
+    "lengthBars": 3,
+    "loopBars": 1,
+    "loop": true
+  },
+  "probe4_afterEndGripShrinkTo2": {
+    "lengthBars": 2,
+    "loopBars": 1
+  },
+  "probe5_nonLoopedGrowBlankBars": {
+    "lengthBars": 3,
+    "loop": false,
+    "notes": 0
+  },
+  "figuresButtonLabels": [
+    "FIGURES 96",
+    "FIGURES ALL",
+    "FIGURES 24",
+    "FIGURES 48"
+  ],
+  "probe6_playbackNoteOnCount": {
+    "noteOnCount": 6
+  },
+  "pageErrorsMainPage": [],
+  "beatHtmlLoaded": true,
+  "simpleSynthUrlUsed": "http://localhost:8080/tools/desktop/simple-synth.html",
+  "page2Errors": [
+    "Failed to load resource: the server responded with a status of 404 (File not found)"
+  ],
+  "page3Errors": []
+}

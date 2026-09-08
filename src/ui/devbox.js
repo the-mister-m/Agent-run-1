@@ -1,7 +1,7 @@
 /**
  * ui/devbox.js — the skin tuning box.
  *
- * Loaded by ui/shell.js, so it is on every tool page. Appears only when the URL hash
+ * Loaded by ui/shell.js and by tools/daw.html. Appears only when the URL hash
  * contains `dev`. Reads the root knobs out of tokens.css at runtime, gives each one a
  * control, writes turned values to document.documentElement.style, persists per page in
  * localStorage, and dumps the changed knobs as a skin file body.

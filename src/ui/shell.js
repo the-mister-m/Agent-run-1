@@ -7,7 +7,8 @@
  * seam, and the wiring that connects `core/input.js`'s bus to an instrument's `noteOn` /
  * `noteOff`. It owns nothing inside any of those modules.
  *
- * Owns: this file, `/tools/wave-synth.html`, `/tools/overtone-synth.html`.
+ * Owns: this file and the pages it mounts — simple-synth.html, wave-synth.html and
+ * overtone-synth.html in both /tools/desktop/ and /tools/mobile/.
  * Does NOT own and never edits: `core/audio.js` · `core/input.js` · either instrument ·
  * `surfaces/keyboard.js` · `vis/spectrum.js` · `vis/scope.js` · `ui/tokens.css` (read
  * only, §9) · `/index.html` (P4) · `ui/overlays.js` (P3) · CONTRACTS.md.
@@ -58,13 +59,28 @@ import './devbox.js';
  * edit P2/P3/P4 need to make here.
  */
 export const TOOLS = [
-  { id: 'wave-synth', label: 'Wave Synth', href: 'wave-synth.html', available: true, phase: 'P1' },
-  { id: 'overtone-synth', label: 'Overtone Synth', href: 'overtone-synth.html', available: true, phase: 'P1' },
-  { id: 'beat', label: 'Beat', href: 'beat.html', available: true, phase: 'P2' },
-  { id: 'harmony', label: 'Harmony', href: 'harmonyNEW.html', available: true, phase: 'P3' },
-  { id: 'patch-synth', label: 'Patch Synth', href: 'patch-synth.html', available: false, phase: 'P4' },
-  { id: 'daw', label: 'The DAW', href: '../index.html', available: false, phase: 'P4' },
+  { id: 'simple-synth', label: 'Simple Synth', href: 'simple-synth.html', available: true, phase: 'P1', split: true },
+  { id: 'wave-synth', label: 'Wave Synth', href: 'wave-synth.html', available: true, phase: 'P1', split: true },
+  { id: 'overtone-synth', label: 'Overtone Synth', href: 'overtone-synth.html', available: true, phase: 'P1', split: true },
+  { id: 'beat', label: 'Beat', href: 'beat.html', available: true, phase: 'P2', split: true },
+  { id: 'harmony', label: 'Harmony', href: 'harmony.html', available: true, phase: 'P3', split: true },
+  { id: 'patch-synth', label: 'Patch Synth', href: 'patch-synth.html', available: true, phase: 'P4', split: true },
+  { id: 'daw', label: 'The DAW', href: 'daw.html', available: true, phase: 'P4', split: false },
 ];
+
+/** The two page layouts. A page passes one; there is no default and no `auto`. */
+export const LAYOUTS = ['desktop', 'mobile'];
+
+/** Resolves each TOOLS href into the page's layout folder. */
+export function toolsForLayout(layout) {
+  if (!LAYOUTS.includes(layout)) {
+    throw new TypeError(`toolsForLayout: layout must be one of ${LAYOUTS.join(' | ')}`);
+  }
+  return TOOLS.map((t) => ({
+    ...t,
+    href: t.split ? `../${layout}/${t.href}` : `../${t.href}`,
+  }));
+}
 
 /**
  * Input surfaces the switcher can offer. **P1 ships exactly one** — the 12-note keyboard
@@ -310,7 +326,6 @@ const STYLE_TEXT = `
   align-items: var(--align-start);
 }
 .cbdaw-shell__col { display: var(--disp-flex); flex-direction: var(--flexdir-column); gap: var(--shell-gap); }
-@media (max-width: 900px) { .cbdaw-shell__columns { grid-template-columns: var(--grid-minmax-0-1fr); } }
 .cbdaw-shell__instrument > * { width: var(--pct-100); }
 
 /* ——— the surface switcher (§3) ——————————————————————————————————————————— */
@@ -319,24 +334,50 @@ const STYLE_TEXT = `
    piano — is 1062 px tall. A Chromebook screen is 768. Laid out as one long scrolling
    document, the KEYBOARD — the one control every student needs first — is the thing that
    falls off the bottom.
-   So on any screen tall enough to be worth it the shell becomes a fixed-viewport app
-   layout: the top bar and the playing surface are pinned, and the middle (instrument +
-   visual + scale) is the part that scrolls. On a very short window it falls back to
-   ordinary document scrolling rather than squeezing the middle to nothing. */
+   Desktop layout: fixed frame, top bar and surface pinned, middle scrolls. Mobile layout:
+   document scroll, surface ordered above the panels. Set by the layout flag. */
 .cbdaw-shell__surface {
   margin-top: var(--auto);
   box-shadow: var(--shadow-lifted);
 }
-@media (min-height: 620px) {
-  .cbdaw-shell { height: var(--vh-100); overflow: var(--ov-hidden); }
-  .cbdaw-shell__columns {
-    flex: var(--flex-1-1-auto);
-    min-height: var(--sp-0);
-    overflow-y: var(--auto);
-    overflow-x: var(--ov-hidden);
-    padding-right: var(--sp-2);
-  }
+
+/* ——— LAYOUT: desktop ————————————————————————————————————————————————————— */
+/* The pinned app frame. Top bar and playing surface hold still, the middle scrolls. */
+.cbdaw-shell[data-layout="desktop"] { height: var(--vh-100); overflow: var(--ov-hidden); }
+.cbdaw-shell[data-layout="desktop"] .cbdaw-shell__columns {
+  flex: var(--flex-1-1-auto);
+  min-height: var(--sp-0);
+  overflow-y: var(--auto);
+  overflow-x: var(--ov-hidden);
+  padding-right: var(--sp-2);
 }
+
+/* ——— LAYOUT: mobile —————————————————————————————————————————————————————— */
+/* One column, document scroll, playing surface ordered above the panels. */
+.cbdaw-shell[data-layout="mobile"] {
+  height: var(--auto);
+  overflow: var(--ov-visible);
+  touch-action: var(--touch-manipulation);
+}
+.cbdaw-shell[data-layout="mobile"] .cbdaw-shell__top { order: var(--order-raise-2); }
+.cbdaw-shell[data-layout="mobile"] .cbdaw-shell__surface {
+  order: var(--order-raise-1);
+  margin-top: var(--sp-0);
+}
+.cbdaw-shell[data-layout="mobile"] .cbdaw-shell__columns {
+  grid-template-columns: var(--grid-minmax-0-1fr);
+  overflow: var(--ov-visible);
+}
+/* Touch targets, sized from tokens.css. */
+.cbdaw-shell[data-layout="mobile"] .cbdaw-menu__button,
+.cbdaw-shell[data-layout="mobile"] .cbdaw-menu__item,
+.cbdaw-shell[data-layout="mobile"] .cbdaw-switcher__button,
+.cbdaw-shell[data-layout="mobile"] .cbdaw-shell__unlock,
+.cbdaw-shell[data-layout="mobile"] .cbdaw-nocap,
+.cbdaw-shell[data-layout="mobile"] .cbdaw-scale button {
+  min-height: var(--tap-min);
+}
+.cbdaw-shell[data-layout="mobile"] .cbdaw-scale button { min-width: var(--tap-min); }
 .cbdaw-switcher { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); flex-wrap: var(--flexwrap-wrap); }
 .cbdaw-switcher__button {
   font: var(--font-inherit);
@@ -929,6 +970,7 @@ export function createCpuMeter({ instrument = null } = {}) {
  *
  * @typedef {object} ToolConfig
  * @property {string}   toolId       matches a row in TOOLS
+ * @property {'desktop'|'mobile'} layout  REQUIRED. Page medium: desktop or mobile.
  * @property {Function} Instrument   a CONTRACTS §2 instrument class
  * @property {Function} Visual       the ONE visual class this tool shows
  * @property {string}   tap          'spectrum' | 'scope' — which tap `Visual` binds to
@@ -969,11 +1011,21 @@ export class ToolShell {
   mount(host) {
     if (this._mounted) this.unmount();
     const cfg = this.config;
+
+    // Layout flag required, checked before build.
+    if (!LAYOUTS.includes(cfg.layout)) {
+      throw new TypeError(
+        `ToolShell: ${cfg.toolId} must pass layout: ${LAYOUTS.map((l) => `'${l}'`).join(' | ')}. ` +
+          'Every page file declares its own medium; there is no default.'
+      );
+    }
+
     acquireShellStyle();
 
     const root = document.createElement('div');
     root.className = 'cbdaw-shell';
     root.dataset.tool = cfg.toolId;
+    root.dataset.layout = cfg.layout;
     this.root = root;
 
     // ——— 1 · the audio channel and the instrument ————————————————————————————
@@ -986,8 +1038,8 @@ export class ToolShell {
     this.instrument = new cfg.Instrument(ctx, this.channel);
 
     // ——— 1a · ONE VISUAL, AND THE RIGHT ONE — asserted before anything is drawn ————
-    // PHASE.md's teaching inversion: Wave Synth shows the spectrum, Overtone Synth shows
-    // the oscilloscope, and neither ever shows both. Three things enforce that here:
+    // Simple Synth shows the spectrum, Overtone Synth shows the oscilloscope, and
+    // neither shows both. Three things enforce that here:
     //   (a) the page hands the shell exactly ONE `Visual` class — there is no list;
     //   (b) this assertion refuses to mount if the instrument offers the OTHER tap too,
     //       so a future edit that gave a synth both taps fails loudly on this page;
@@ -1013,8 +1065,9 @@ export class ToolShell {
     const top = document.createElement('header');
     top.className = 'cbdaw-shell__top';
 
+    // Siblings resolve inside this page's own layout folder.
     this.menu = createFileMenu({
-      items: TOOLS,
+      items: toolsForLayout(cfg.layout),
       currentId: cfg.toolId,
       label: 'Tool',
       // P1's meaning of "select": go to that tool's page. P4 passes a different handler
@@ -1073,16 +1126,8 @@ export class ToolShell {
     visualPanel.appendChild(visualHost);
     rightCol.appendChild(visualPanel);
 
-    // REPORTED, NOT FIXED — for whoever reads this next.
-    // Both P1 synths create their AnalyserNode with Web Audio's default
-    // `maxDecibels = -30`. On this page that clips the top of the peak flat, and the Wave
-    // Synth's on-screen FUNDAMENTAL readout comes out 1.5–6% low (measured: C4 reads
-    // 246.1 Hz for a true 261.6 Hz). `scopes` already recommended `maxDecibels ≈ -15`
-    // (receipt-scopes.md, OPEN DECISIONS #2); with that value the same measurement lands
-    // within 0.12%. The fix is one line inside `instruments/wave-synth.js` and
-    // `instruments/overtone-synth.js` — another seat's files. This shell does not reach
-    // into an instrument's analyser to paper over it (§2), and does not silently
-    // compensate in the drawing either. Escalated to the Troubleshooter with the numbers.
+    // Analyser maxDecibels at the Web Audio default of -30 clips the peak and reads the
+    // fundamental 1.5-6% low. The instruments set -15 themselves.
     this.visual = new cfg.Visual(this.instrument);
 
     this.scaleControl = createScaleControl();
@@ -1229,4 +1274,4 @@ export function mountStandaloneTool(config, host = document.body) {
   return shell;
 }
 
-export default { TOOLS, ToolShell, mountStandaloneTool, registerSurface };
+export default { TOOLS, LAYOUTS, toolsForLayout, ToolShell, mountStandaloneTool, registerSurface };

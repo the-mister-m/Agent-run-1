@@ -522,25 +522,6 @@ export default class CompBuilder {
     return num;
   }
 
-  /** Rules 1 and 2, computed. For chord `i`, compare each of its tones to chord `i-1`:
-   *  same pitch class is a common note, one semitone away is a neighbour. The first chord
-   *  has nothing before it and is marked neither. */
-  _leadingFor(i) {
-    if (i === 0) return new Map();
-    const prev = this._liveTonesOf(this.slots[i - 1]).map((t) => mod(t.midi, 12));
-    const out = new Map();
-    for (const tone of this._liveTonesOf(this.slots[i])) {
-      const pc = mod(tone.midi, 12);
-      if (prev.includes(pc)) { out.set(tone.j, 'common'); continue; }
-      const near = prev.some((p) => {
-        const d = Math.abs(mod(pc - p + 6, 12) - 6);
-        return d === 1;
-      });
-      if (near) out.set(tone.j, 'neighbor');
-    }
-    return out;
-  }
-
   // ---------------------------------------------------------------------------------------
   // 5 · SOUND — handed out, never made here
   // ---------------------------------------------------------------------------------------

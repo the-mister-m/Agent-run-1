@@ -25,7 +25,7 @@
 // -----------------------------------------------------------------------------------
 // DONE-CHECK for P1/S3 `keys-input`. Throwaway harness, not a product page.
 // Verifies /src/core/input.js + /src/surfaces/keyboard.js against the seat brief's nine
-// questions, importing the frozen /src/core/audio.js and the real wave-synth.
+// questions, importing the frozen /src/core/audio.js and the real simple-synth.
 //
 // NO AUDIO OUTPUT DEVICE EXISTS HERE. Nothing below claims to have heard anything.
 // Every check is on event data, DOM state, or node-graph state.
@@ -68,16 +68,16 @@ const { ctx, masterGain, masterAnalyser, createChannel, voicePool, governor } = 
 const { input } = await import('../../src/core/input.js');
 const kbMod = await import('../../src/surfaces/keyboard.js');
 const Keyboard = kbMod.default;
-const WaveSynth = (await import('../../src/instruments/wave-synth.js')).default;
+const SimpleSynth = (await import('../../src/instruments/simple-synth.js')).default;
 
 const startupTime = performance.now(); // startup already finished; MIDI never blocked it
 
 // ——— the instrument. §2: constructor(ctx, out). `out` is a real channel node.
 const channel = createChannel();
-const synth = new WaveSynth(ctx, channel);
+const synth = new SimpleSynth(ctx, channel);
 
 // The subscriber that drives the instrument. NOTE WHAT IT CANNOT SEE: it destructures
-// {note, velocity} only, and WaveSynth.noteOn's signature is (note, velocity, atTime).
+// {note, velocity} only, and SimpleSynth.noteOn's signature is (note, velocity, atTime).
 // There is no parameter anywhere in this path that could carry `source`.
 const busLog = [];
 const instrumentCalls = [];
@@ -159,7 +159,7 @@ ok(Math.abs(ons.find((e) => e.source === 'midi').velocity - 100 / 127) < 1e-9,
 const instrOns = instrumentCalls.filter((c) => c.kind === 'on');
 ok(instrOns.length === 4 && new Set(instrOns.map((c) => JSON.stringify({ n: c.note }))).size === 1,
    'instrument received four identical note numbers');
-ok(!('source' in (instrOns[0] || {})) && WaveSynth.prototype.noteOn.length <= 3,
+ok(!('source' in (instrOns[0] || {})) && SimpleSynth.prototype.noteOn.length <= 3,
    'nothing downstream can read `source` — noteOn(note, velocity, atTime) has no slot for it');
 
 // =====================================================================================

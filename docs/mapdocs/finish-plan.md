@@ -29,8 +29,6 @@ in tools/ except dev-splash and dev-test.
 
 | Gate | What Brandon rules | Spec |
 |---|---|---|
-| Commit | The 09-04 work on eleven files is uncommitted. Commit before any loop. | — |
-| Cleanup | Each delete and rename line. Curriculum order. Dev pages public or not. | [SPEC-cleanup.md](SPEC-cleanup.md) |
 | Split | One `layout` flag on the shell page. File naming for pairs. | [SPEC-pages.md](SPEC-pages.md) |
 | Sound | Limiter on master. Which one ducking layer. Exponent by ear. | [SPEC-sound.md](SPEC-sound.md) |
 | DAW | Dead Surface pane: delete or rebind. Record target. Trough px. | [SPEC-daw-desktop.md](SPEC-daw-desktop.md) |

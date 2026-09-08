@@ -1,0 +1,159 @@
+{
+  "a_before": [],
+  "a_pass": {
+    "stateIn": "recording",
+    "barAtStop": 3
+  },
+  "a_after": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 3,
+      "lengthBars": 1,
+      "notes": 3
+    }
+  ],
+  "b_before": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 3,
+      "lengthBars": 1,
+      "notes": 3
+    }
+  ],
+  "b_pass": {
+    "stateIn": "recording",
+    "barAtStop": 10
+  },
+  "b_after": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 3,
+      "lengthBars": 1,
+      "notes": 3
+    },
+    {
+      "id": "r2",
+      "lane": "trk2",
+      "startBar": 10,
+      "lengthBars": 1,
+      "notes": 3
+    }
+  ],
+  "c_armed": [
+    [
+      "trk1",
+      false
+    ],
+    [
+      "trk2",
+      false
+    ]
+  ],
+  "c_before": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 3,
+      "lengthBars": 1,
+      "notes": 3
+    },
+    {
+      "id": "r2",
+      "lane": "trk2",
+      "startBar": 10,
+      "lengthBars": 1,
+      "notes": 3
+    }
+  ],
+  "c_pass": {
+    "stateIn": "recording",
+    "barAtStop": 14
+  },
+  "c_after": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 3,
+      "lengthBars": 1,
+      "notes": 3
+    },
+    {
+      "id": "r2",
+      "lane": "trk2",
+      "startBar": 10,
+      "lengthBars": 1,
+      "notes": 3
+    }
+  ],
+  "d_before": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 3,
+      "lengthBars": 1,
+      "notes": 3
+    },
+    {
+      "id": "r3",
+      "lane": "trk2",
+      "startBar": 5,
+      "lengthBars": 1,
+      "notes": "pattern"
+    },
+    {
+      "id": "r2",
+      "lane": "trk2",
+      "startBar": 10,
+      "lengthBars": 1,
+      "notes": 3
+    }
+  ],
+  "d_pass": {
+    "stateIn": "recording",
+    "barAtStop": 5
+  },
+  "d_after": [
+    {
+      "id": "r1",
+      "lane": "trk1",
+      "startBar": 3,
+      "lengthBars": 1,
+      "notes": 3
+    },
+    {
+      "id": "r3",
+      "lane": "trk2",
+      "startBar": 5,
+      "lengthBars": 1,
+      "notes": "pattern"
+    },
+    {
+      "id": "r2",
+      "lane": "trk2",
+      "startBar": 10,
+      "lengthBars": 1,
+      "notes": 3
+    }
+  ],
+  "dawErrors": [],
+  "beat_gridPresent": 1,
+  "beat_rulerBarTags": 0,
+  "beat_originTick": true,
+  "beat_playheadSamples": [
+    "38.6979%",
+    "64.5833%",
+    "89.6354%",
+    "14.6875%",
+    "39.5312%",
+    "64.5833%",
+    "90.4167%",
+    "15.5208%"
+  ],
+  "beatErrors": [
+    "console: Failed to load resource: the server responded with a status of 404 (File not found)",
+    "console: Failed to load resource: the server responded with a status of 404 (File not found)"
+  ]
+}

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Run 1 — Tools</title>
+<link rel="stylesheet" href="src/ui/tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: var(--fs-base)/1.5 var(--font-mono);
+  }
+  header {
+    padding: var(--sp-8) var(--sp-6) var(--sp-5);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { margin: 0; font-size: var(--fs-xl); letter-spacing: .06em; text-transform: uppercase; }
+  header p { margin: var(--sp-2) 0 0; color: var(--text-dim); font-size: var(--fs-sm); }
+  header .switch {
+    display: inline-block;
+    margin-top: var(--sp-3);
+    border-bottom: 1px solid var(--line);
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
+    text-decoration: none;
+  }
+  header .switch:active { border-color: var(--accent); color: var(--accent); }
+
+  h2 {
+    margin: var(--sp-4) 0 0;
+    padding: 0 var(--sp-6);
+    font-size: var(--fs-sm);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  nav { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6) var(--sp-8); }
+  nav a {
+    display: block;
+    padding: var(--sp-8) var(--sp-6);
+    border: 1px solid var(--line);
+    border-radius: var(--sp-3);
+    background: var(--panel);
+    color: var(--text);
+    text-decoration: none;
+  }
+  nav a:active { border-color: var(--accent); color: var(--accent); }
+  nav a span { display: block; margin-top: var(--sp-2); color: var(--text-dim); font-size: var(--fs-sm); }
+  nav a:active span { color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Agent Run 1</h1>
+  <p>Chromebook DAW — tool pages</p>
+  <a class="switch" href="desktop.html" data-nav="desktop">→ desktop version</a>
+</header>
+
+<h2>Units</h2>
+<nav>
+  <a href="tools/mobile/simple-synth.html">Simple Synth<span>Pick a shape and see how many frequencies are in it. Smoother wave = fewer overtones.</span></a>
+  <a href="tools/mobile/wave-synth.html">Wave Synth<span>Two oscillators, a filter, two envelopes, two LFOs and a mod matrix. Stack voices with unison.</span></a>
+  <a href="tools/mobile/overtone-synth.html">Overtone Synth<span>Stack partials on the fundamental and watch the shape they add up to. More frequencies = a more complex wave.</span></a>
+  <a href="tools/mobile/beat.html">Beat<span>Eight drums, one pattern. Play them from the pads or the home row, and the grid plays them back.</span></a>
+  <a href="tools/mobile/harmony.html">Harmony<span>One scale, the chords it builds, and one engine to hear them through. Move a tone and the chord tells you its own name.</span></a>
+  <a href="tools/mobile/patch-synth.html">Patch Synth<span>Parts on a bench and cables between them. Nothing is wired when you open it — the sound is whatever you patch.</span></a>
+</nav>
+
+<h2>The DAW</h2>
+<nav>
+  <a href="tools/daw.html">The DAW<span>full DAW frame — tracks, mixer, arrangement</span></a>
+</nav>
+
+<h2>Dev</h2>
+<nav>
+  <a href="tools/desktop/dev-splash.html">dev-splash<span>skin splash — desktop only</span></a>
+  <a href="tools/desktop/dev-test.html">dev-test<span>test page — desktop only</span></a>
+  <a href="tools/desktop/sound-lab.html">sound-lab<span>layer, limiter, exponent gate — desktop only</span></a>
+</nav>
+
+<script>
+  // switch link — remember the pick so index.html stops auto-routing
+  document.querySelector('.switch').addEventListener('click', function () {
+    try { localStorage.setItem('cbdaw-nav', this.dataset.nav); } catch (e) {}
+  });
+</script>
+
+</body>
+</html>

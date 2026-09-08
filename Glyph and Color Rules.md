@@ -217,3 +217,7 @@ One seat takes this doc and closes, in `/src` only:
 
 No CONTRACTS edit is proposed here. §15 is append-only and owned by `spec-scale`; whatever
 you rule gets appended by that seat, not by the one doing the code.
+
+## REGION LOOP GLYPH — 2026-09-08
+
+`⟳` on a region block toggles that region's loop, top-right corner of the block.

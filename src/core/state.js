@@ -99,7 +99,7 @@ export function createState(initialScale = createScale()) {
 
   /** punch: {on, startBar, endBar}. Timeline range, global. Arm is per-lane — see
    *  `ui/arrangement.js`'s Capture instances; no global arm state lives here. */
-  let project = { punch: { on: false, startBar: 1, endBar: 5 } };
+  let project = { punch: { on: false, startBar: 1, endBar: 5 }, figureCap: 96 };
 
   function commitProject(next) {
     if (next === project) return project;
@@ -168,6 +168,11 @@ export function createState(initialScale = createScale()) {
     },
     setPunch(patch) {
       return commitProject({ ...project, punch: { ...project.punch, ...patch } });
+    },
+
+    /** Region figure note cap. 24, 48, 96, or 'ALL'. */
+    setFigureCap(next) {
+      return commitProject({ ...project, figureCap: next });
     },
 
     // ——— introspection, for surfaces and for the done-checks ——————————————————————————

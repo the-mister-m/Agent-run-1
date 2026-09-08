@@ -3,7 +3,6 @@ import { tracks as sharedTracks } from '../core/tracks.js';
 import { state as sharedState } from '../core/state.js';
 import { unlock } from '../core/audio.js';
 import StepGrid, { stepLabel } from '../surfaces/step-grid.js';
-import PianoRoll from '../surfaces/piano-roll.js';
 import Keyboard from '../surfaces/keyboard.js';
 import DiatonicKeys from '../surfaces/diatonic-keys.js';
 import ScaleCircle from '../surfaces/scale-circle.js';
@@ -16,6 +15,7 @@ let styleRefs = 0;
 // instrumentType -> display label, for the lane head's instrument dropdown
 export const INSTRUMENT_OPTIONS = [
   { value: '', label: '—' },
+  { value: 'simple-synth', label: 'Simple Synth' },
   { value: 'wave-synth', label: 'Wave Synth' },
   { value: 'overtone-synth', label: 'Overtone Synth' },
   { value: 'chord-module', label: 'Chord Module' },
@@ -61,6 +61,98 @@ function clampZoom(z) {
   const v = Number(z);
   if (!Number.isFinite(v)) return 1;
   return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, v));
+}
+
+/** True for a region with at least one note or one on-step. */
+function hasPlayableNotes(region) {
+  const notes = region?.notes;
+  if (Array.isArray(notes)) return notes.length > 0;
+  if (notes && typeof notes === 'object' && Array.isArray(notes.lanes)) {
+    return notes.lanes.some((lane) => Array.isArray(lane.steps) && lane.steps.some(Boolean));
+  }
+  return false;
+}
+
+/** Lowest and highest note pitch in a note array. */
+function noteRange(notes) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const n of notes) {
+    if (n.note < min) min = n.note;
+    if (n.note > max) max = n.note;
+  }
+  if (!Number.isFinite(min)) { min = 60; max = 60; }
+  return { min, max };
+}
+
+/** Every Nth item of a list so its length lands at or under cap. */
+function sampleEvery(list, cap) {
+  if (!Number.isFinite(cap) || list.length <= cap) return list;
+  const step = Math.ceil(list.length / cap);
+  return list.filter((_, i) => i % step === 0);
+}
+
+/** Note or step figures for one region, tiled across loop cycles, dead notes dim. */
+function buildFigures(region, barTicks, cap) {
+  const frag = document.createDocumentFragment();
+  const notes = region.notes;
+  const lengthTicks = region.lengthBars * barTicks;
+
+  if (Array.isArray(notes)) {
+    if (!notes.length) return frag;
+    const boundary = (region.loop ? (region.loopBars || region.lengthBars) : region.lengthBars) * barTicks;
+    const { min, max } = noteRange(notes);
+    const span = Math.max(1, max - min + 1);
+    const capped = sampleEvery(notes, cap);
+    const cycleNotes = capped.filter((n) => n.tick < boundary);
+    const deadNotes = capped.filter((n) => n.tick >= boundary);
+    const repeats = region.loop ? Math.ceil(lengthTicks / boundary) : 1;
+
+    const place = (n, tick, dim) => {
+      if (tick >= lengthTicks) return;
+      const el = document.createElement('div');
+      el.className = 'cbdaw-arr__region-note';
+      el.dataset.dim = String(dim);
+      el.style.left = `${(tick / lengthTicks) * 100}%`;
+      el.style.width = `${Math.max((n.length / lengthTicks) * 100, 1)}%`;
+      el.style.top = `${span === 1 ? 50 : ((max - n.note) / (span - 1)) * 100}%`;
+      frag.appendChild(el);
+    };
+
+    for (let k = 0; k < repeats; k++) {
+      for (const n of cycleNotes) place(n, k * boundary + n.tick, false);
+    }
+    for (const n of deadNotes) place(n, n.tick, true);
+    return frag;
+  }
+
+  if (notes && typeof notes === 'object' && Array.isArray(notes.lanes)) {
+    const onLanes = notes.lanes.filter((lane) => Array.isArray(lane.steps) && lane.steps.some(Boolean));
+    if (!onLanes.length) return frag;
+    const cycleBars = region.loop ? (region.loopBars || region.lengthBars) : region.lengthBars;
+    const scale = cycleBars / region.lengthBars;
+    const repeats = region.loop ? Math.ceil(region.lengthBars / cycleBars) : 1;
+    const rowH = 100 / onLanes.length;
+
+    onLanes.forEach((lane, row) => {
+      const onSteps = lane.steps.map((s, i) => (s ? i : -1)).filter((i) => i >= 0);
+      const sampled = sampleEvery(onSteps, cap);
+      for (let k = 0; k < repeats; k++) {
+        for (const idx of sampled) {
+          const left = ((idx / lane.steps.length) * scale + k * scale) * 100;
+          if (left >= 100) continue;
+          const el = document.createElement('div');
+          el.className = 'cbdaw-arr__region-step';
+          el.style.left = `${left}%`;
+          el.style.top = `${row * rowH}%`;
+          el.style.height = `${rowH}%`;
+          frag.appendChild(el);
+        }
+      }
+    });
+  }
+
+  return frag;
 }
 
 const STYLE_TEXT = `
@@ -357,11 +449,62 @@ const STYLE_TEXT = `
 }
 
 .cbdaw-arr__region-label {
+  position: var(--pos-relative);
+  z-index: var(--z-raise-1);
   padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-micro);
   color: var(--text);
   white-space: var(--ws-nowrap);
   pointer-events: var(--pe-none);
+}
+
+/* pointer-events-none layer, fills the block, sits under the label */
+.cbdaw-arr__region-figure {
+  position: var(--pos-absolute);
+  inset: var(--sp-0);
+  pointer-events: var(--pe-none);
+}
+
+.cbdaw-arr__region-cycle {
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  width: var(--sp-1);
+  background: var(--line);
+}
+
+.cbdaw-arr__region-note {
+  position: var(--pos-absolute);
+  min-width: var(--sp-2);
+  height: var(--sp-2);
+  margin-top: calc(var(--sp-2) / -2);
+  border-radius: var(--r-sm);
+  background: var(--text);
+}
+
+.cbdaw-arr__region-note[data-dim="true"] {
+  background: var(--text-dim);
+  opacity: var(--op-faint);
+}
+
+.cbdaw-arr__region-step {
+  position: var(--pos-absolute);
+  width: var(--sp-2);
+  background: var(--text);
+}
+
+.cbdaw-arr__region-loop {
+  position: var(--pos-absolute);
+  top: var(--sp-1);
+  right: var(--sp-1);
+  padding: var(--sp-0) var(--sp-1);
+  z-index: var(--z-raise-1);
+}
+
+.cbdaw-arr__region-loop[data-on="true"] {
+  background: var(--rec-on);
+  border-color: var(--rec-on);
+  color: var(--text);
 }
 
 .cbdaw-arr__region-edge {
@@ -450,11 +593,9 @@ export default class Arrangement {
     this._unsubProject = null;
     this._blockDrag = null;
     this._loopDrag = null;
-    this._listeners = { select: new Set(), open: new Set() };
-    // The one open region editor, or null. { regionId, laneId, kind, surface, host }.
-    this._editor = null;
-    this._unsubOpen = null;
-    this._unsubRegionRemove = null;
+    this._listeners = { select: new Set() };
+    // the clock statechange handler, live only while mounted
+    this._onClockState = null;
 
     // (id, instrumentType|null) -> the page's assignment flow. Unset, the dropdown writes
     // the store field only and no instance is built.
@@ -595,17 +736,12 @@ export default class Arrangement {
     this._unsubTracksUpdate = this._tracks.on('update', (t) => this._onTrackUpdate(t));
 
     // The transport bar owns the punch range; every lane's Capture follows it.
-    this._unsubProject = sharedState.on('project', (p) => this._syncPunch(p.punch));
+    this._unsubProject = sharedState.on('project', (p) => { this._syncPunch(p.punch); this._renderAllRegions(); });
     this._syncPunch(sharedState.project.punch);
 
-    // The entry point: a region's dblclick already emits 'open' (§10.3). This is the
-    // only listener.
-    this._unsubOpen = this.on('open', (region) => this._openRegion(region));
-    // A region removed anywhere (Delete key, a drag collision) closes its open editor
-    // without writing back — there is nothing left to write into.
-    this._unsubRegionRemove = this._regions.on('remove', (r) => {
-      if (this._editor?.regionId === r.id) this._closeEditor({ writeBack: false });
-    });
+    // The transport's record state opens and closes every armed lane's take.
+    this._onClockState = ({ to }) => this._syncTakes(to);
+    this._clock.on('statechange', this._onClockState);
 
     // Audio unlock, capture phase: a mounted surface's own window keydown listener runs in
     // the bubble phase, so this resumes the context before the first note is played.
@@ -619,13 +755,13 @@ export default class Arrangement {
   /** Mid-drag the blocks are rebuilt every pointermove, which would drop the node the
    *  gesture is attached to. Only the geometry moves. */
   _renderDuringDrag() {
+    const barTicks = ticksPerBar();
     for (const lane of this._lanes.values()) {
       for (const el of lane.regionRow.querySelectorAll('.cbdaw-arr__region')) {
         const r = this._regions.get(el.dataset.id);
         if (!r) { el.remove(); continue; }
         if (r.laneId !== lane.id) { el.remove(); continue; }
-        el.style.left = `calc(${BAR_W} * ${r.startBar - 1})`;
-        el.style.width = `calc(${BAR_W} * ${r.lengthBars})`;
+        this._paintRegionBlock(el, r, barTicks);
       }
     }
     // A region dragged onto another lane has no node there yet.
@@ -646,11 +782,8 @@ export default class Arrangement {
     this._scrubRelease?.(); // drop window listeners if unmounted mid-scrub
     this._blockDrag?.();
     this._loopDrag?.();
-    this._closeEditor();
-    this._unsubOpen?.();
-    this._unsubOpen = null;
-    this._unsubRegionRemove?.();
-    this._unsubRegionRemove = null;
+    if (this._onClockState) this._clock.off('statechange', this._onClockState);
+    this._onClockState = null;
     this._unsubRegions?.();
     this._unsubRegions = null;
     this._unsubTracksAdd?.();
@@ -870,7 +1003,6 @@ export default class Arrangement {
     if (!this.mounted) return;
     const lane = this._lanes.get(t.id);
     if (!lane) return;
-    if (this._editor?.laneId === t.id) this._closeEditor();
     this._disposeLaneSurface(lane);
     lane.capture.dispose();
     lane.head.remove();
@@ -1183,6 +1315,7 @@ export default class Arrangement {
   /** Rebuilds one lane's blocks from the store. */
   _renderLaneRegions(lane) {
     for (const el of [...lane.regionRow.querySelectorAll('.cbdaw-arr__region')]) el.remove();
+    const barTicks = ticksPerBar();
 
     for (const r of this._regions.forLane(lane.id)) {
       const el = document.createElement('div');
@@ -1190,9 +1323,11 @@ export default class Arrangement {
       el.dataset.id = r.id;
       el.dataset.selected = String(r.id === this._selectedId);
       el.dataset.muted = String(r.muted);
-      el.style.left = `calc(${BAR_W} * ${r.startBar - 1})`;
-      el.style.width = `calc(${BAR_W} * ${r.lengthBars})`;
       if (r.color) el.style.background = r.color;
+
+      const figure = document.createElement('div');
+      figure.className = 'cbdaw-arr__region-figure';
+      el.appendChild(figure);
 
       const label = document.createElement('div');
       label.className = 'cbdaw-arr__region-label';
@@ -1210,14 +1345,49 @@ export default class Arrangement {
         });
       }
 
-      this._addDom(el, 'pointerdown', (e) => this._beginBlockDrag(e, r.id, 'move'));
-      this._addDom(el, 'dblclick', (e) => {
+      const loopBtn = document.createElement('button');
+      loopBtn.type = 'button';
+      loopBtn.className = 'cbdaw-arr__btn cbdaw-arr__region-loop';
+      loopBtn.textContent = '⟳';
+      el.appendChild(loopBtn);
+      this._addDom(loopBtn, 'pointerdown', (e) => {
         e.stopPropagation();
-        this._emit('open', this._regions.get(r.id));
+        this._beginLoopDrag(e, r.id);
       });
 
+      this._addDom(el, 'pointerdown', (e) => this._beginBlockDrag(e, r.id, 'move'));
+
       lane.regionRow.appendChild(el);
+      this._paintRegionBlock(el, r, barTicks);
     }
+  }
+
+  /** Fills a region block's geometry, loop glyph, and figure layer. */
+  _paintRegionBlock(el, r, barTicks) {
+    el.style.left = `calc(${BAR_W} * ${r.startBar - 1})`;
+    el.style.width = `calc(${BAR_W} * ${r.lengthBars})`;
+
+    const loopBtn = el.querySelector('.cbdaw-arr__region-loop');
+    if (loopBtn) loopBtn.dataset.on = String(r.loop);
+
+    const figure = el.querySelector('.cbdaw-arr__region-figure');
+    if (!figure) return;
+    figure.replaceChildren();
+    if (r.loop && r.loopBars) {
+      for (let b = r.loopBars; b < r.lengthBars; b += r.loopBars) {
+        const line = document.createElement('div');
+        line.className = 'cbdaw-arr__region-cycle';
+        line.style.left = `${(b / r.lengthBars) * 100}%`;
+        figure.appendChild(line);
+      }
+    }
+    figure.appendChild(buildFigures(r, barTicks, this._figureCap()));
+  }
+
+  /** state.project.figureCap, 'ALL' as Infinity. */
+  _figureCap() {
+    const cap = sharedState.project.figureCap;
+    return cap === 'ALL' ? Infinity : (Number(cap) || 96);
   }
 
   _renderAllRegions() {
@@ -1264,15 +1434,64 @@ export default class Arrangement {
     window.addEventListener('pointerup', onUp);
   }
 
-  /** Where a take's notes land now that the editor owns writeback (§10.4): only into the
-   *  region already open in the editor for this lane. No playhead guess, no invented
-   *  region — a lane with no editor open drops the take. Destination rule beyond this is
-   *  open (§10.6), not decided here. */
+  /** Click toggles loop. Drag grows/shrinks by whole cycles and sets loop on. No notes, no-op. */
+  _beginLoopDrag(e, id) {
+    const origin = this._regions.get(id);
+    if (!origin || !hasPlayableNotes(origin)) return;
+    e.preventDefault();
+    this._select(id);
+
+    const startX = e.clientX;
+    const barPx = this._barPx();
+    const cycle = origin.loop ? (origin.loopBars || origin.lengthBars) : origin.lengthBars;
+    const el = e.currentTarget.closest?.('.cbdaw-arr__region') || null;
+    let dragged = false;
+
+    const onMove = (ev) => {
+      if (barPx <= 0) return;
+      const deltaBars = Math.round((ev.clientX - startX) / barPx);
+      const deltaCycles = Math.round(deltaBars / cycle);
+      if (deltaCycles === 0) return;
+      dragged = true;
+      if (el) el.dataset.dragging = 'true';
+      const nextLen = Math.max(cycle, origin.lengthBars + deltaCycles * cycle);
+      this._regions.resize(id, { lengthBars: nextLen });
+      this._regions.setLoop(id, { on: true, loopBars: cycle });
+    };
+
+    const onUp = () => {
+      this._blockDrag = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (!dragged) this._regions.setLoop(id, { on: !origin.loop });
+      this._renderAllRegions();
+    };
+
+    this._blockDrag = onUp;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  /** Opens a take on every armed lane while the transport records, closes every take when
+   *  it stops or leaves the record state. An unarmed lane opens nothing. */
+  _syncTakes(state) {
+    const recording = state === 'recording';
+    for (const lane of this._lanes.values()) {
+      const armed = Boolean(this._tracks.get(lane.id)?.armed);
+      if (recording && armed) lane.capture.record();
+      else lane.capture.stopTake();
+    }
+  }
+
+  /** Where a take's notes land: the region under the playhead, else a new one-bar region
+   *  at the playhead. */
   _commitToRegion(lane, report) {
     const notes = report?.notes || [];
     if (!notes.length) return;
-    if (!this._editor || this._editor.laneId !== lane.id) return;
-    this._regions.addNotes(this._editor.regionId, notes);
+    const bar = this._clock.position.bar;
+    const target = this._regions.at(lane.id, bar)
+      || this._regions.add({ laneId: lane.id, startBar: bar, lengthBars: 1, name: lane.label });
+    if (target) this._regions.addNotes(target.id, notes);
   }
 
   // ——— playing surfaces —————————————————————————————————————————————————————————————————
@@ -1324,60 +1543,6 @@ export default class Arrangement {
     surface.mountCompact(lane.surfaceSlot);
     this._layoutOverlay();
     return surface;
-  }
-
-  /** Opens a region editor (§10.3). A kindless track opens nothing. Only one editor is
-   *  open at a time — opening a second closes the first, writing it back first. */
-  _openRegion(region) {
-    if (!region) return;
-    const track = this._tracks.get(region.laneId);
-    const kind = track?.kind;
-    if (kind !== 'pitched' && kind !== 'drum') return;
-
-    this._closeEditor();
-
-    const host = document.createElement('div');
-    host.style.position = 'fixed';
-    host.style.inset = '10%';
-    host.style.background = 'var(--popout-ground, #202a3c)';
-    host.style.zIndex = '9999';
-    host.style.overflow = 'auto';
-    host.style.border = '1px solid var(--line, #3a485f)';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'cbdaw-arr__btn';
-    closeBtn.textContent = 'CLOSE';
-    host.appendChild(closeBtn);
-
-    const body = document.createElement('div');
-    host.appendChild(body);
-    document.body.appendChild(host);
-
-    const surface = kind === 'pitched' ? new PianoRoll() : new StepGrid();
-    if (kind === 'pitched') surface.setNotes(region.notes);
-    else surface.setPattern(region.notes);
-    surface.mount(body);
-
-    this._editor = { regionId: region.id, laneId: region.laneId, kind, surface, host };
-    // Not tracked via _addDom: this button dies with `host` on every close, so it must
-    // not accumulate in the arrangement's own DOM-listener list.
-    closeBtn.addEventListener('click', () => this._closeEditor());
-  }
-
-  /** Closes the open editor (§10.4): read the surface, write it back, dispose the surface,
-   *  drop the host. `writeBack: false` skips the write — used when the region itself is
-   *  already gone. */
-  _closeEditor({ writeBack = true } = {}) {
-    const ed = this._editor;
-    if (!ed) return;
-    this._editor = null;
-    if (writeBack) {
-      const payload = ed.kind === 'pitched' ? ed.surface.getNotes() : ed.surface.getPattern();
-      this._regions.setNotes(ed.regionId, payload);
-    }
-    ed.surface.dispose();
-    ed.host.remove();
   }
 
   on(event, fn) {

@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound Lab</title>
+<link rel="stylesheet" href="../../src/ui/tokens.css">
+<style>
+* { box-sizing: var(--box-border-box); }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-base)/var(--lh-base) var(--font-mono);
+  padding: var(--sp-6);
+}
+
+.lab { border: var(--bw) solid var(--line); background: var(--panel); border-radius: var(--r-panel); }
+
+.lab__top {
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  justify-content: var(--justify-space-between);
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: var(--bw) solid var(--line);
+}
+.lab__top h1 {
+  margin: var(--sp-0);
+  font-size: var(--fs-lg);
+  letter-spacing: var(--track-title);
+  text-transform: var(--tt-label);
+}
+.lab__sub { color: var(--text-dim); font-size: var(--fs-xs); letter-spacing: var(--track-mid); }
+
+.lab__sec { border-bottom: var(--bw) solid var(--line); padding: var(--sp-5) var(--sp-6); }
+.lab__sec:last-child { border-bottom: var(--sp-0); }
+
+.lab__label {
+  color: var(--text-dim);
+  letter-spacing: var(--track-label);
+  text-transform: var(--tt-label);
+  font-size: var(--fs-xs);
+  margin-bottom: var(--sp-3);
+}
+
+.lab__row {
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  flex-wrap: var(--flexwrap-wrap);
+  gap: var(--sp-4);
+}
+
+.lab__btn {
+  font: inherit;
+  color: var(--text);
+  background: var(--raise);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  padding: var(--sp-2) var(--sp-6);
+  cursor: var(--cur-pointer);
+  letter-spacing: var(--track-mid);
+}
+.lab__btn:hover { border-color: var(--accent); }
+.lab__btn.on { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: var(--w-med); }
+.lab__btn.danger { color: var(--warn); border-color: var(--warn); }
+
+.lab__radio {
+  display: var(--disp-flex);
+  align-items: var(--align-center);
+  gap: var(--sp-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--track-mid);
+  cursor: var(--cur-pointer);
+}
+.lab__radio input:checked + span,
+.lab__radio:has(input:checked) { color: var(--text); }
+
+.lab__hint { color: var(--text-dim); font-size: var(--fs-xs); letter-spacing: var(--track-mid); }
+
+.lab__val {
+  font-variant-numeric: var(--num-tabular);
+  color: var(--accent);
+  font-size: var(--fs-md);
+  min-width: var(--sp-31);
+  text-align: var(--ta-right);
+}
+
+input[type=range] { flex: var(--flex-1); accent-color: var(--accent); }
+
+.lab__inst { margin-top: var(--sp-4); }
+.lab__kb { margin-top: var(--sp-2); }
+
+.lab__meter { height: var(--sp-16); background: var(--recess); border-radius: var(--r-cell); }
+
+.lab__readout {
+  margin-top: var(--sp-3);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--track-mid);
+  font-variant-numeric: var(--num-tabular);
+}
+
+.lab__state {
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--track-mid);
+  font-variant-numeric: var(--num-tabular);
+}
+</style>
+</head>
+<body>
+
+<div class="lab">
+
+  <div class="lab__top">
+    <h1>Sound Lab</h1>
+    <span class="lab__sub" id="ctxInfo">audio idle</span>
+  </div>
+
+  <section class="lab__sec">
+    <div class="lab__label">Instrument</div>
+    <div class="lab__row">
+      <button class="lab__btn on" id="pickSimple">Simple Synth</button>
+      <button class="lab__btn" id="pickWave">Wave Synth</button>
+      <button class="lab__btn" id="pickOvertone">Overtone Synth</button>
+    </div>
+    <div class="lab__inst" id="instHost"></div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__label">Layer</div>
+    <div class="lab__row" id="layerRow">
+      <label class="lab__radio"><input type="radio" name="layer" value="channel"><span>channel only</span></label>
+      <label class="lab__radio"><input type="radio" name="layer" value="voice"><span>voice only</span></label>
+      <label class="lab__radio"><input type="radio" name="layer" value="both" checked><span>both (today)</span></label>
+      <label class="lab__radio"><input type="radio" name="layer" value="none"><span>none</span></label>
+    </div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__label">Limiter</div>
+    <div class="lab__row">
+      <button class="lab__btn" id="limiterToggle">off</button>
+      <span class="lab__hint">compressor, master gain to master analyser, -1dB knee 0 ratio 20 attack 1ms release 50ms</span>
+    </div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__label">Exponent</div>
+    <div class="lab__row">
+      <input type="range" id="expSlider" min="0.3" max="1.0" step="0.05" value="0.8">
+      <span class="lab__val" id="expVal">0.80</span>
+    </div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__label">Response</div>
+    <div class="lab__row">
+      <input type="range" id="respSlider" min="0" max="120" step="1" value="0">
+      <span class="lab__val" id="respVal">0 ms</span>
+    </div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__label">Chords</div>
+    <div class="lab__row">
+      <button class="lab__btn" id="chordRun">CHORD RUN</button>
+      <button class="lab__btn" id="heldChord">HELD CHORD</button>
+      <button class="lab__btn danger" id="chordRelease">RELEASE</button>
+      <span class="lab__hint">four eight-note chords, one beat each at 120bpm, no gap</span>
+    </div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__label">Play</div>
+    <div class="lab__kb" id="kbHost"></div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__label">Meter</div>
+    <div class="lab__meter" id="meterHost"></div>
+    <div class="lab__readout" id="liveReadout">voices 0 &middot; channel gain 1.00 &middot; exponent 0.80 &middot; reduction 0.0 dB</div>
+  </section>
+
+  <section class="lab__sec">
+    <div class="lab__state" id="stateLine">layer=both limiter=off exp=0.80 resp=0</div>
+  </section>
+
+</div>
+
+<script type="module">
+import {
+  ctx,
+  audio,
+  unlock,
+  masterAnalyser,
+  createChannel,
+  releaseChannel,
+  synthVoiceNorm,
+  setMasterLimiter,
+  getMasterLimiter,
+} from '../../src/core/audio.js';
+import { input } from '../../src/core/input.js';
+import SimpleSynth from '../../src/instruments/simple-synth.js';
+import WaveSynth from '../../src/instruments/wave-synth.js';
+import OvertoneSynth from '../../src/instruments/overtone-synth.js';
+import Meter from '../../src/vis/meter.js';
+import Keyboard from '../../src/surfaces/keyboard.js';
+
+// four eight-note chord voicings, root then extended stack, one beat each at 120bpm
+const BEAT_S = 60 / 120;
+const CHORD_INTERVALS = [0, 4, 7, 10, 14, 17, 21, 24];
+const CHORD_ROOTS = [60, 65, 67, 60];
+
+const LAYER_MODES = {
+  channel: { mode: 'per-instrument', voiceLayer: false },
+  voice: { mode: 'off', voiceLayer: true },
+  both: { mode: 'per-instrument', voiceLayer: true },
+  none: { mode: 'off', voiceLayer: false },
+};
+
+let instrument = null;
+let channel = null;
+let currentLayer = 'both';
+let limiterOn = false;
+let heldNotes = [];
+
+const instHost = document.getElementById('instHost');
+const ctxInfo = document.getElementById('ctxInfo');
+const stateLine = document.getElementById('stateLine');
+const liveReadout = document.getElementById('liveReadout');
+
+// swap the live instrument, disposing the old one and its channel
+function buildInstrument(Ctor) {
+  if (instrument) {
+    instrument.dispose();
+    releaseChannel(channel);
+    instrument = null;
+    channel = null;
+  }
+  channel = createChannel(Ctor.id);
+  instrument = new Ctor(ctx, channel);
+  instrument.mountExpanded(instHost);
+}
+
+const PICKERS = '#pickSimple, #pickWave, #pickOvertone';
+
+document.getElementById('pickSimple').addEventListener('click', (e) => {
+  buildInstrument(SimpleSynth);
+  document.querySelectorAll(PICKERS).forEach((b) => b.classList.remove('on'));
+  e.target.classList.add('on');
+});
+document.getElementById('pickWave').addEventListener('click', (e) => {
+  buildInstrument(WaveSynth);
+  document.querySelectorAll(PICKERS).forEach((b) => b.classList.remove('on'));
+  e.target.classList.add('on');
+});
+document.getElementById('pickOvertone').addEventListener('click', (e) => {
+  buildInstrument(OvertoneSynth);
+  document.querySelectorAll(PICKERS).forEach((b) => b.classList.remove('on'));
+  e.target.classList.add('on');
+});
+
+// input bus to the live instrument, same wiring shell.js uses
+input.on('noteon', (e) => {
+  unlock();
+  if (instrument) instrument.noteOn(e.note, e.velocity);
+});
+input.on('noteoff', (e) => {
+  if (instrument) instrument.noteOff(e.note);
+});
+window.addEventListener('blur', () => input.allNotesOff());
+
+audio.on('unlocked', () => { ctxInfo.textContent = 'audio running'; });
+
+// on-screen key row plus the home row, one mount
+const kb = new Keyboard();
+kb.mountExpanded(document.getElementById('kbHost'));
+
+// master analyser meter
+const meter = new Meter(masterAnalyser, { orientation: 'horizontal' });
+meter.mount(document.getElementById('meterHost'));
+
+// layer radio
+document.querySelectorAll('input[name=layer]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (!radio.checked) return;
+    const cfg = LAYER_MODES[radio.value];
+    synthVoiceNorm.mode = cfg.mode;
+    synthVoiceNorm.voiceLayer = cfg.voiceLayer;
+    currentLayer = radio.value;
+    updateStateLine();
+  });
+});
+
+// limiter toggle
+document.getElementById('limiterToggle').addEventListener('click', (e) => {
+  limiterOn = !limiterOn;
+  setMasterLimiter(limiterOn);
+  e.target.textContent = limiterOn ? 'on' : 'off';
+  e.target.classList.toggle('on', limiterOn);
+  updateStateLine();
+});
+
+// exponent slider
+const expSlider = document.getElementById('expSlider');
+const expVal = document.getElementById('expVal');
+expSlider.value = synthVoiceNorm.exponent;
+expVal.textContent = synthVoiceNorm.exponent.toFixed(2);
+expSlider.addEventListener('input', () => {
+  synthVoiceNorm.exponent = parseFloat(expSlider.value);
+  expVal.textContent = synthVoiceNorm.exponent.toFixed(2);
+  updateStateLine();
+});
+
+// response slider
+const respSlider = document.getElementById('respSlider');
+const respVal = document.getElementById('respVal');
+respSlider.value = Math.round(synthVoiceNorm.responseMs);
+respVal.textContent = Math.round(synthVoiceNorm.responseMs) + ' ms';
+respSlider.addEventListener('input', () => {
+  synthVoiceNorm.responseMs = parseFloat(respSlider.value);
+  respVal.textContent = Math.round(synthVoiceNorm.responseMs) + ' ms';
+  updateStateLine();
+});
+
+// four chords back to back, one beat each at 120bpm, ctx clock only
+function chordRun() {
+  unlock();
+  if (!instrument) return;
+  const t0 = ctx.currentTime + 0.05;
+  CHORD_ROOTS.forEach((root, i) => {
+    const at = t0 + i * BEAT_S;
+    const off = at + BEAT_S;
+    const notes = CHORD_INTERVALS.map((iv) => root + iv);
+    notes.forEach((n) => instrument.noteOn(n, 0.8, at));
+    notes.forEach((n) => instrument.noteOff(n, off));
+  });
+}
+
+// eight notes on, held until RELEASE
+function heldChordOn() {
+  unlock();
+  if (!instrument) return;
+  heldChordRelease();
+  const t0 = ctx.currentTime;
+  heldNotes = CHORD_INTERVALS.map((iv) => 60 + iv);
+  heldNotes.forEach((n) => instrument.noteOn(n, 0.8, t0));
+}
+
+// releases every held note at once, at the current time
+function heldChordRelease() {
+  if (!instrument || heldNotes.length === 0) return;
+  const t0 = ctx.currentTime;
+  heldNotes.forEach((n) => instrument.noteOff(n, t0));
+  heldNotes = [];
+}
+
+document.getElementById('chordRun').addEventListener('click', chordRun);
+document.getElementById('heldChord').addEventListener('click', heldChordOn);
+document.getElementById('chordRelease').addEventListener('click', heldChordRelease);
+
+// one line, every control's current state
+function updateStateLine() {
+  stateLine.textContent =
+    'layer=' + currentLayer +
+    ' limiter=' + (limiterOn ? 'on' : 'off') +
+    ' exp=' + synthVoiceNorm.exponent.toFixed(2) +
+    ' resp=' + Math.round(synthVoiceNorm.responseMs);
+}
+
+// voice count, channel gain, exponent, limiter reduction — read every frame
+function tick() {
+  const limiter = getMasterLimiter();
+  const reduction = limiter ? limiter.reduction : 0;
+  const voices = instrument ? instrument.voiceCount : 0;
+  const gain = channel ? channel.gain.value : 1;
+  liveReadout.textContent =
+    'voices ' + voices +
+    ' · channel gain ' + gain.toFixed(2) +
+    ' · exponent ' + synthVoiceNorm.exponent.toFixed(2) +
+    ' · reduction ' + reduction.toFixed(1) + ' dB';
+  requestAnimationFrame(tick);
+}
+
+buildInstrument(SimpleSynth);
+updateStateLine();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

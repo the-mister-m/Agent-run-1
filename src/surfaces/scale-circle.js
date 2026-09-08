@@ -456,7 +456,7 @@ export default class ScaleCircle {
    * RENAMED 2026-08-24 from `attachState`, which was the same operation under a second name
    * (`redpen-p3` Q9 item 9 / Q7 finding 6). `bindState` won on call sites: two definitions
    * (`surfaces/piano-roll.js`, `instruments/chord-module.js`) and two live callers
-   * (`tools/harmonyNEW.html`), against `attachState`'s one definition and zero callers. No
+   * (`tools/harmony.html`), against `attachState`'s one definition and zero callers. No
    * `attachState` METHOD remains anywhere in `/src` or `/tools` — the only occurrences of
    * the word left are the three in this note. Behaviour is unchanged, and the
    * constructor's required-`store` argument is untouched — that one is Brandon's.

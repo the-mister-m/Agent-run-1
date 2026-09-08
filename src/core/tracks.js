@@ -41,6 +41,7 @@ const EVENTS = ['add', 'remove', 'update', 'change'];
 
 /** instrumentType → kind. The only place this mapping is made. */
 const INSTRUMENT_KIND = {
+  'simple-synth': 'pitched',
   'wave-synth': 'pitched',
   'overtone-synth': 'pitched',
   'chord-module': 'pitched',

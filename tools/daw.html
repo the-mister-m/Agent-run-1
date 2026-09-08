@@ -302,17 +302,16 @@
         <span class="dwn-label">Bottom</span>
         <span class="dwn-spacer"></span>
         <button class="dwn-chip" data-bottom="strips-all" data-on="false">Mixer</button>
-        <button class="dwn-chip" data-bottom="surface" data-on="false">Surface</button>
         <button class="dwn-chip" data-bottom="roll" data-on="false">Piano Roll</button>
         <button class="dwn-chip" data-bottom="graph" data-on="false">Node Graph</button>
         <button class="dwn-chip" data-bottom="automation" data-on="false">Automation</button>
+        <button class="dwn-chip" id="dwn-figures" data-on="false">FIGURES 96</button>
       </div>
       <div class="dwn-region__body dwn-bottom__body" id="dwn-bottom-host">
         <div class="dwn-pane dwn-pane--strips" id="dwn-pane-strips-all" data-show="false">
           <div class="dwn-strips-scroll" id="dwn-strips-scroll"></div>
           <div class="dwn-master-slot" id="dwn-master-slot"></div>
         </div>
-        <div class="dwn-pane" id="dwn-pane-surface" data-show="false"></div>
         <div class="dwn-pane" id="dwn-pane-roll" data-show="false"></div>
         <div class="dwn-pane" id="dwn-pane-graph" data-show="false"></div>
         <div class="dwn-pane" id="dwn-pane-automation" data-show="false"></div>
@@ -340,7 +339,6 @@ import '../src/ui/devbox.js';
 // wireDawShell's mount hosts. `strips` is mutable — one key per live track, plus master.
 const handle = {
   header: document.getElementById('dwn-header-host'),
-  playingSurface: document.getElementById('dwn-pane-surface'),
   arrangement: document.getElementById('dwn-arr-host'),
   nodeGraph: document.getElementById('dwn-pane-graph'),
   automationLanes: document.getElementById('dwn-pane-automation'),
@@ -348,7 +346,7 @@ const handle = {
   strips: { master: document.getElementById('dwn-master-slot') },
 };
 
-// daw-shell's stylesheet — mountDawShell() normally injects it; this page mounts its own frame
+// daw-shell's stylesheet — this page builds its own frame markup, so it acquires directly
 acquireStyle();
 
 // owns header, arrangement, mixer, graph, buses, roll scheduler, track lifecycle
@@ -640,59 +638,123 @@ tracks.on('update', (t) => {
 tracks.on('remove', (t) => closePanel(t.id));
 
 
-// ---- region roll ------------------------------------------------------------------
-// one piano roll for the window, in the bottom third beside Surface. It follows the
-// arrangement's selected region; nothing selected, nothing mounted.
+// ---- region pane ------------------------------------------------------------------
+// one editing surface for the window, in the bottom third. It follows the arrangement's
+// selected region: a roll for a pitched lane, a step grid for a drum lane.
 
 const rollHost = document.getElementById('dwn-pane-roll');
 
-let roll = null;
+// the surface the pane holds, null when the pane is empty
+let paneSurface = null;
 
-// the region the roll holds, null when the roll is unmounted
+// 'pitched' | 'drum' | null — the kind the mounted surface serves
+let paneKind = null;
+
+// the region the pane holds, null when the pane is empty
 let rollRegionId = null;
 
-// push the loaded region's notes back to the store
+// 'drum' | 'pitched' for a region on a lane with a kind, else null
+function regionKind(region) {
+  if (!region) return null;
+  const k = tracks.get(region.laneId)?.kind;
+  return k === 'drum' || k === 'pitched' ? k : null;
+}
+
+// ticks a region actually plays: its loop cycle when looped, else its whole length
+function activeTicksOf(r) {
+  return (r.loop ? (r.loopBars || r.lengthBars) : r.lengthBars) * ticksPerBar();
+}
+
+// push the loaded region's payload back to the store
 function flushRoll() {
-  if (!roll || !rollRegionId) return;
+  if (!paneSurface || !rollRegionId) return;
   if (!regions.get(rollRegionId)) return;
-  regions.setNotes(rollRegionId, roll.getNotes());
+  regions.setNotes(
+    rollRegionId,
+    paneKind === 'drum' ? paneSurface.getPattern() : paneSurface.getNotes(),
+  );
 }
 
 function unmountRoll() {
-  if (roll && rollRegionId) roll.unmount();
-  roll?.setBus(null);
+  paneSurface?.setBus(null);
+  paneSurface?.dispose();
+  rollHost.replaceChildren();
+  paneSurface = null;
+  paneKind = null;
   rollRegionId = null;
 }
 
-// a drum region's pattern is not a note list — the roll takes pitched regions only
-function isPitched(region) {
-  return Boolean(region) && tracks.get(region.laneId)?.kind === 'pitched';
+// the eight piece roles of a lane's instrument
+function piecesFor(laneId) {
+  return shell.instruments.get(laneId)?.constructor?.pieces || null;
 }
 
-// load a region into the roll and raise its pane, or clear both when there is nothing to show
+// load a region into the pane and raise it, or clear both when there is nothing to show
 function showRegion(region) {
+  const kind = regionKind(region);
   if (rollRegionId && rollRegionId !== region?.id) flushRoll();
-  if (!isPitched(region)) {
+  if (!kind) {
     unmountRoll();
     if (bottomId === 'roll') setBottom(null);
     return;
   }
+
+  // one surface at a time: the other kind is disposed before this one is built
+  if (paneSurface && kind !== paneKind) unmountRoll();
+
   if (rollRegionId !== region.id) {
-    if (!roll) roll = new PianoRoll();
-    if (!rollRegionId) roll.mountCompact(rollHost);
+    if (!paneSurface) {
+      paneSurface = kind === 'drum' ? new StepGrid(null, clock) : new PianoRoll();
+      paneKind = kind;
+      paneSurface.mountCompact(rollHost);
+    }
     rollRegionId = region.id;
-    roll.setOriginTick((region.startBar - 1) * ticksPerBar());
-    roll.setNotes(region.notes);
+    paneSurface.setOriginTick((region.startBar - 1) * ticksPerBar());
+    if (kind === 'drum') {
+      paneSurface.setPieces(piecesFor(region.laneId));
+      // a region with no pattern yet starts blank at its own length
+      if (region.notes && !Array.isArray(region.notes)) paneSurface.setPattern(region.notes);
+      else paneSurface.resetPattern(region.lengthBars);
+      paneSurface.bars = Math.max(region.lengthBars, paneSurface.bars);
+    } else {
+      paneSurface.setNotes(region.notes);
+    }
   }
-  // the roll sounds through whichever lane owns the region it is showing
-  roll.setBus(shell.trackBus(region.laneId));
+  paneSurface.setActiveTicks(activeTicksOf(region));
+  // the pane sounds through whichever lane owns the region it is showing
+  paneSurface.setBus(shell.trackBus(region.laneId));
   if (bottomId !== 'roll') setBottom('roll');
 }
 
 arrangement.on('select', showRegion);
 
-// flush at gesture end; the roll has no change event
-window.addEventListener('pointerup', () => flushRoll());
+// loop toggled or resized while its region is open: refresh the length and the dim boundary
+regions.on('update', (r) => {
+  if (r.id !== rollRegionId || !paneSurface) return;
+  if (paneKind === 'drum') paneSurface.bars = Math.max(r.lengthBars, paneSurface.bars);
+  paneSurface.setActiveTicks(activeTicksOf(r));
+});
+
+// an instrument assigned while its region is open: the grid picks up the new piece roles
+tracks.on('update', (t) => {
+  if (!paneSurface || paneKind !== 'drum' || !rollRegionId) return;
+  if (regions.get(rollRegionId)?.laneId !== t.id) return;
+  paneSurface.setPieces(piecesFor(t.id));
+});
+
+// FIGURES <n>: cycles the region figure cap, every lane redraws
+const FIGURE_CAPS = [24, 48, 96, 'ALL'];
+const figuresBtn = document.getElementById('dwn-figures');
+figuresBtn.addEventListener('click', () => {
+  const current = state.project.figureCap;
+  const idx = FIGURE_CAPS.indexOf(current);
+  const next = FIGURE_CAPS[(idx + 1) % FIGURE_CAPS.length];
+  state.setFigureCap(next);
+  figuresBtn.textContent = `FIGURES ${next}`;
+});
+
+// flush after the gesture end, once the surface's own pointerup handlers have run
+window.addEventListener('pointerup', () => setTimeout(flushRoll, 0));
 
 // a deleted region takes no write-back
 regions.on('remove', (r) => {
@@ -722,7 +784,6 @@ function applyCollapse(region, prop, open) {
 
 const PANES = {
   'strips-all': document.getElementById('dwn-pane-strips-all'),
-  surface: document.getElementById('dwn-pane-surface'),
   roll: document.getElementById('dwn-pane-roll'),
   graph: document.getElementById('dwn-pane-graph'),
   automation: document.getElementById('dwn-pane-automation'),

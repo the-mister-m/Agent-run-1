@@ -174,7 +174,7 @@ export function createRegionStore() {
      *
      * `notes` is stored as given and never inspected.
      */
-    add({ laneId, startBar = 1, lengthBars = 1, name = null, color = null, notes = [], muted = false } = {}) {
+    add({ laneId, startBar = 1, lengthBars = 1, name = null, color = null, notes = [], muted = false, loop = false, loopBars = null } = {}) {
       if (laneId === undefined || laneId === null) throw new TypeError('regions.add: laneId required');
       const s = clampInt(startBar, 1, 1);
       const len = clampInt(lengthBars, MIN_LENGTH_BARS, MIN_LENGTH_BARS);
@@ -189,6 +189,8 @@ export function createRegionStore() {
         color,
         muted: Boolean(muted),
         notes: copyNotes(notes),
+        loop: Boolean(loop),
+        loopBars: loopBars === null ? null : Math.min(clampInt(loopBars, MIN_LENGTH_BARS, len), len),
       }, 'add');
     },
 
@@ -255,8 +257,24 @@ export function createRegionStore() {
         len = Math.min(clampInt(lengthBars, MIN_LENGTH_BARS, len), maxLen);
       }
 
-      if (s === r.startBar && len === r.lengthBars) return r;
-      return commit({ ...r, startBar: s, lengthBars: len }, 'update');
+      const loopBars = r.loopBars !== null && r.loopBars > len ? len : r.loopBars;
+      if (s === r.startBar && len === r.lengthBars && loopBars === r.loopBars) return r;
+      return commit({ ...r, startBar: s, lengthBars: len, loopBars }, 'update');
+    },
+
+    /** on/loopBars for one region. loopBars null with on true takes lengthBars. */
+    setLoop(id, { on = null, loopBars = null } = {}) {
+      const r = regions.get(id);
+      if (!r) return null;
+      const nextOn = on === null ? r.loop : Boolean(on);
+      let nextLoopBars = r.loopBars;
+      if (loopBars !== null) {
+        nextLoopBars = Math.min(clampInt(loopBars, MIN_LENGTH_BARS, r.lengthBars), r.lengthBars);
+      } else if (nextOn && nextLoopBars === null) {
+        nextLoopBars = r.lengthBars;
+      }
+      if (nextOn === r.loop && nextLoopBars === r.loopBars) return r;
+      return commit({ ...r, loop: nextOn, loopBars: nextLoopBars }, 'update');
     },
 
     /** Replace a region's payload. Stored as given; never inspected. */
@@ -302,6 +320,8 @@ export function createRegionStore() {
         color: r.color,
         muted: r.muted,
         notes: r.notes,
+        loop: r.loop,
+        loopBars: r.loopBars,
       });
     },
 
@@ -328,6 +348,8 @@ export function createRegionStore() {
           color: raw.color ?? null,
           muted: Boolean(raw.muted),
           notes: copyNotes(raw.notes),
+          loop: Boolean(raw.loop),
+          loopBars: raw.loopBars ?? null,
         }));
       }
       emit('change', { event: 'load', region: null });

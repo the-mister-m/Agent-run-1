@@ -1,6 +1,6 @@
 /**
  * instruments/overtone-synth.js — the Overtone Synth. Channel 2 of the DAW, and its own
- * standalone page. The inverse of the Wave Synth: the student builds a sound by hand out
+ * standalone page. The inverse of the Simple Synth: the student builds a sound by hand out
  * of 8 harmonic partials and watches the resulting waveform shape thicken on the
  * oscilloscope, instead of picking a waveform and watching its spectrum. Built by
  * `overtone-voice`, P1/S3.
@@ -344,9 +344,8 @@ export default class OvertoneSynth {
     this._voicesByNote = new Map(); // note -> live Voice, for noteOff/retrigger
     this._allVoices = new Set(); // every live voice this instrument owns
 
-    // [FIXED 2026-08-23, `redpen-p1` D-3] Mount state is keyed by mode, not a single slot,
-    // so `mountCompact` and `mountExpanded` can both be live at once — the shape
-    // `wave-synth.js` already uses. Each entry is `{ el, root, refs, teardown }` or null.
+    // Mount state keyed by mode, so compact and expanded can both be live.
+    // Each entry is { el, root, refs, teardown } or null.
     this._mounts = { compact: null, expanded: null };
   }
 
@@ -368,12 +367,7 @@ export default class OvertoneSynth {
   /** §11.2's allocate sequence. Never refuses a note (§10-A) — refused requests steal the
    *  DAW's longest-released (or longest-held) voice, fade it over 5ms, and retry once.
    *
-   *  [FIXED 2026-08-23, Troubleshooter-directed, `redpen-p1` D-1 / CONTRACTS §11.7a] The
-   *  `velocity = 0.8` default. §11.7a: "when `velocity` is `undefined`, every instrument
-   *  must treat it as 0.8, not NaN and not a thrown error" — the same constant §12.1
-   *  already fixes for a surface that cannot sense velocity. Without it `noteOn(60)`
-   *  reached `linearRampToValueAtTime(NaN)` and the note was silent. `wave-synth.js`
-   *  already defaults in exactly this place, exactly this way. */
+   *  Undefined velocity defaults to 0.8, matching simple-synth.js. */
   noteOn(note, velocity = 0.8, atTime) {
     const t = atTime ?? this._ctx.currentTime;
 
@@ -453,15 +447,9 @@ export default class OvertoneSynth {
 
   // ---- params (§11.3 envelope + §11.5 exact path list) -------------------------------
   //
-  // [FIXED 2026-08-23, Troubleshooter-directed, `redpen-p1` D-2 / CONTRACTS §11.7b] The
-  // ERROR CONVENTION on all three of setParam / getParam / setState. §11.7b: an
-  // UNRECOGNIZED path is a silent no-op on `setParam`, returns `undefined` from
-  // `getParam`, and a non-plain-object `setState` argument is a silent no-op — never a
-  // thrown exception. Reasoning is §11.7b's own: §7 automation and P5's preset loader call
-  // these programmatically, at scheduled times, on user-authored data, where one throw does
-  // not fail one control — it can stop a scheduler pass mid-song. `wave-synth.js` already
-  // behaves this way; this file previously threw, and two behaviours cannot both be "the"
-  // §2 behaviour for a generic caller. Now matched to `wave-synth.js` exactly.
+  // Error convention on setParam, getParam and setState: an unrecognized path is a
+  // silent no-op, getParam returns undefined, a non-object setState argument is a
+  // no-op. Matches simple-synth.js.
   //
   // NOT changed, and deliberately so: `partial.0.multiplier` still THROWS on both
   // `setParam` and `getParam`. That path is not "unrecognized" — §11.5 recognizes it and
@@ -550,8 +538,7 @@ export default class OvertoneSynth {
   }
 
   setState(obj) {
-    // §11.7b: a malformed state argument is a silent no-op, never a throw. Matches
-    // `wave-synth.js`'s `if (!obj || typeof obj !== 'object') return;` exactly.
+    // A malformed state argument is a silent no-op. Matches simple-synth.js.
     if (!obj || typeof obj !== 'object') return;
     if (Array.isArray(obj.partials)) {
       for (let i = 0; i < PARTIAL_COUNT && i < obj.partials.length; i++) {
@@ -593,12 +580,8 @@ export default class OvertoneSynth {
 
   // ---- analysis tap (§2 amendment 2, §11.5, §11.6) --------------------------------------
 
-  /** Returns the instrument's post-mix AnalyserNode for 'scope', null for anything else.
-   *  Overtone Synth's visual is the oscilloscope only — the inversion of Wave Synth, whose
-   *  tap is the spectrum analyzer only (§11.4/§11.5). The node is already connected inside
-   *  this instrument's own chain (§11.6); a reader must never reconnect it or call
-   *  dispose() on it — that rule is enforced by convention (this returns the live node
-   *  itself), matching every other instrument in the run. */
+  /** Returns the post-mix AnalyserNode for 'scope', null for anything else.
+   *  The node is already connected inside this instrument's own chain. */
   getAnalyser(which) {
     if (which === 'scope') return this._analyser;
     return null;
@@ -624,19 +607,9 @@ export default class OvertoneSynth {
     this._mount(el, 'expanded');
   }
 
-  /** [FIXED 2026-08-23, Troubleshooter-directed, `redpen-p1` D-3] DUAL MOUNT. This method
-   *  used to open with `if (this._mountedEl) this.unmount()`, so an instrument could hold
-   *  exactly one mount and `mountExpanded()` silently tore `mountCompact()` down. P4's DAW
-   *  mounts a strip view and a detail view of the SAME instrument at once, and
-   *  `wave-synth.js` already supports that (verified live in `test-report.md` Q1), so two
-   *  §2 instruments answered `mountCompact`/`mountExpanded` differently. Mount state is now
-   *  keyed by mode — `{ compact, expanded }`, the same shape `wave-synth.js` uses — so both
-   *  can be live simultaneously and share one instrument's state. Re-mounting the SAME mode
-   *  still replaces that mode's DOM (it does not stack), and `unmount()` still takes both
-   *  down. Audio was never involved: every mount reads and writes the one `this._partials`
-   *  / `this._env`, so "sharing state" is not new plumbing, it is what removing the
-   *  teardown exposes. `_syncUI()` is what pushes a change made in one mount into the
-   *  other. */
+  /** Dual mount. Mount state is keyed by mode, the same shape simple-synth.js uses, so
+   *  compact and expanded can be live at once over one instrument state. Re-mounting the
+   *  same mode replaces that mode's DOM. _syncUI pushes a change into the other mount. */
   _mount(el, mode) {
     if (this._mounts[mode]) this._unmountOne(mode);
 
@@ -838,10 +811,8 @@ export default class OvertoneSynth {
    *  multiplier inputs, level sliders, level bars, envelope sliders. Cheap, targeted
    *  writes only — never rebuilds DOM, so it is safe to call on every `setParam`.
    *
-   *  Two mounts can be live at once (D-3), so this is what makes them share state: a change
-   *  made in the compact view lands in the expanded view and the reverse. A control that is
-   *  `document.activeElement` is skipped so a slider is never yanked out from under a
-   *  student's pointer mid-drag — the same guard `wave-synth.js`'s `_syncUI()` uses. */
+   *  Two mounts can be live at once, so this is what makes them share state. A control
+   *  that is document.activeElement is skipped, the same guard simple-synth.js uses. */
   _syncUI() {
     for (const mode of ['compact', 'expanded']) {
       const mount = this._mounts[mode];

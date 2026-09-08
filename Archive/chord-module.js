@@ -1,5 +1,5 @@
 // =========================================================================================
-// instruments/chord-module.js — the harmony brain, as an instrument
+// Archive/chord-module.js — the harmony brain, as an instrument (archived, still wired into the DAW's instrument picker)
 // =========================================================================================
 // What this file is: it holds a numeral, a chord size, an octave, an inversion and a
 // comping spread; it turns those into pitches through `theory/chord.js`; and it either
@@ -29,8 +29,8 @@
 // default.
 // =========================================================================================
 
-import { voicePool, governor, createVoiceOut } from '../core/audio.js';
-import { state as sharedState } from '../core/state.js';
+import { voicePool, governor, createVoiceOut } from '../src/core/audio.js';
+import { state as sharedState } from '../src/core/state.js';
 
 import {
   MAX_COUNT,
@@ -39,9 +39,9 @@ import {
   numeralParts,
   isUpperOvertoneChord,
   noteBank,
-} from '../theory/chord.js';
+} from '../src/theory/chord.js';
 
-import { degreeQuality, degreeColor } from '../theory/scale.js';
+import { degreeQuality, degreeColor } from '../src/theory/scale.js';
 
 // -----------------------------------------------------------------------------------------
 // 1 · THE FOUR TONES
@@ -1508,7 +1508,7 @@ export default class ChordModule {
     const select = root.querySelector('[data-target]');
     if (select) {
       const rows = this.targets;
-      const want = rows.map((r) => `${r.id} ${r.label}`).join('');
+      const want = rows.map((r) => `${r.id}\u0000${r.label}`).join('\u0001');
       if (select.dataset.rows !== want) {
         select.dataset.rows = want;
         select.innerHTML = rows

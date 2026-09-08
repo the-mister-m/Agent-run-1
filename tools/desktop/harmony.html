@@ -6,18 +6,19 @@
 <title>Harmony — Chromebook DAW</title>
 
 <!--
-  /tools/harmonyNEW.html — the Harmony standalone teaching page.
-  The Harmony engine. CONTRACTS §1 names this path.
+  /tools/desktop/harmony.html — the Harmony standalone teaching page, desktop.
+  Its twin is /tools/mobile/harmony.html. Both import the same src/ modules; the two files
+  differ in the `LAYOUT` constant they stamp on the shell root and in nothing else.
 
   NO BUILD STEP (CONTRACTS §10). Plain ES module imports, relative paths, no bundler, no
   dependency, nothing to compile. Serve the PROJECT ROOT over static HTTP and open this file:
 
       python3 -m http.server 8000
-      http://127.0.0.1:8000/tools/harmonyNEW.html
+      http://127.0.0.1:8000/tools/desktop/harmony.html
 
   It must be HTTP, not file:// — Chrome refuses ES module imports from a file:// origin, and
   Web MIDI needs a secure context (CONTRACTS §5, §10). 127.0.0.1 counts as secure.
-  Serve from the PROJECT ROOT, not from /tools, so every ../src/ import resolves.
+  Serve from the PROJECT ROOT, not from /tools, so every ../../src/ import resolves.
 
   THE LESSON (PHASE.md): a scale is a shape you can bend, and a chord is what you get when
   you stack every other note of it. Three surfaces show the SAME scale three ways and all
@@ -36,7 +37,7 @@
     surfaces/scale-circle.js ... the wheel. Read only.
     surfaces/comp-builder.js ... Chord Bank, Root Positions, Comp Positions. Builds the
                                  chords and hands the notes to the selected engine.
-    instruments/wave-synth.js .. an ENGINE. Read only.
+    instruments/simple-synth.js  an ENGINE. Read only.
     instruments/overtone-synth.js an ENGINE. Read only.
     ui/shell.js ................ REUSED, NEVER EDITED. This page imports its file menu, its
                                  CPU meter and its stylesheet and writes not one line of it.
@@ -58,7 +59,7 @@
     thing for the same reason.
 -->
 
-<link rel="stylesheet" href="../src/ui/tokens.css">
+<link rel="stylesheet" href="../../src/ui/tokens.css">
 <style>
   html, body { margin: var(--sp-0); padding: var(--sp-0); background: var(--bg, #0a0d13); }
   .cbdaw-boot {
@@ -118,7 +119,12 @@
     display: var(--disp-grid); gap: var(--sp-6); align-items: var(--align-start);
     grid-template-columns: var(--grid-90-70-140);
   }
-  @media (max-width: 1100px) { .hm-surfaces { grid-template-columns: var(--grid-1fr); } }
+
+  /* Mobile: `.hm-surfaces` one column, scale builder degree rows and wheel stacked. */
+  .cbdaw-shell[data-layout="mobile"] .hm-surfaces { grid-template-columns: var(--grid-1fr); }
+  .cbdaw-shell[data-layout="mobile"] .hm-split { flex-direction: var(--flexdir-column); }
+  .cbdaw-shell[data-layout="mobile"] .hm-targets { grid-template-columns: var(--grid-1fr); }
+  .cbdaw-shell[data-layout="mobile"] .hm-key { min-height: var(--sp-23); }
 
   .hm-keys { display: var(--disp-flex); flex-wrap: var(--flexwrap-wrap); gap: var(--sp-2); }
   .hm-key {
@@ -165,16 +171,16 @@
 // =========================================================================================
 
 import {
-  TOOLS,
+  toolsForLayout,
   createFileMenu,
   createCpuMeter,
   acquireShellStyle,
   releaseShellStyle,
-} from '../src/ui/shell.js';
+} from '../../src/ui/shell.js';
 
-import { ctx, unlock, createChannel, releaseChannel } from '../src/core/audio.js';
-import { input } from '../src/core/input.js';
-import { state } from '../src/core/state.js';
+import { ctx, unlock, createChannel, releaseChannel } from '../../src/core/audio.js';
+import { input } from '../../src/core/input.js';
+import { state } from '../../src/core/state.js';
 
 import {
   PRESETS,
@@ -182,13 +188,16 @@ import {
   setScaleTonic,
   setScalePreset,
   spellingOf,
-} from '../src/theory/scale.js';
+} from '../../src/theory/scale.js';
 
-import ScaleCircle from '../src/surfaces/scale-circle.js';
-import CompBuilder from '../src/surfaces/comp-builder.js';
+import ScaleCircle from '../../src/surfaces/scale-circle.js';
+import CompBuilder from '../../src/surfaces/comp-builder.js';
 
-import WaveSynth from '../src/instruments/wave-synth.js';
-import OvertoneSynth from '../src/instruments/overtone-synth.js';
+import SimpleSynth from '../../src/instruments/simple-synth.js';
+import OvertoneSynth from '../../src/instruments/overtone-synth.js';
+
+/** Which medium this page file is for. Its twin in ../mobile/ differs only here. */
+const LAYOUT = 'desktop';
 
 // =========================================================================================
 // 1 · SMALL HELPERS — layout only. No music, no labels of this page's own invention.
@@ -276,6 +285,7 @@ function createScaleControl(store, listeners) {
   // Below it, two halves. The degree rows sit on the left; the wheel they drive mounts into
   // `circleHost` on the right and is the same scale, not a second one.
   const split = document.createElement('div');
+  split.className = 'hm-split';
   split.style.display = 'var(--disp-flex)';
   split.style.flexWrap = 'var(--flexwrap-wrap)';
   split.style.gap = 'var(--sp-6)';
@@ -434,21 +444,23 @@ function mount(host) {
   const root = document.createElement('div');
   root.className = 'cbdaw-shell';
   root.dataset.tool = 'harmony';
+  // Stamps the same layout flag `ui/shell.js` stamps.
+  root.dataset.layout = LAYOUT;
 
   // ——— 1 · audio channels and the instruments ————————————————————————————————————
   // §2: an instrument is handed `(ctx, out)`, never makes its own context (§10) and never
   // connects to `ctx.destination`. `createChannel()` is what produces `out` until P4's
   // mixer/strip.js exists.
   // The ids opt both channels into synth voice normalization (core/audio.js section 4a).
-  const waveChannel = createChannel(WaveSynth.id);
+  const waveChannel = createChannel(SimpleSynth.id);
   const overtoneChannel = createChannel(OvertoneSynth.id);
 
-  const wave = new WaveSynth(ctx, waveChannel);
+  const wave = new SimpleSynth(ctx, waveChannel);
   const overtone = new OvertoneSynth(ctx, overtoneChannel);
 
   // The engines this page loaded, in menu order. The first is selected at mount.
   const engines = [
-    { id: WaveSynth.id, label: WaveSynth.label, instrument: wave },
+    { id: SimpleSynth.id, label: SimpleSynth.label, instrument: wave },
     { id: OvertoneSynth.id, label: OvertoneSynth.label, instrument: overtone },
   ];
   let engineId = engines[0].id;
@@ -458,13 +470,8 @@ function mount(host) {
   const top = document.createElement('header');
   top.className = 'cbdaw-shell__top';
 
-  // `ui/shell.js`'s TOOLS table still carries `{id:'harmony', available:false, phase:'P3'}`,
-  // so the Harmony row would render disabled on its own page. Flipping that boolean is an
-  // edit to shell.js and this seat does not edit shell.js (brief: "reuse it, do not edit
-  // it"). `createFileMenu` already takes `items` — the component is told what to isolate
-  // rather than knowing — so this page hands it a COPY with its own row marked available and
-  // reaches into nothing. Exactly what `tools/beat.html` did for the Beat row.
-  const items = TOOLS.map((t) => (t.id === 'harmony' ? { ...t, available: true } : { ...t }));
+  // `createFileMenu` gets TOOLS rows resolved into this page's layout folder.
+  const items = toolsForLayout(LAYOUT);
   const menu = createFileMenu({
     items,
     currentId: 'harmony',
@@ -708,7 +715,7 @@ function mount(host) {
   // §2's async gate. Every instrument here is `needsLoad = false` and resolves immediately;
   // calling it anyway is what lets a loading instrument drop into this same page later.
   for (const inst of [wave, overtone]) {
-    inst.ready?.().catch((err) => console.error('[harmonyNEW.html] ready() failed:', err));
+    inst.ready?.().catch((err) => console.error('[desktop/harmony.html] ready() failed:', err));
   }
 
   // ——— 8 · teardown, counted rather than claimed ——————————————————————————————————
@@ -763,7 +770,7 @@ try {
   box.className = 'hm-err';
   box.textContent = `harmony failed to mount:\n\n${err && err.stack ? err.stack : err}`;
   document.body.appendChild(box);
-  console.error('[harmonyNEW.html] mount failed:', err);
+  console.error('[desktop/harmony.html] mount failed:', err);
 }
 
 </script>

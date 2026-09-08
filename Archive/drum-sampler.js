@@ -1,5 +1,6 @@
 /**
- * instruments/drum-sampler.js — eight drum pieces played from recorded audio files Brandon
+ * Archive/drum-sampler.js — archived, still wired into the DAW's instrument picker and dev-splash.
+ * Eight drum pieces played from recorded audio files Brandon
  * supplies. The recorded half of PHASE.md's teaching pair with `drum-synth` — same eight
  * roles, same grid, so a student can A/B a made sound against a captured one (seat brief,
  * BIG PICTURE). Built by `drum-sampler`, P2/S4.
@@ -59,7 +60,7 @@
  *    already owns.
  */
 
-import { voicePool, governor, createVoiceOut } from '../core/audio.js';
+import { voicePool, governor, createVoiceOut } from '../src/core/audio.js';
 
 // ---------------------------------------------------------------------------------------
 // CONSTANTS  (seat questions 1, 2 — the kit layout and the fixed eight roles)

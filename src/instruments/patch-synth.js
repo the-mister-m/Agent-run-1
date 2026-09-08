@@ -990,6 +990,8 @@ export default class PatchSynth {
 
     this._outNode = this._createNode('out', 0, 0);
     this._outNode.audioIn('in').connect(this._analyser);
+    // Out node initial-position flag.
+    this._outPositioned = false;
 
     this._mounts = { compact: null, expanded: null };
     this._domListenersByMount = { compact: [], expanded: [] };
@@ -1441,6 +1443,20 @@ export default class PatchSynth {
     this._views[which] = { root, palette, canvas, scene, svg, note, pointers: new Map() };
 
     for (const node of this._nodes.values()) scene.appendChild(this._paintNode(which, doc, node));
+
+    // Out node: right edge, vertical center.
+    if (!this._outPositioned && this._outNode) {
+      const rect = canvas.getBoundingClientRect();
+      const outBox = scene.querySelector(`.ps-node[data-id="${this._outNode.id}"]`);
+      if (rect.width > 0 && outBox) {
+        const boxRect = outBox.getBoundingClientRect();
+        this._outNode.x = Math.max(0, rect.width - boxRect.width);
+        this._outNode.y = Math.max(0, (rect.height - boxRect.height) / 2);
+        outBox.style.left = `${this._outNode.x}px`;
+        outBox.style.top = `${this._outNode.y}px`;
+        this._outPositioned = true;
+      }
+    }
 
     this._listen(which, canvas, 'pointerdown', (ev) => this._onDown(which, ev));
     this._listen(which, canvas, 'pointermove', (ev) => this._onMove(which, ev));

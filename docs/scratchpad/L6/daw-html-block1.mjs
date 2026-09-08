@@ -1,0 +1,480 @@
+
+
+import { ctx, unlock } from '../src/core/audio.js';
+import { clock, ticksPerBar } from '../src/core/clock.js';
+import { state } from '../src/core/state.js';
+import { input } from '../src/core/input.js';
+import { tracks } from '../src/core/tracks.js';
+import { regions } from '../src/core/regions.js';
+import { wireDawShell, acquireStyle } from '../src/ui/daw-shell.js';
+import Keyboard from '../src/surfaces/keyboard.js';
+import DiatonicKeys from '../src/surfaces/diatonic-keys.js';
+import StepGrid from '../src/surfaces/step-grid.js';
+import PianoRoll from '../src/surfaces/piano-roll.js';
+import '../src/ui/devbox.js';
+
+// wireDawShell's mount hosts. `strips` is mutable — one key per live track, plus master.
+const handle = {
+  header: document.getElementById('dwn-header-host'),
+  arrangement: document.getElementById('dwn-arr-host'),
+  nodeGraph: document.getElementById('dwn-pane-graph'),
+  automationLanes: document.getElementById('dwn-pane-automation'),
+  stripsScroll: document.getElementById('dwn-strips-scroll'),
+  strips: { master: document.getElementById('dwn-master-slot') },
+};
+
+// daw-shell's stylesheet — this page builds its own frame markup, so it acquires directly
+acquireStyle();
+
+// owns header, arrangement, mixer, graph, buses, roll scheduler, track lifecycle
+const shell = wireDawShell(handle, { laneSurfaces: false });
+const { mixer, graph, arrangement, header } = shell;
+
+const rig = { ctx, clock, state, input, tracks, shell, handle, mixer, graph, arrangement, header };
+window.dwn = rig;
+
+// audio starts suspended in Chrome — first gesture unlocks
+document.addEventListener('pointerdown', () => unlock());
+window.addEventListener('blur', () => input.allNotesOff());
+
+
+// ---- transport keys ---------------------------------------------------------------
+// space toggles play; enter parks the playhead at the loop start, or bar 1 with loop off
+
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  if (t && t.closest && t.closest('input, select, textarea, [contenteditable]')) return;
+
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (clock.state === 'stopped') clock.play();
+    else clock.stop();
+  } else if (e.code === 'Enter') {
+    e.preventDefault();
+    clock.seek(clock.loop.on ? clock.loop.startBar : 1);
+  }
+});
+
+
+// ---- left column strips -----------------------------------------------------------
+
+const EL = {
+  chan: document.getElementById('dwn-chan'),
+  stripSel: document.getElementById('dwn-strip-sel'),
+  stripMaster: document.getElementById('dwn-strip-master'),
+  bottom: document.getElementById('dwn-bottom'),
+  bottomHost: document.getElementById('dwn-bottom-host'),
+};
+
+// selected track id, or null when no tracks exist
+let selectedId = null;
+
+// second view of the selected track's strip
+function showSelected(id) {
+  const prev = selectedId ? mixer.strips[selectedId] : null;
+  if (prev) prev.unmount(EL.stripSel);
+  else EL.stripSel.innerHTML = '';
+  selectedId = id;
+  if (selectedId) mixer.strips[selectedId]?.mountCompact(EL.stripSel);
+}
+
+// option list, off the live track store
+function syncChannelList() {
+  const ids = tracks.all.map((t) => t.id);
+  EL.chan.innerHTML = '';
+  for (const t of tracks.all) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = t.name || t.id;
+    EL.chan.appendChild(opt);
+  }
+  const next = ids.includes(selectedId) ? selectedId : (ids[0] || null);
+  if (next !== selectedId) showSelected(next);
+  EL.chan.value = selectedId || '';
+}
+
+EL.chan.addEventListener('change', () => showSelected(EL.chan.value || null));
+
+// clicking a region in the arrangement moves the left strip to that region's track
+arrangement.on('select', (region) => {
+  if (!region || region.laneId === selectedId) return;
+  showSelected(region.laneId);
+  EL.chan.value = selectedId || '';
+});
+
+// track store subscriptions
+for (const ev of ['add', 'remove', 'update']) tracks.on(ev, syncChannelList);
+
+mixer.strips.master.mountCompact(EL.stripMaster);
+syncChannelList();
+
+
+// ---- instrument panels ------------------------------------------------------------
+// one floating modal per track, any number open at once
+
+// track kind -> the surfaces that track can play through
+const SURFACE_CHIPS = {
+  pitched: [
+    { value: 'keyboard', label: 'Keyboard', Ctor: Keyboard, driver: 'bus' },
+    { value: 'diatonic-keys', label: 'Diatonic Keys', Ctor: DiatonicKeys, driver: 'bus' },
+  ],
+  drum: [
+    { value: 'step-grid', label: 'Step Grid', Ctor: StepGrid, driver: 'instrument' },
+  ],
+};
+
+// track id -> open panel record
+const panels = new Map();
+
+// each new panel steps down and right from the last
+let panelOffset = 0;
+
+function surfacesFor(id) {
+  return SURFACE_CHIPS[tracks.get(id)?.kind] || [];
+}
+
+// the panel's instrument view, rebuilt when the track's instance changes
+function syncPanelInstrument(panel, id) {
+  const next = shell.instruments.get(id) || null;
+  if (panel.instrument !== next) {
+    panel.instrument?.unmount?.(panel.instrumentHost);
+    panel.instrumentHost.replaceChildren();
+    panel.instrument = next;
+    next?.mountCompact(panel.instrumentHost);
+  }
+  panel.surface?.bindInstrument?.(next);
+}
+
+// the panel's surface, read from the track store's surfaceType
+function syncPanelSurface(panel, id) {
+  const stored = tracks.get(id)?.surfaceType || null;
+  const spec = surfacesFor(id).find((s) => s.value === stored) || null;
+  const next = spec ? spec.value : null;
+  if (panel.surfaceType === next) return;
+
+  panel.surface?.dispose?.();
+  panel.surface = null;
+  panel.surfaceHost.replaceChildren();
+  panel.surfaceType = next;
+  panel.surfaceHost.hidden = !spec;
+  if (!spec) return;
+
+  let surface = null;
+  if (spec.driver === 'instrument') {
+    surface = new spec.Ctor(null, clock);
+    surface.bindInstrument(shell.instruments.get(id) || null);
+  } else {
+    const bus = shell.trackBus(id);
+    if (!bus) { panel.surfaceHost.hidden = true; panel.surfaceType = null; return; }
+    surface = new spec.Ctor(null, bus);
+  }
+  panel.surface = surface;
+  surface.mountCompact(panel.surfaceHost);
+}
+
+// the surface chip row, rebuilt from the track's kind
+function syncPanelChipRow(panel, id) {
+  const stored = tracks.get(id)?.surfaceType || null;
+  panel.chipRow.replaceChildren();
+  for (const spec of surfacesFor(id)) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'dwn-chip';
+    chip.textContent = spec.label;
+    chip.dataset.on = String(stored === spec.value);
+    chip.addEventListener('click', () => {
+      tracks.setSurfaceType(id, stored === spec.value ? null : spec.value);
+    });
+    panel.chipRow.appendChild(chip);
+  }
+}
+
+function renderPanel(id) {
+  const panel = panels.get(id);
+  if (!panel) return;
+  panel.nameEl.textContent = tracks.get(id)?.name || id;
+  syncPanelChipRow(panel, id);
+  syncPanelInstrument(panel, id);
+  syncPanelSurface(panel, id);
+}
+
+// title-bar drag, pointer capture for the life of the gesture
+function wirePanelDrag(panel) {
+  let startX = 0;
+  let startY = 0;
+  let baseX = 0;
+  let baseY = 0;
+
+  function onMove(e) {
+    panel.root.style.left = `${baseX + e.clientX - startX}px`;
+    panel.root.style.top = `${baseY + e.clientY - startY}px`;
+  }
+  function onUp() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  }
+
+  panel.bar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    e.preventDefault();
+    const rect = panel.root.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    baseX = rect.left;
+    baseY = rect.top;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+function openPanel(id) {
+  if (panels.has(id)) return;
+
+  const root = document.createElement('div');
+  root.className = 'dwn-panel';
+  root.style.left = `${80 + panelOffset}px`;
+  root.style.top = `${80 + panelOffset}px`;
+  panelOffset = (panelOffset + 24) % 168;
+
+  const bar = document.createElement('div');
+  bar.className = 'dwn-panel__bar';
+  const nameEl = document.createElement('span');
+  nameEl.className = 'dwn-panel__name';
+  const spacer = document.createElement('span');
+  spacer.className = 'dwn-spacer';
+  const chipRow = document.createElement('span');
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'dwn-chip';
+  closeBtn.textContent = '×';
+  bar.append(nameEl, spacer, chipRow, closeBtn);
+
+  const body = document.createElement('div');
+  body.className = 'dwn-panel__body';
+  const instrumentHost = document.createElement('div');
+  body.appendChild(instrumentHost);
+
+  const surfaceHost = document.createElement('div');
+  surfaceHost.className = 'dwn-panel__surface';
+  surfaceHost.hidden = true;
+
+  root.append(bar, body, surfaceHost);
+  document.body.appendChild(root);
+
+  const panel = {
+    root, bar, nameEl, chipRow, body, instrumentHost, surfaceHost,
+    instrument: null, surface: null, surfaceType: null,
+  };
+  panels.set(id, panel);
+
+  closeBtn.addEventListener('click', () => closePanel(id));
+  wirePanelDrag(panel);
+  renderPanel(id);
+  syncPanelChips();
+}
+
+function closePanel(id) {
+  const panel = panels.get(id);
+  if (!panel) return;
+  panels.delete(id);
+  panel.surface?.dispose?.();
+  panel.instrument?.unmount?.(panel.instrumentHost);
+  panel.root.remove();
+  syncPanelChips();
+}
+
+// PANEL buttons: disabled with no instrument, lit while that track's panel is open
+function syncPanelChips() {
+  for (const chip of document.querySelectorAll('[data-panel]')) {
+    const id = chip.dataset.panel;
+    chip.disabled = !tracks.get(id)?.instrumentType;
+    chip.dataset.on = String(panels.has(id));
+  }
+}
+
+// one PANEL button per lane head
+arrangement.onLaneBuilt = (lane) => {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'cbdaw-arr__btn';
+  chip.textContent = 'PANEL';
+  chip.dataset.panel = lane.id;
+  chip.dataset.on = 'false';
+  chip.addEventListener('click', () => {
+    if (panels.has(lane.id)) closePanel(lane.id);
+    else openPanel(lane.id);
+  });
+  lane.head.appendChild(chip);
+  syncPanelChips();
+};
+
+tracks.on('update', (t) => {
+  renderPanel(t.id);
+  syncPanelChips();
+});
+tracks.on('remove', (t) => closePanel(t.id));
+
+
+// ---- region roll ------------------------------------------------------------------
+// one piano roll for the window, in the bottom third. It follows the arrangement's
+// selected region; nothing selected, nothing mounted.
+
+const rollHost = document.getElementById('dwn-pane-roll');
+
+let roll = null;
+
+// the region the roll holds, null when the roll is unmounted
+let rollRegionId = null;
+
+// push the loaded region's notes back to the store
+function flushRoll() {
+  if (!roll || !rollRegionId) return;
+  if (!regions.get(rollRegionId)) return;
+  regions.setNotes(rollRegionId, roll.getNotes());
+}
+
+function unmountRoll() {
+  if (roll && rollRegionId) roll.unmount();
+  roll?.setBus(null);
+  rollRegionId = null;
+}
+
+// a drum region's pattern is not a note list — the roll takes pitched regions only
+function isPitched(region) {
+  return Boolean(region) && tracks.get(region.laneId)?.kind === 'pitched';
+}
+
+// load a region into the roll and raise its pane, or clear both when there is nothing to show
+function showRegion(region) {
+  if (rollRegionId && rollRegionId !== region?.id) flushRoll();
+  if (!isPitched(region)) {
+    unmountRoll();
+    if (bottomId === 'roll') setBottom(null);
+    return;
+  }
+  if (rollRegionId !== region.id) {
+    if (!roll) roll = new PianoRoll();
+    if (!rollRegionId) roll.mountCompact(rollHost);
+    rollRegionId = region.id;
+    roll.setOriginTick((region.startBar - 1) * ticksPerBar());
+    roll.setNotes(region.notes);
+  }
+  // the roll sounds through whichever lane owns the region it is showing
+  roll.setBus(shell.trackBus(region.laneId));
+  if (bottomId !== 'roll') setBottom('roll');
+}
+
+arrangement.on('select', showRegion);
+
+// flush at gesture end; the roll has no change event
+window.addEventListener('pointerup', () => flushRoll());
+
+// a deleted region takes no write-back
+regions.on('remove', (r) => {
+  if (r.id === rollRegionId) unmountRoll();
+});
+
+
+// ---- collapse ---------------------------------------------------------------------
+// a dragged region carries an inline size; it is stashed while collapsed, restored on expand
+
+const stashedSize = new Map();
+
+function applyCollapse(region, prop, open) {
+  region.dataset.open = String(open);
+  if (open) {
+    const size = stashedSize.get(region.id);
+    if (size) region.style[prop] = size;
+  } else {
+    if (region.style[prop]) stashedSize.set(region.id, region.style[prop]);
+    region.style[prop] = '';
+  }
+}
+
+
+// ---- bottom third panes -----------------------------------------------------------
+// panes mount once at boot; chips toggle visibility
+
+const PANES = {
+  'strips-all': document.getElementById('dwn-pane-strips-all'),
+  roll: document.getElementById('dwn-pane-roll'),
+  graph: document.getElementById('dwn-pane-graph'),
+  automation: document.getElementById('dwn-pane-automation'),
+};
+
+const bottomChips = [...document.querySelectorAll('[data-bottom]')];
+
+// the shown pane id, or null when the bottom third is collapsed
+let bottomId = null;
+
+function setBottom(id) {
+  bottomId = id;
+  for (const [key, pane] of Object.entries(PANES)) pane.dataset.show = String(key === id);
+  applyCollapse(EL.bottom, 'height', Boolean(id));
+  for (const chip of bottomChips) {
+    chip.dataset.on = String(chip.dataset.bottom === id);
+  }
+}
+
+for (const chip of bottomChips) {
+  chip.addEventListener('click', () => {
+    const id = chip.dataset.bottom;
+    setBottom(bottomId === id ? null : id);
+  });
+}
+
+setBottom(null);
+
+
+// ---- region chips -----------------------------------------------------------------
+
+function wireChip(chipId, regionId, prop) {
+  const chip = document.getElementById(chipId);
+  const region = document.getElementById(regionId);
+  chip.addEventListener('click', () => {
+    const open = region.dataset.open !== 'true';
+    applyCollapse(region, prop, open);
+    chip.dataset.on = String(open);
+  });
+}
+
+wireChip('dwn-chip-header', 'dwn-header', 'height');
+wireChip('dwn-chip-left', 'dwn-left', 'width');
+wireChip('dwn-chip-arr', 'dwn-arr', 'height');
+
+
+// ---- draggable borders ------------------------------------------------------------
+// axis 'y' drives the target's height, 'x' its width
+
+function wireDivider(divId, targetId, axis, sign) {
+  const div = document.getElementById(divId);
+  const target = document.getElementById(targetId);
+  let start = 0;
+  let base = 0;
+
+  function onMove(e) {
+    const delta = (axis === 'y' ? e.clientY - start : e.clientX - start) * sign;
+    const next = Math.max(0, base + delta);
+    if (axis === 'y') target.style.height = `${next}px`;
+    else target.style.width = `${next}px`;
+  }
+
+  function onUp() {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  }
+
+  div.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const rect = target.getBoundingClientRect();
+    start = axis === 'y' ? e.clientY : e.clientX;
+    base = axis === 'y' ? rect.height : rect.width;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
+}
+
+wireDivider('dwn-div-header', 'dwn-header', 'y', 1);
+wireDivider('dwn-div-left', 'dwn-left', 'x', 1);
+wireDivider('dwn-div-bottom', 'dwn-bottom', 'y', -1);
+

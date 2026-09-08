@@ -27,6 +27,25 @@ the port-0/sends tap split, **CLOSED 2026-08-31** by `strip-tap-fix` — two sma
 items left, both Brandon's), one new from 2026-09-01 (`arrange rebuild` — phase D
 unspecced).
 
+## NEW — 2026-09-08 — finish-run, Brandon's desk
+
+Four finish-plan gates cleared by twelve subagents in one session (L1 cleanup, L2 desktop/mobile
+split, L3 pairs, L6 DAW fixes), Synth Lab ported to a new Wave Synth (old one renamed Simple
+Synth), region loop + the drum machine on the timeline shipped, and the DAW's first working
+record wire was built. Full detail: [session review](docs/reports/2026-09-08-session-review-finish-run.md) ·
+[closer receipt](docs/reports/2026-09-08-closer-receipt.md).
+
+- **Wave Synth never mounts a DAW-assigned track** — `instrumentType`/`kind` land, `.instrument`
+  stays null through 3s of polling; likely collides with the port's in-flight edits, unconfirmed.
+  [wave-synth-test receipt](docs/reports/2026-09-08-wave-synth-test-receipt.md) row 9.
+- **`Synth Lab/` and the root screenshot** — delete or keep, Brandon's call, no destination named.
+  [session review](docs/reports/2026-09-08-session-review-finish-run.md) STRAY FILES.
+- **`dev-splash.html` imports `DrumSampler` from `Archive/` instead of `src/instruments/`** —
+  found by L2-comment-cleanup, out of that job's scope, not fixed.
+- **L6's two blockers are now settled, not open**: the dead Surface pane was deleted, and the
+  region double-click is retired (the floating editor it opened no longer exists, replaced by
+  the pane in `tools/daw.html`).
+
 ## NEW — 2026-09-07 — Rule 7 conflict, unruled
 
 - Output Style rule 7 and project CLAUDE.md rule 7 state opposite things about the 1M-token
@@ -94,11 +113,14 @@ Six-job run shipped phase E (unlimited named tracks, instrument instances) and p
 (region editor). Full detail: [session review](docs/reports/2026-09-01-session-review-unlimited-tracks.md),
 six job receipts linked from it.
 
-- **Recording destination, unruled — the one that matters.** Job 6 removed
-  `_commitToRegion()`'s playhead-guessing on Brandon's ruling; nothing in the spec replaced
-  it. Job 6's call: a live take now lands ONLY in the region whose editor is currently open,
-  and is DROPPED otherwise. This is a behavior change, not a refactor.
-  [receipt-region-editor.md](docs/reports/receipt-region-editor.md) §LIVE RECORDING.
+- **Recording destination — CLOSED 2026-09-07/08.** L6 ruled `_commitToRegion()`: an open
+  editor on the lane still wins, otherwise the take lands in the region covering the
+  playhead bar, else a new one-bar region is created there — demonstrated in all three
+  branches. `sequence-roll` then built the record wire that actually reaches it,
+  `_syncTakes()`, so a take is opened at all for the first time. Three new caveats replace
+  this item, filed under **2026-09-08 — finish-run, Brandon's desk** below (capture-off-bus,
+  drum takes as note arrays, pane-flush-loses-take). [L6 receipt](docs/reports/2026-09-07-L6-daw-receipt.md) ·
+  [sequence-roll receipt](docs/reports/2026-09-08-sequence-roll-receipt.md).
 - **SPEC-region-editor.md disposition.** Pre-existing, untracked before this session. Job 6
   read it and built to §10 of [SPEC-unlimited-tracks.md](docs/specs/SPEC-unlimited-tracks.md)
   instead — decide whether the older spec is superseded or kept.
