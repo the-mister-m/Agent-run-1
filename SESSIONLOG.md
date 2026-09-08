@@ -1,10 +1,12 @@
-Updated 2026-09-03 — Closer, piano roll ↔ region wiring close
+Updated 2026-09-04 — session agent, mixer panel consolidation (receipt UNCLOSED)
 
 # SESSIONLOG — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Append-only. Work done and decisions made.
 
 ## SESSION INDEX
 (one line per session, newest first: date · name · 5–10 word summary)
+- 2026-09-04 · session agent, mixer panel consolidation · **UNCLOSED, closer not called** — sidebar and bottom mixers tightened in `tools/daw-window.html`: the real gap was a 60px `.cbdaw-strip` sitting in a 130px box, not the CSS gap; both box widths brought to `--sp-30`, sidebar column width and gaps followed, bottom chip renamed "All Strips" → "Mixer", strip shelf `flex: 0 1 auto` so Master rides the last strip instead of the pane edge, `arrangement.on('select')` now moves the sidebar strip and Channel dropdown to the clicked region's track; Master's three skipped rows (instrument picker, M/S + pan, four insert slots) now build as hidden stand-ins in the shared `src/mixer/strip.js` so its rows line up with a channel's — this reaches every mixer on every page, unverified; `--vis-hidden` added to tokens.css, additive, no existing value changed; whole-screen tightening Brandon saw traced to a dev bar `--sp-unit` override persisted in localStorage, not the repo (`git status` clean, value identical to HEAD) — explanation accepted, never read back off the bar; trough height OPEN, `--sp-95` too short and no token exists between it and `--sp-230`; flash feedback never started; nothing run in a browser by the agent, [review](docs/reports/2026-09-04-session-review-mixer-panel-consolidation.md)
+- 2026-09-04 · session agent, noteOff seam + lane head · **RECEIPT UNREAD, closer not called** — noteOff seam closed in both synths and confirmed by ear: both read `gain.value` at call time and wrote it at a future `t0`, a new `_gainAt(t)` computes the scheduled envelope value instead; warm start's overtone diagnosis (the `Math.max` clamp) was wrong and was reported before editing; transport Punch found dead (`store.setPunch()` had no reader in `/src`) while the lane PUNCH was the working one, Brandon ruled wire-transport-to-lanes so `state.on('project')` now pushes one range onto every lane's Capture; lane LOOP button, PUNCH button and both stepper rows cut, ARM → white record dot, header type stepped down, transport gained ▶■● symbols; nothing run in a browser by the agent, [review](docs/reports/2026-09-04-session-review-noteoff-seam-lane-head.md)
 - 2026-09-03 · Closer, piano roll ↔ region wiring close · noteOff seam (both instruments, both symptoms) and the duplicate-regions lead moved into the warm start, TODO flags a second receipt for this work still pending, docset already tidy (four flagged reports were already in INDEX), no discrepancies found, [receipt](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md)
 - 2026-09-03 · session agent, piano roll ↔ region wiring · Piano Roll wired as a bottom-third pane in `tools/daw-window.html`, follows the arrangement's selected region, audible for the first time — `roll-scheduler.js` read `n.start` where the project writes `tick`, fixed, plus a `startBar` offset and `setOriginTick()` so the playhead agrees with the arrangement; Space/Enter transport keys added; noteOff seam found open (wave-synth clicks, overtone-synth clips), duplicate regions seen not confirmed, nothing run in a browser by the agent, [review](docs/reports/2026-09-03-session-review-piano-roll-region-wiring.md)
 - 2026-09-03 · session agent, daw header layout · **UNCLOSED** — project header rendered vertical with 1039px-wide inputs because `tools/daw-window.html` calls `wireDawShell()` and never `mountDawShell()`, so daw-shell's `STYLE_TEXT` never injected and `.cbdaw-dawhead` computed `display: block` from the user agent sheet; `acquireStyle` exported and called from the page, the deliberate `@media (max-width: 900px)` column stack changed to row+wrap, `--flexdir-row` added to tokens.css (only the column twin existed); nothing run in a browser after the edits, [review](docs/reports/2026-09-03-session-review-daw-header-layout.md)
@@ -1808,3 +1810,154 @@ lines, `tools/patch-synth.html` new, one line appended to `src/ui/tokens.css`.
   [tools/daw-window.html](tools/daw-window.html) ·
   [src/core/roll-scheduler.js](src/core/roll-scheduler.js) ·
   [src/surfaces/piano-roll.js](src/surfaces/piano-roll.js)
+
+## 2026-09-04 (01:16Z–02:19Z) — `noteOff seam + lane head` — wave-synth, overtone-synth, daw-shell, arrangement
+
+- Concurrent session, closer-covered — filed retroactively, receipt was left UNREAD.
+- **NoteOff seam closed in both synths, Brandon confirmed by ear.** `_gainAt(t)` added to
+  wave-synth and overtone-synth so a future-scheduled release reads the envelope's real
+  value instead of a stale `gain.value` snapshot. The warm start's overtone diagnosis (a
+  `Math.max(atTime, currentTime)` clamp) was wrong — `Math.max` passes a future value
+  through untouched; the real defect was the same stale-read wave-synth had. Told Brandon
+  before editing; the clamp itself was left in place.
+- **Transport Punch was dead** — `daw-shell.js` wrote `store.setPunch()`, grep found no
+  reader of `project.punch` anywhere in `/src`; the lane's own PUNCH button was the only
+  one working. Brandon ruled: wire transport → lanes, cut the lane UI. Lane LOOP/PUNCH
+  buttons and both stepper rows deleted; ARM now reads as a white record dot; every lane
+  seeds its punch range off `state.on('project')`.
+- Header type stepped down (`--fs-sm`→`--fs-tiny`, `--fs-base`→`--fs-micro`, Brandon's own
+  edits) and transport symbols changed to ▶ ■ ●.
+- Conduct logged for the closer: one ungated write (the ▶■● glyphs, on an implied rather
+  than stated go — Brandon caught it), repeated stale line-number citations after the
+  agent's own edits shifted the file (corrected by re-grepping before each citation), and
+  the same mid-session Bash-read/edit instruction this project keeps hitting — kept
+  Read/Edit per Brandon's CLAUDE.md, told him.
+- Rule 7 conflict (output style vs. both CLAUDE.md files, on using the full context window)
+  flagged at session start, still unruled — Brandon's call, carried to TODO.md.
+- **Never run in a browser** by this agent. Brandon drove every test.
+- LINKS: [session review](docs/reports/2026-09-04-session-review-noteoff-seam-lane-head.md) ·
+  [src/instruments/wave-synth.js](src/instruments/wave-synth.js) ·
+  [src/instruments/overtone-synth.js](src/instruments/overtone-synth.js) ·
+  [src/ui/arrangement.js](src/ui/arrangement.js)
+
+## 2026-09-04 (02:30:10Z–03:11:49Z) — `mixer panel consolidation` — daw-window, strip.js, tokens.css
+
+- Concurrent session, closer-covered — filed retroactively, session retired before the
+  trough question was answered and before closer was called.
+- `tools/daw-window.html`'s sidebar and bottom-rack mixer strips tightened: the visible
+  gap was a 60px `.cbdaw-strip` sitting in a 130px box, not a CSS gap — both boxes now
+  `--sp-30`. "All Strips" chip renamed "Mixer". Strip shelf `flex: 0 1 auto` so Master
+  rides against the last strip instead of the pane's right edge. `arrangement.on('select')`
+  now drives the sidebar strip and Channel dropdown to the clicked region's track.
+- **Reaches beyond the page:** Master's three previously-skipped rows (instrument select,
+  M/S+pan, insert slots) now build as hidden stand-ins in the shared `src/mixer/strip.js`
+  — every mixer on every page renders them, including `index.html` and the standalone
+  tool pages. Never checked in a browser.
+- `--vis-hidden: hidden` added to `tokens.css`, additive, no existing token changed.
+- Whole-screen tightening Brandon saw mid-session traced to a dev-bar `--sp-unit`
+  override living in `localStorage`, not the repo — `git status` showed `tokens.css`/
+  `devbox.js` clean. Not confirmed by reading the dev bar back; Brandon accepted the
+  explanation.
+- Self-account given to Brandon on request: seven rounds, four were the agent correcting
+  its own miss (misread which rack a spacing value belonged to, shrank a CSS gap without
+  comparing box widths, met the `--sp-unit` scare with a deflecting three-step plan
+  Brandon called out, then broke Master's alignment fixing the trough ratio). The one
+  first-pass change (Master's three skipped rows) was preceded by an actual read.
+- **Open: trough height.** `--sp-95` (190px) too short, `--sp-230` (460px) is full
+  stretch, no token sits between them. Brandon asked for a height and retired before
+  answering.
+- **Not started:** flash feedback on region/blank-track click, Brandon's spec, ordered
+  last.
+- Never run in a browser by this agent. Brandon drove every reload and screenshot.
+- LINKS: [session review](docs/reports/2026-09-04-session-review-mixer-panel-consolidation.md) ·
+  [tools/daw-window.html](tools/daw-window.html) ·
+  [src/mixer/strip.js](src/mixer/strip.js) ·
+  [src/ui/tokens.css](src/ui/tokens.css)
+
+## 2026-09-04 (03:26:36Z–04:22:09Z) — `piano roll keys + shading` — piano-roll, diatonic-keys, daw-window
+
+- Brandon gave six changes at once and asked for a grep plan in blast-radius order before
+  any read. First plan was roughly half padding — wide `src/ tools/` sweeps hedging against
+  a radius I had no evidence for. He asked what wasn't needed; the honest answer was three
+  greps, one file, one caller. Ran those.
+- Four of the six were one control strip: markup, `_syncToolbar`, and the click switch.
+  Toolbar is now two buttons — `even`/`odd` and letter/solfege. `chromatic`, `e + a`,
+  `none` and `number` are gone. The rows mode was deleted outright, not hidden.
+- There was never a "4" button. One button, static face `3`. It now reads its own state.
+  The internal 4/3 division values feed `stepLabel` and were left alone.
+- **Triad-quality coloring removed from both surfaces.** The roll shades two-tone off
+  `data-overlay`; [diatonic-keys.js](src/surfaces/diatonic-keys.js) runs Brandon's
+  brightness ladder — 1,5 brightest · 2,4 · 3,6 · 7 at the midpoint to black. He clarified
+  degree 2 equals degree 4 after I flagged it as the one gap in his ruling.
+- **THE TRAP, caught by reading first:** the five `[data-quality]` rules in diatonic-keys
+  were the key faces, not decoration. Deleting them alone drops keys to
+  `background: var(--panel)` with `color: var(--bg)` — an unreadable keyboard. Found by
+  reading the CSS range Brandon gated me into, after I told him my confidence there was
+  only medium.
+- **The roll can play.** A key strip in the gutter, `setBus()`, one held note released on
+  window pointerup. Source id `'mouse'` — the `SOURCES` enum is frozen with no roll entry,
+  and `'mouse'` is never arm-gated. Wired at [daw-window.html](tools/daw-window.html) off
+  the selected region's lane.
+- Row rules and gridlines were `--line` on a near-black ground and invisible. Brandon asked
+  whether black borders can work on that background at all — they can't. Moved to
+  translucent `--text` mixes so one value reads on both row shades.
+- Correction logged: deleting the rows mode took `DIATONIC_ROWS_PER_OCTAVE` with it, still
+  used by `_rowPosition()`'s degree numbering. `node --check` passes on a missing reference;
+  the grep caught it. Restored as `DEGREES_PER_OCTAVE`.
+- Correction logged: I wrote contract cites and "Brandon via BUILDPLAN" into new comments.
+  Rule is label/function/state only. He caught it, I rewrote them.
+- **Rule conflict raised mid-session.** A system message ordered reads and edits through
+  Bash. That contradicts Brandon's standing rule. Flagged immediately, ignored, every edit
+  went through Edit as a visible diff.
+- **Never run in a browser** by me. Brandon drove every look; three tuning rounds came off
+  his screenshots. Item 1's audio routes through the noteOff seam still open from
+  2026-09-03 and is unverified.
+- LINKS: [session review](docs/reports/2026-09-04-session-review-piano-roll-keys-and-shading.md) ·
+  [src/surfaces/piano-roll.js](src/surfaces/piano-roll.js) ·
+  [src/surfaces/diatonic-keys.js](src/surfaces/diatonic-keys.js) ·
+  [tools/daw-window.html](tools/daw-window.html)
+
+## 2026-09-07 17:40–17:55 EDT — `repo sonnet` — docs/mapdocs/master-index.md built
+- Objective-only master index: 502 files (whole tree table, KB/tokens/lines/git
+  last-touch/commit count), folder totals, 268 import edges out (grep-derived), 41
+  import targets in, 5 orphans, 14 look-alike name pairs with diff --stat, git snapshot
+  (branch `main`, 7 total commits).
+- No file bodies read, no fixes made. Grep/git/python-stats only.
+- LINKS: [master-index.md](docs/mapdocs/master-index.md) ·
+  [session review](docs/reports/2026-09-07-repo-sonnet-master-index.md)
+
+## 2026-09-07 17:45–18:05 EDT — `history sonnet` — docs/mapdocs/master-story.md built
+- Read SESSIONLOG.md + INDEX.md whole (only those two files, per gate). Built the Master
+  Story: timeline by date (08-22 through 09-04), files-by-session, files-by-name,
+  37 open threads with the date each was raised, 5 INDEX-vs-LOG discrepancies, and a
+  tools-status section for beat/wave/overtone/patch-synth/harmony/DAW-window/dev-splash/
+  nav-index (nav-index page not named in either source file).
+- No code read, no code touched, no judgment on the code itself — report only.
+- LINKS: [master-story.md](docs/mapdocs/master-story.md) ·
+  [session review](docs/reports/2026-09-07-history-sonnet-master-story.md)
+
+## 2026-09-07 16:40–18:29 EDT — `finish scope` — recon closed, finish-plan + five specs written
+
+- Session agent: Fable. Goal: regroup, recon, and write the specs that turn what exists into
+  what Brandon needs. No code edited this session.
+- Recon run by two sonnets in parallel: `repo sonnet` (docs/mapdocs/master-index.md, 105k
+  tokens) and `history sonnet` (docs/mapdocs/master-story.md, 216k tokens — over the 200k
+  cap Brandon set, a fact not a finding).
+- Eight-grep plan run: mobile awareness, input model, shell exports, instrument seam, DAW
+  picker, clipping math, one-liners, subscription balance.
+- Reads: shell.js, daw-shell.js, track-bus.js, roll-scheduler.js, all five tool pages,
+  daw-window.html, index.html; partial audio.js, arrangement.js, wave-synth.js, strip.js,
+  input.js, keyboard.js.
+- Findings: three frame patterns not two · no limiter anywhere · four level regimes · the
+  DAW's bottom Surface pane reaches no track · recording drops notes with no editor open,
+  code and comment disagree · index.html is the nav page, CLAUDE.md map still called it the
+  DAW · tool registry stale · duplicate regions not found by read.
+- Five specs, one plan, one HOWTO, all new in docs/mapdocs/.
+- LINKS: [session review](docs/reports/2026-09-07-session-review-finish-scope.md) ·
+  [finish-plan.md](docs/mapdocs/finish-plan.md) ·
+  [SPEC-cleanup.md](docs/mapdocs/SPEC-cleanup.md) ·
+  [SPEC-pages.md](docs/mapdocs/SPEC-pages.md) ·
+  [SPEC-sound.md](docs/mapdocs/SPEC-sound.md) ·
+  [SPEC-daw-desktop.md](docs/mapdocs/SPEC-daw-desktop.md) ·
+  [SPEC-map.md](docs/mapdocs/SPEC-map.md) ·
+  [HOWTO-read-this-repo.md](docs/mapdocs/HOWTO-read-this-repo.md)

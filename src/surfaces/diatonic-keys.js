@@ -76,7 +76,7 @@ export function startDegreeIndexFor(positionShift) {
 /**
  * → one drawn key's full spec, slot `k` = 0..7 (bottom to top window), for the CURRENT
  * `scale` and `positionShift`. Every field is read from theory/scale.js:
- *   · pc / midi / quality / colorToken / altered — `circlePositions()`, §15.3, direct by
+ *   · pc / midi / quality / altered — `circlePositions()`, §15.3, direct by
  *     DEGREE INDEX. Not the pitch-based `degreeIndexOf` path, and deliberately: this key
  *     already knows which degree it is, so it never has to look its own identity up by
  *     pitch and never falls prey to the duplicate-pitch-class collapse §15.2a documents.
@@ -110,7 +110,6 @@ export function keySpecFor(scale, k, positionShift, overlay) {
     midi,
     text,
     quality: row.quality,
-    colorToken: row.colorToken,
     altered,
     atMax: scale.degrees[degreeIndex] >= MAJOR[degreeIndex] + DEGREE_CLAMP,
     atMin: scale.degrees[degreeIndex] <= MAJOR[degreeIndex] - DEGREE_CLAMP,
@@ -176,11 +175,15 @@ const STYLE_TEXT = `
   font-size: var(--fs-xs);
   border-radius: var(--r-cell);
 }
-.cbdaw-diakeys__key[data-quality="major"]      { background: var(--deg-major); }
-.cbdaw-diakeys__key[data-quality="minor"]      { background: var(--deg-minor); }
-.cbdaw-diakeys__key[data-quality="diminished"] { background: var(--deg-dim); }
-.cbdaw-diakeys__key[data-quality="augmented"]  { background: var(--deg-aug); }
-.cbdaw-diakeys__key[data-quality="altered"]    { background: var(--deg-altered); }
+/* Brightness by scale degree, no hue. 1 and 5 brightest, 2 and 4 next, 3 and 6 next,
+   7 halfway to black. Index 0 is degree 1; key 8 wraps to index 0 and inherits it. */
+.cbdaw-diakeys__key[data-degree-index="0"],
+.cbdaw-diakeys__key[data-degree-index="4"] { background: var(--text); }
+.cbdaw-diakeys__key[data-degree-index="1"],
+.cbdaw-diakeys__key[data-degree-index="3"] { background: color-mix(in srgb, var(--text) 80%, var(--bg)); }
+.cbdaw-diakeys__key[data-degree-index="2"],
+.cbdaw-diakeys__key[data-degree-index="5"] { background: color-mix(in srgb, var(--text) 62%, var(--bg)); }
+.cbdaw-diakeys__key[data-degree-index="6"] { background: color-mix(in srgb, var(--text) 50%, var(--bg)); }
 
 /* The student moved this degree off the preset (scale.altered[i], §4) — a ring, not a
    colour swap: the fill above is still the QUALITY, this is a second, non-colour cue,

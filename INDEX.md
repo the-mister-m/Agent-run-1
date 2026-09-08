@@ -1,17 +1,25 @@
-Updated 2026-09-03 — Closer, piano roll ↔ region wiring close
+Updated 2026-09-04 — closer, three concurrent-session close
 
 # INDEX — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Links only, no summaries.
 
 ## TOP INDEX
 - MAPDOCS — ≈line 13
-- CODE — ≈line 16
-- DOCS — ≈line 66
-- SESSIONS — ≈line 127
-- SKINSPECS — ≈line 174
+- CODE — ≈line 24
+- DOCS — ≈line 82
+- SESSIONS — ≈line 165
+- SKINSPECS — ≈line 221
 
 ## MAPDOCS
-(none yet)
+- [docs/mapdocs/master-index.md](docs/mapdocs/master-index.md) — whole-tree file stats, folder totals, import edges in/out, orphans, look-alike name pairs, git snapshot
+- [docs/mapdocs/master-story.md](docs/mapdocs/master-story.md) — Master Story: full timeline, files-by-session, files-by-name, open threads, INDEX-vs-LOG discrepancies, and tool status, built only from SESSIONLOG.md + INDEX.md
+- [docs/mapdocs/finish-plan.md](docs/mapdocs/finish-plan.md) — done-looks-like, rulings, four gates, the map, seven loops with model and tokens
+- [docs/mapdocs/SPEC-cleanup.md](docs/mapdocs/SPEC-cleanup.md) — delete list, rename map, registry flips, J1 one-liners, nav pages
+- [docs/mapdocs/SPEC-pages.md](docs/mapdocs/SPEC-pages.md) — three frame patterns, the `layout` flag, one pair per tool, CSS paste replacement
+- [docs/mapdocs/SPEC-sound.md](docs/mapdocs/SPEC-sound.md) — instrument contract, four level regimes, limiter gate, new synth touchpoints
+- [docs/mapdocs/SPEC-daw-desktop.md](docs/mapdocs/SPEC-daw-desktop.md) — note path, dead Surface pane, record target, trough, dupes repro script
+- [docs/mapdocs/SPEC-map.md](docs/mapdocs/SPEC-map.md) — module card template, read state, L7 job
+- [docs/mapdocs/HOWTO-read-this-repo.md](docs/mapdocs/HOWTO-read-this-repo.md) — front door: reading order, which spec, which file and line
 
 ## CODE
 - [src/core/audio.js](src/core/audio.js) — audio-core engine: voicePool, governor, atomic steal, §4a synth voice normalization (`synthVoiceNorm`)
@@ -72,6 +80,10 @@ Rules: GLOBAL-RULES.md. Links only, no summaries.
 - [tools/daw-window.html](tools/daw-window.html) — DAW WINDOW, NEW 2026-09-03, template pass to [docs/specs/SPEC-daw-window.md](docs/specs/SPEC-daw-window.md): the frame and the chips, no new piece invented. Project Header full width on top; left column carries the selected-channel strip + master and runs the full height beside the centre column; centre is Arrangement over a switched bottom third (All 7 Strips / Piano Roll / Node Graph, radio chips, none on → collapsed). Every region carries a collapse chip that stays reachable when the body hides; three pointer-drag dividers (header↔body, left↔centre, arrangement↔bottom), and a collapse stashes the dragged inline size and restores it. Same fixed `ch1..ch6`+master demo rig as `dev-splash.html`, not the track store; rig on `window.dwn`. **`Strip.mountCompact()` self-unmounts, so a strip cannot be in two places** — turning the All-7 chip on hands the left column's two strips to the bottom third and turning it off takes them back. **NEVER RUN** — `node --check` and token grep only. [receipt](docs/reports/receipt-daw-window-template.md)
 
 ## DOCS
+- [docs/reports/2026-09-04-session-review-piano-roll-keys-and-shading.md](docs/reports/2026-09-04-session-review-piano-roll-keys-and-shading.md) — session review, piano roll keys + shading: toolbar cut to two buttons (`even`/`odd`, letter/solfege), chromatic-vs-diatonic rows mode deleted outright, `e + a` pinned always-on, `none`/`number` label modes cut; triad-quality coloring removed from BOTH [src/surfaces/piano-roll.js](src/surfaces/piano-roll.js) and [src/surfaces/diatonic-keys.js](src/surfaces/diatonic-keys.js) — the roll now shades two-tone off `data-overlay` (letters → white/black key, solfege → in-key), diatonic-keys runs a brightness ladder by scale degree (1,5 brightest · 2,4 · 3,6 · 7 at the midpoint, Brandon's ruling). NEW: a playable key strip in the roll's gutter with a `setBus()` seam — pressing a key or entering a note sounds the track's instrument, wired at [tools/daw-window.html](tools/daw-window.html) off the selected region's lane. Row rules and gridlines moved from `--line` to translucent `--text` mixes (they were dark-on-dark and invisible). **Item 1's audio routes through the still-open noteOff seam and is unverified; never run in a browser by the agent**
+- [docs/reports/2026-09-04-closer-three-session-close.md](docs/reports/2026-09-04-closer-three-session-close.md) — closer receipt, three concurrent sessions closed together (piano roll keys, mixer panel, noteOff seam): SESSIONLOG gap filled for the two unclosed sessions, CLAUDE.md MAP corrected, warm start rewritten, worklog written as three separate entries
+- [docs/reports/2026-09-04-session-review-mixer-panel-consolidation.md](docs/reports/2026-09-04-session-review-mixer-panel-consolidation.md) — session review, mixer panel consolidation: sidebar and bottom mixer strips tightened in `tools/daw-window.html` — the gap was a 60px `.cbdaw-strip` in a 130px box, both boxes now `--sp-30`; "All Strips" chip → "Mixer"; strip shelf `flex: 0 1 auto` so Master rides the last strip; `arrangement.on('select')` drives the sidebar strip and Channel dropdown; Master's three skipped rows now build as hidden stand-ins in the shared `src/mixer/strip.js`, which reaches every mixer on every page and was never browser-checked; `--vis-hidden` added to tokens.css (additive); whole-screen tightening traced to a dev bar `--sp-unit` override in localStorage, repo clean; trough height OPEN — no token exists between `--sp-95` and `--sp-230`; flash feedback never started
+- [docs/reports/2026-09-04-session-review-noteoff-seam-lane-head.md](docs/reports/2026-09-04-session-review-noteoff-seam-lane-head.md) — session review, noteOff seam + lane head: `_gainAt(t)` added to both synths so a future-scheduled release starts from the envelope's real value instead of a stale `gain.value` read (Brandon confirmed both by ear); warm start's overtone diagnosis corrected — the `Math.max` clamp was never the bug; transport Punch was writing `project.punch` with no reader in `/src`, now wired to every lane's Capture via `state.on('project')`; lane LOOP/PUNCH/steppers cut, ARM is a white record dot, header type stepped down, transport symbols added; line-number drift and one ungated write logged for the closer
 - [docs/reports/2026-09-03-closer-piano-roll-region-wiring.md](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md) — closer receipt, piano roll ↔ region wiring close: warm start rewritten with the noteOff seam, TODO carries the duplicate-regions lead, a second receipt for this work still pending, no discrepancies found
 - [docs/reports/2026-09-03-session-review-daw-header-layout.md](docs/reports/2026-09-03-session-review-daw-header-layout.md) — session agent review, DAW header layout, **UNCLOSED**: `tools/daw-window.html` never injected daw-shell's stylesheet (calls `wireDawShell`, not `mountDawShell`), so `.cbdaw-dawhead` computed `display: block` from the user agent sheet — this is the "header does not stack on its own" note below, answered; `acquireStyle` exported + called, 900px column stack changed to row+wrap, `--flexdir-row` added to tokens.css, nothing browser-verified
 - [docs/reports/2026-09-03-session-review-daw-window-wiring.md](docs/reports/2026-09-03-session-review-daw-window-wiring.md) — session agent review, daw-window wiring: `tools/daw-window.html`'s no-playback root cause (never called `wireDawShell`) found and fixed, instrument picker shared between mixer strip and lane, per-track floating panel added, graph.js viewport (Job C) scoped not started, nothing browser-verified
@@ -151,6 +163,8 @@ Rules: GLOBAL-RULES.md. Links only, no summaries.
 - [P3-harmony-tool/S7-verify/receipt-redpen-p3.md](Builddocs/P3-harmony-tool/S7-verify/receipt-redpen-p3.md) — P3/S7 redpen-p3 receipt
 
 ## SESSIONS
+- [2026-09-07-session-review-finish-scope.md](docs/reports/2026-09-07-session-review-finish-scope.md) — session agent review, finish scope: two sonnets recon (master-index.md, master-story.md), finish-plan + five SPECs + HOWTO written into docs/mapdocs/, no code touched, eight-grep plan run, four gates now await Brandon
+- [2026-09-04-session-review-mixer-panel-consolidation.md](docs/reports/2026-09-04-session-review-mixer-panel-consolidation.md) — session agent review, mixer panel consolidation: strip boxes `--sp-65` → `--sp-30` in sidebar and bottom rack, "All Strips" → "Mixer", Master rides the last strip, sidebar follows the clicked region, Master's skipped rows become hidden stand-ins in shared `strip.js` (reaches every page, unverified), `--vis-hidden` added; trough height OPEN, flash feedback not started, no browser run
 - [2026-09-03-closer-piano-roll-region-wiring.md](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md) — closer receipt, piano roll ↔ region wiring close: noteOff seam + duplicate regions carried to warm start/TODO, second receipt pending, no discrepancies
 - [2026-09-03-closer-daw-window-wiring.md](docs/reports/2026-09-03-closer-daw-window-wiring.md) — closer receipt, daw-window wiring close: folds in the per-voice-normalizer session + daw-window-template subagent, INDEX/MEMORY/CLAUDE updated, no discrepancies
 - [2026-09-03-session-review-daw-header-layout.md](docs/reports/2026-09-03-session-review-daw-header-layout.md) — session agent review, DAW header layout, **UNCLOSED**: stylesheet never injected on `daw-window.html`, `acquireStyle` exported, 900px stack → row+wrap, `--flexdir-row` added, no browser run

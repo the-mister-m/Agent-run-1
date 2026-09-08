@@ -125,22 +125,25 @@
   /* left column — selected strip + master, full height */
   .dwn-left {
     flex: 0 0 auto;
-    width: calc(var(--sp-65) * 2 + var(--sp-12));
+    width: calc(var(--sp-30) * 2 + var(--sp-3));
   }
   .dwn-left[data-open="false"] { width: auto; }
   .dwn-left[data-open="false"] .dwn-label,
   .dwn-left[data-open="false"] .dwn-select { display: var(--disp-none); }
   .dwn-left__body {
     display: flex;
-    gap: var(--sp-4);
-    padding: var(--sp-4);
+    gap: var(--sp-1);
+    padding: var(--sp-1);
     overflow: auto;
   }
   .dwn-strip {
     flex: 0 0 auto;
-    width: var(--sp-65);
+    width: var(--sp-30);
     min-height: var(--sp-230);
   }
+  /* trough stops growing with the column — keeps the fader's blue/dark ratio
+     matched to a bottom-rack strip; the insert slots take the leftover height */
+  .dwn-strip .cbdaw-strip__fadermeter { max-height: var(--sp-95); }
 
   /* center column — arrangement over bottom third */
   .dwn-center {
@@ -170,22 +173,22 @@
   }
   .dwn-pane[data-show="false"] { display: var(--disp-none); }
 
-  /* strip rack — track strips scroll, master pinned outside */
+  /* strip rack — track strips scroll, master rides at their right edge */
   .dwn-pane--strips {
     display: flex;
-    gap: var(--sp-4);
+    gap: var(--sp-1);
     align-items: stretch;
     min-height: var(--sp-230);
   }
   .dwn-strips-scroll {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     display: flex;
-    gap: var(--sp-4);
+    gap: var(--sp-1);
     min-width: 0;
     overflow-x: auto;
   }
   .dwn-strips-scroll > div,
-  .dwn-master-slot { flex: 0 0 auto; width: var(--sp-65); }
+  .dwn-master-slot { flex: 0 0 auto; width: var(--sp-30); }
 
   /* instrument panel — one floating modal per track, dragged by its title bar */
   .dwn-panel {
@@ -298,7 +301,7 @@
       <div class="dwn-chipbar">
         <span class="dwn-label">Bottom</span>
         <span class="dwn-spacer"></span>
-        <button class="dwn-chip" data-bottom="strips-all" data-on="false">All Strips</button>
+        <button class="dwn-chip" data-bottom="strips-all" data-on="false">Mixer</button>
         <button class="dwn-chip" data-bottom="surface" data-on="false">Surface</button>
         <button class="dwn-chip" data-bottom="roll" data-on="false">Piano Roll</button>
         <button class="dwn-chip" data-bottom="graph" data-on="false">Node Graph</button>
@@ -416,6 +419,13 @@ function syncChannelList() {
 }
 
 EL.chan.addEventListener('change', () => showSelected(EL.chan.value || null));
+
+// clicking a region in the arrangement moves the left strip to that region's track
+arrangement.on('select', (region) => {
+  if (!region || region.laneId === selectedId) return;
+  showSelected(region.laneId);
+  EL.chan.value = selectedId || '';
+});
 
 // track store subscriptions
 for (const ev of ['add', 'remove', 'update']) tracks.on(ev, syncChannelList);
@@ -650,6 +660,7 @@ function flushRoll() {
 
 function unmountRoll() {
   if (roll && rollRegionId) roll.unmount();
+  roll?.setBus(null);
   rollRegionId = null;
 }
 
@@ -673,6 +684,8 @@ function showRegion(region) {
     roll.setOriginTick((region.startBar - 1) * ticksPerBar());
     roll.setNotes(region.notes);
   }
+  // the roll sounds through whichever lane owns the region it is showing
+  roll.setBus(shell.trackBus(region.laneId));
   if (bottomId !== 'roll') setBottom('roll');
 }
 

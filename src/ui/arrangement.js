@@ -124,21 +124,6 @@ const STYLE_TEXT = `
   box-sizing: var(--box-border-box);
 }
 
-.cbdaw-arr__loop-toggle {
-  font-size: var(--fs-xs);
-  padding: var(--sp-1) var(--sp-3);
-  border-radius: var(--r-sm);
-  border: var(--bw) solid var(--line);
-  background: var(--raise);
-  color: var(--text);
-  cursor: var(--cur-pointer);
-}
-
-.cbdaw-arr__loop-toggle[data-on="true"] {
-  background: var(--loop-region);
-  border-color: var(--strip-sel);
-}
-
 .cbdaw-arr__header {
   position: var(--pos-sticky);
   top: var(--sp-0);
@@ -271,6 +256,14 @@ const STYLE_TEXT = `
   display: var(--disp-flex);
   align-items: var(--align-center);
   gap: var(--sp-1);
+  width: var(--pct-100);
+  box-sizing: var(--box-border-box);
+}
+
+/* the row's buttons split its width, so it ends flush with the name and picker above */
+.cbdaw-arr__lane-row > .cbdaw-arr__btn {
+  flex: var(--flex-1-1-0);
+  min-width: var(--sp-0);
 }
 
 .cbdaw-arr__btn {
@@ -290,14 +283,17 @@ const STYLE_TEXT = `
   color: var(--text);
 }
 
-.cbdaw-arr__btn[data-punch="true"] {
-  background: var(--punch-region);
-  border-color: var(--punch-region);
+/* record dot — white dot, dim while disarmed, red field while armed */
+.cbdaw-arr__arm {
+  color: var(--text);
+  opacity: var(--op-dim);
 }
 
-.cbdaw-arr__stepper {
-  font-size: var(--fs-micro);
-  color: var(--text-dim);
+.cbdaw-arr__arm[data-on="true"] {
+  background: var(--rec-on);
+  border-color: var(--rec-on);
+  color: var(--text);
+  opacity: var(--op-full);
 }
 
 .cbdaw-arr__lane-body {
@@ -451,6 +447,7 @@ export default class Arrangement {
     this._unsubTracksAdd = null;
     this._unsubTracksRemove = null;
     this._unsubTracksUpdate = null;
+    this._unsubProject = null;
     this._blockDrag = null;
     this._loopDrag = null;
     this._listeners = { select: new Set(), open: new Set() };
@@ -467,7 +464,7 @@ export default class Arrangement {
 
     this.el = null;
     this.nodes = {
-      scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null,
+      scroll: null, grid: null, corner: null, ruler: null, overlay: null,
       toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null, addTrack: null,
     };
 
@@ -520,6 +517,21 @@ export default class Arrangement {
 
   /** Pushes one track's `armed` to its button, its capture and its bus. The store is the
    *  only writer; this is the only reader. Arm layers — never clears another lane. */
+  /** Pushes the project punch range onto every lane's Capture and redraws each wash.
+   *  Called on mount and on every 'project' emit; a lane built later reads the store
+   *  itself in `_buildLane`. */
+  _syncPunch(punch) {
+    if (!punch) return;
+    for (const lane of this._lanes.values()) {
+      lane.punch.on = Boolean(punch.on);
+      lane.punch.startBar = punch.startBar;
+      lane.punch.endBar = punch.endBar;
+      if (lane.punch.on) lane.capture.punchIn(punch.startBar, punch.endBar);
+      else lane.capture.punchOff();
+      if (lane.wash) this._renderLanePunchWash(lane);
+    }
+  }
+
   _syncLaneArm(lane, armed) {
     const on = Boolean(armed);
     if (lane.armBtn) lane.armBtn.dataset.on = String(on);
@@ -582,6 +594,10 @@ export default class Arrangement {
     this._unsubTracksRemove = this._tracks.on('remove', (t) => this._onTrackRemove(t));
     this._unsubTracksUpdate = this._tracks.on('update', (t) => this._onTrackUpdate(t));
 
+    // The transport bar owns the punch range; every lane's Capture follows it.
+    this._unsubProject = sharedState.on('project', (p) => this._syncPunch(p.punch));
+    this._syncPunch(sharedState.project.punch);
+
     // The entry point: a region's dblclick already emits 'open' (§10.3). This is the
     // only listener.
     this._unsubOpen = this.on('open', (region) => this._openRegion(region));
@@ -640,16 +656,18 @@ export default class Arrangement {
     this._unsubTracksAdd?.();
     this._unsubTracksRemove?.();
     this._unsubTracksUpdate?.();
+    this._unsubProject?.();
     this._unsubTracksAdd = null;
     this._unsubTracksRemove = null;
     this._unsubTracksUpdate = null;
+    this._unsubProject = null;
     this._selectedId = null;
     this._detachDom();
     this._teardownLanes();
     this.el?.remove();
     this.el = null;
     this.nodes = {
-      scroll: null, grid: null, corner: null, ruler: null, overlay: null, loopToggle: null,
+      scroll: null, grid: null, corner: null, ruler: null, overlay: null,
       toolbar: null, zoomOut: null, zoomIn: null, zoomReadout: null, addTrack: null,
     };
     this.mounted = false;
@@ -703,15 +721,7 @@ export default class Arrangement {
 
     const corner = document.createElement('div');
     corner.className = 'cbdaw-arr__corner';
-    const loopToggle = document.createElement('button');
-    loopToggle.type = 'button';
-    loopToggle.className = 'cbdaw-arr__loop-toggle';
-    loopToggle.textContent = 'LOOP';
-    corner.appendChild(loopToggle);
     grid.appendChild(corner);
-    this._addDom(loopToggle, 'click', () => {
-      this._clock.loop = { ...this._clock.loop, on: !this._clock.loop.on };
-    });
 
     const header = document.createElement('div');
     header.className = 'cbdaw-arr__header';
@@ -735,7 +745,7 @@ export default class Arrangement {
 
     this.el = root;
     this.nodes = {
-      scroll, grid, corner, ruler, overlay, loopToggle, toolbar, zoomOut, zoomIn, zoomReadout,
+      scroll, grid, corner, ruler, overlay, toolbar, zoomOut, zoomIn, zoomReadout,
       addTrack, header, loopRow, loopSpan,
     };
     target.appendChild(root);
@@ -955,49 +965,21 @@ export default class Arrangement {
     armRow.className = 'cbdaw-arr__lane-row';
     const armBtn = document.createElement('button');
     armBtn.type = 'button';
-    armBtn.className = 'cbdaw-arr__btn';
+    armBtn.className = 'cbdaw-arr__btn cbdaw-arr__arm';
     armBtn.textContent = 'ARM';
+    armBtn.title = 'Arm for recording';
+    armBtn.setAttribute('aria-label', 'Arm for recording');
     armBtn.dataset.on = 'false';
-    const punchBtn = document.createElement('button');
-    punchBtn.type = 'button';
-    punchBtn.className = 'cbdaw-arr__btn';
-    punchBtn.textContent = 'PUNCH';
-    punchBtn.dataset.punch = 'false';
     // drops the track record; every listener releases its own half of the track
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'cbdaw-arr__btn';
-    removeBtn.textContent = '×';
+    removeBtn.textContent = 'DELETE';
     removeBtn.title = 'Remove track';
-    armRow.append(armBtn, punchBtn, removeBtn);
+    armRow.append(armBtn, removeBtn);
     head.appendChild(armRow);
 
     this._addDom(removeBtn, 'click', () => this._tracks.remove(ch.id));
-
-    const punchRow = document.createElement('div');
-    punchRow.className = 'cbdaw-arr__lane-row';
-    const startMinus = document.createElement('button');
-    startMinus.type = 'button';
-    startMinus.className = 'cbdaw-arr__btn';
-    startMinus.textContent = '-';
-    const startReadout = document.createElement('span');
-    startReadout.className = 'cbdaw-arr__stepper';
-    const startPlus = document.createElement('button');
-    startPlus.type = 'button';
-    startPlus.className = 'cbdaw-arr__btn';
-    startPlus.textContent = '+';
-    const endMinus = document.createElement('button');
-    endMinus.type = 'button';
-    endMinus.className = 'cbdaw-arr__btn';
-    endMinus.textContent = '-';
-    const endReadout = document.createElement('span');
-    endReadout.className = 'cbdaw-arr__stepper';
-    const endPlus = document.createElement('button');
-    endPlus.type = 'button';
-    endPlus.className = 'cbdaw-arr__btn';
-    endPlus.textContent = '+';
-    punchRow.append(startMinus, startReadout, startPlus, endMinus, endReadout, endPlus);
-    head.appendChild(punchRow);
 
     const body = document.createElement('div');
     body.className = 'cbdaw-arr__lane-body';
@@ -1026,8 +1008,8 @@ export default class Arrangement {
 
     const kind = ch.kind === 'drum' || ch.kind === 'pitched' ? ch.kind : null;
 
-    const punchState = { on: false, startBar: 1, endBar: 2 };
-    const songLength = () => Math.max(1, this._clock.songLengthBars);
+    // mirrors the transport bar's project punch; the lane owns no punch controls
+    const punchState = { ...sharedState.project.punch };
 
     // No `target`: with none, Capture still emits `notes[]` on commit, and those go into
     // the region under the playhead rather than into a mounted editor.
@@ -1037,7 +1019,7 @@ export default class Arrangement {
     const lane = {
       id: ch.id, kind, label: ch.label, capture, head, body, regionRow, surfaceSlot,
       instrument: null, bus: null, surface: null, surfaceType: null,
-      nameInput, instrumentSelect, surfaceSelect, armBtn, punchBtn, startReadout, endReadout,
+      nameInput, instrumentSelect, surfaceSelect, armBtn,
       punch: punchState,
     };
     this._lanes.set(ch.id, lane);
@@ -1060,51 +1042,10 @@ export default class Arrangement {
       if (e.target === regionRow) this._select(null);
     });
 
-    const syncReadouts = () => {
-      startReadout.textContent = String(punchState.startBar);
-      endReadout.textContent = String(punchState.endBar);
-    };
-    syncReadouts();
-
-    const pushPunch = () => {
-      if (punchState.on) capture.punchIn(punchState.startBar, punchState.endBar);
-      this._renderLanePunchWash(lane);
-    };
-
     // writes the store only; `_syncLaneArm` off the update event moves the button, the
     // lane's capture and the lane's bus
     this._addDom(armBtn, 'click', () => {
       this._tracks.setArmed(ch.id, armBtn.dataset.on !== 'true');
-    });
-
-    this._addDom(punchBtn, 'click', () => {
-      punchState.on = !punchState.on;
-      punchBtn.dataset.punch = String(punchState.on);
-      if (punchState.on) capture.punchIn(punchState.startBar, punchState.endBar);
-      else capture.punchOff();
-      this._renderLanePunchWash(lane);
-    });
-
-    this._addDom(startMinus, 'click', () => {
-      punchState.startBar = clampBar(punchState.startBar - 1, punchState.endBar - 1);
-      syncReadouts();
-      pushPunch();
-    });
-    this._addDom(startPlus, 'click', () => {
-      punchState.startBar = clampBar(punchState.startBar + 1, punchState.endBar - 1);
-      syncReadouts();
-      pushPunch();
-    });
-    this._addDom(endMinus, 'click', () => {
-      punchState.endBar = clampBar(punchState.endBar - 1, songLength());
-      punchState.endBar = Math.max(punchState.startBar + 1, punchState.endBar);
-      syncReadouts();
-      pushPunch();
-    });
-    this._addDom(endPlus, 'click', () => {
-      punchState.endBar = clampBar(punchState.endBar + 1, songLength());
-      syncReadouts();
-      pushPunch();
     });
 
     const wash = document.createElement('div');
@@ -1112,6 +1053,10 @@ export default class Arrangement {
     wash.hidden = true;
     this.nodes.overlay.appendChild(wash);
     lane.wash = wash;
+
+    // a lane built after mount picks up the transport's punch range on its own
+    if (punchState.on) capture.punchIn(punchState.startBar, punchState.endBar);
+    this._renderLanePunchWash(lane);
 
     // last: mounting a surface measures the overlay, which needs `lane.wash` in place
     if (storedSurface) this._mountLaneSurface(lane, storedSurface);
@@ -1564,7 +1509,6 @@ export default class Arrangement {
     const barWidth = BAR_W;
     if (this._handleStart) this._handleStart.style.left = `calc(${barWidth} * ${loop.startBar - 1})`;
     if (this._handleEnd) this._handleEnd.style.left = `calc(${barWidth} * ${loop.endBar - 1})`;
-    this.nodes.loopToggle.dataset.on = String(loop.on);
 
     const span = this.nodes.loopSpan;
     if (span) {

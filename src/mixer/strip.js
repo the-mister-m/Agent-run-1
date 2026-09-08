@@ -20,6 +20,11 @@ const STYLE_TEXT = `
   padding: var(--sp-1);
   user-select: var(--usel-none);
 }
+/* master's stand-in rows: hold the height of a channel row, show and do nothing */
+.cbdaw-strip__ghost {
+  visibility: var(--vis-hidden);
+  pointer-events: var(--pe-none);
+}
 .cbdaw-strip__label {
   font-size: var(--fs-tiny);
   font-weight: var(--w-med);
@@ -454,61 +459,59 @@ export default class Strip {
     const view = { el, wrap: null, nodes: {}, meter: null, slotMeters: [], cleanup: [] };
 
     const root = document.createElement('div');
-    root.className = 'cbdaw-strip';
+    root.className = this.isMaster ? 'cbdaw-strip cbdaw-strip--master' : 'cbdaw-strip';
+    const ghost = this.isMaster ? ' cbdaw-strip__ghost' : '';
 
     const labelEl = document.createElement('div');
     labelEl.className = 'cbdaw-strip__label';
     labelEl.textContent = this.label;
     root.appendChild(labelEl);
 
-    // instrument picker, under the name. Absent on master and when no options were given.
-    if (!this.isMaster && this.instrumentOptions) {
+    // instrument picker, under the name. Master gets a stand-in; absent when no options were given.
+    if (this.isMaster || this.instrumentOptions) {
       const instrumentSelect = document.createElement('select');
-      instrumentSelect.className = 'cbdaw-strip__instrument';
+      instrumentSelect.className = 'cbdaw-strip__instrument' + ghost;
       instrumentSelect.title = 'Instrument';
-      for (const opt of this.instrumentOptions) {
+      for (const opt of this.instrumentOptions || []) {
         const o = document.createElement('option');
         o.value = opt.value;
         o.textContent = opt.label;
         instrumentSelect.appendChild(o);
       }
-      instrumentSelect.value = this._instrumentType || '';
-      this._addListener(view, instrumentSelect, 'change', () => {
-        const type = instrumentSelect.value || null;
-        this._instrumentType = type;
-        if (typeof this.onAssignInstrument === 'function') this.onAssignInstrument(this.id, type);
-      });
       root.appendChild(instrumentSelect);
-      view.nodes.instrument = instrumentSelect;
+      if (!this.isMaster) {
+        instrumentSelect.value = this._instrumentType || '';
+        this._addListener(view, instrumentSelect, 'change', () => {
+          const type = instrumentSelect.value || null;
+          this._instrumentType = type;
+          if (typeof this.onAssignInstrument === 'function') this.onAssignInstrument(this.id, type);
+        });
+        view.nodes.instrument = instrumentSelect;
+      }
     }
 
+    // mute/solo and pan. Master builds both as stand-ins so its rows line up with a channel's.
     let muteBtn = null;
     let soloBtn = null;
-    if (!this.isMaster) {
+    {
       const ms = document.createElement('div');
-      ms.className = 'cbdaw-strip__ms';
+      ms.className = 'cbdaw-strip__ms' + ghost;
       muteBtn = document.createElement('button');
       muteBtn.className = 'cbdaw-strip__btn cbdaw-strip__btn--mute';
       muteBtn.type = 'button';
       muteBtn.textContent = 'M';
       muteBtn.setAttribute('aria-pressed', String(this._mute));
-      this._addListener(view, muteBtn, 'click', () => {
-        this.mute = !this._mute;
-      });
       soloBtn = document.createElement('button');
       soloBtn.className = 'cbdaw-strip__btn cbdaw-strip__btn--solo';
       soloBtn.type = 'button';
       soloBtn.textContent = 'S';
       soloBtn.setAttribute('aria-pressed', String(this._solo));
-      this._addListener(view, soloBtn, 'click', () => {
-        this.solo = !this._solo;
-      });
       ms.appendChild(muteBtn);
       ms.appendChild(soloBtn);
       root.appendChild(ms);
 
       const pan = document.createElement('div');
-      pan.className = 'cbdaw-strip__pan';
+      pan.className = 'cbdaw-strip__pan' + ghost;
       const panCenter = document.createElement('div');
       panCenter.className = 'cbdaw-strip__pan-center';
       const panThumb = document.createElement('div');
@@ -516,9 +519,21 @@ export default class Strip {
       pan.appendChild(panCenter);
       pan.appendChild(panThumb);
       root.appendChild(pan);
-      view.nodes.pan = pan;
-      view.nodes.panThumb = panThumb;
-      this._wirePanDrag(view, pan);
+
+      if (this.isMaster) {
+        muteBtn = null;
+        soloBtn = null;
+      } else {
+        this._addListener(view, muteBtn, 'click', () => {
+          this.mute = !this._mute;
+        });
+        this._addListener(view, soloBtn, 'click', () => {
+          this.solo = !this._solo;
+        });
+        view.nodes.pan = pan;
+        view.nodes.panThumb = panThumb;
+        this._wirePanDrag(view, pan);
+      }
     }
 
     const fm = document.createElement('div');
@@ -542,8 +557,8 @@ export default class Strip {
     this._wireFaderDrag(view, fader);
 
     const slots = document.createElement('div');
-    slots.className = 'cbdaw-strip__slots';
-    if (!this.isMaster) {
+    slots.className = 'cbdaw-strip__slots' + ghost;
+    {
       for (let i = 0; i < SLOT_COUNT; i++) {
         const slot = document.createElement('div');
         slot.className = 'cbdaw-strip__slot';
@@ -563,7 +578,7 @@ export default class Strip {
         body.appendChild(slotRoute);
         slot.appendChild(slotMeter);
         slot.appendChild(body);
-        this._addListener(view, slot, 'click', () => this._onSlotClick(i));
+        if (!this.isMaster) this._addListener(view, slot, 'click', () => this._onSlotClick(i));
         slots.appendChild(slot);
       }
     }

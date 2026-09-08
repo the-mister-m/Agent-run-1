@@ -241,8 +241,8 @@ const STYLE_TEXT = `
 .cbdaw-menu__tag { font-size: var(--fs-sm); color: var(--text-dim, #93a1b8); letter-spacing: var(--track-label); }
 
 /* ——— status cluster: audio state · CPU meter · noCap (§5) ————————————————— */
-.cbdaw-status { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-7); flex-wrap: var(--flexwrap-wrap); font-size: var(--fs-base); }
-.cbdaw-status__group { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-3); color: var(--text-dim, #93a1b8); }
+.cbdaw-status { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-4); flex-wrap: var(--flexwrap-wrap); font-size: var(--fs-micro); }
+.cbdaw-status__group { display: var(--disp-flex); align-items: var(--align-center); gap: var(--sp-1); color: var(--text-dim, #93a1b8); }
 .cbdaw-status__value { color: var(--text, #f2f6fc); font-variant-numeric: var(--num-tabular); }
 .cbdaw-cpu__track {
   position: var(--pos-relative);
@@ -376,7 +376,7 @@ const STYLE_TEXT = `
   min-width: var(--sp-17);
   text-align: var(--ta-center);
   font-weight: var(--w-bold);
-  font-size: 16px;
+  font-size: 10px;
   color: var(--accent, #34e5b4);
   font-variant-numeric: var(--num-tabular);
 }

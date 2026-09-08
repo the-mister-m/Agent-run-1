@@ -187,7 +187,7 @@ const STYLE_TEXT = `
   height: var(--pct-100);
   padding: var(--sp-2) var(--sp-4);
   box-sizing: var(--box-border-box);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-tiny);
   color: var(--text-dim);
   overflow-x: var(--auto);
   overflow-y: var(--ov-hidden);
@@ -430,9 +430,9 @@ export function mountProjectHeader(el, { store = state, clockRef = clock, instru
   const root = document.createElement('div');
   root.className = 'cbdaw-dawhead';
   root.innerHTML = `
-    <button type="button" class="cbdaw-dawhead__btn" data-role="play">Play</button>
-    <button type="button" class="cbdaw-dawhead__btn" data-role="stop">Stop</button>
-    <button type="button" class="cbdaw-dawhead__btn" data-role="record">Rec</button>
+    <button type="button" class="cbdaw-dawhead__btn" data-role="play" title="Play" aria-label="Play">&#9654;</button>
+    <button type="button" class="cbdaw-dawhead__btn" data-role="stop" title="Stop" aria-label="Stop">&#9632;</button>
+    <button type="button" class="cbdaw-dawhead__btn" data-role="record" title="Record" aria-label="Record">&#9679;</button>
     <span class="cbdaw-dawhead__position" data-position>1.1.000</span>
     <span class="cbdaw-dawhead__sep"></span>
     <span data-key-slot></span>

@@ -143,6 +143,9 @@ class Voice {
     this._started = true;
 
     const peak = clamp(velocity, 0, 1);
+    // start time and peak of the scheduled envelope, kept for _gainAt
+    this._t0 = t;
+    this._peak = peak;
     const g = this.envGain.gain;
     g.cancelScheduledValues(t);
     g.setValueAtTime(0, t);
@@ -181,13 +184,38 @@ class Voice {
     this._env = { ...env };
   }
 
+  /** The gain the scheduled envelope reaches at absolute time `t`. Used when a stage is
+   *  scheduled ahead of the clock, where reading `envGain.gain.value` returns the present
+   *  value and not the one at `t`. Follows the same branch the automation took: release
+   *  ramp while 'releasing', otherwise attack -> decay -> sustain. */
+  _gainAt(t) {
+    if (this._state === 'releasing') {
+      const start = this._releaseT0;
+      const end = Math.max(start + this._env.release, start + 0.001);
+      if (t <= start) return this._releaseFrom;
+      if (t >= end) return 0;
+      return this._releaseFrom * (1 - (t - start) / (end - start));
+    }
+    const attackEnd = this._t0 + this._env.attack;
+    const decayEnd = attackEnd + this._env.decay;
+    const sustain = this._peak * clamp(this._env.sustain, 0, 1);
+    if (t <= this._t0) return 0;
+    if (t < attackEnd) return this._peak * ((t - this._t0) / this._env.attack);
+    if (t < decayEnd) return this._peak + (sustain - this._peak) * ((t - attackEnd) / this._env.decay);
+    return sustain;
+  }
+
   release(atTime) {
     if (this._state === 'free' || this._state === 'releasing' || this._state === 'stealing') return;
     const ctx = this._ctx;
     const t = Math.max(atTime ?? ctx.currentTime, ctx.currentTime);
     const g = this.envGain.gain;
+    // read before the state moves to 'releasing' — _gainAt branches on it
+    const from = t > ctx.currentTime ? this._gainAt(t) : g.value;
+    this._releaseT0 = t;
+    this._releaseFrom = from;
     g.cancelScheduledValues(t);
-    g.setValueAtTime(g.value, t);
+    g.setValueAtTime(from, t);
     g.linearRampToValueAtTime(0, t + this._env.release);
     this._state = 'releasing';
     clearTimeout(this._settleTimer);
@@ -207,8 +235,10 @@ class Voice {
     const ctx = this._ctx;
     const t = Math.max(atTime ?? ctx.currentTime, ctx.currentTime);
     const g = this.envGain.gain;
+    // read before the state moves to 'stealing' — _gainAt branches on it
+    const from = t > ctx.currentTime ? this._gainAt(t) : g.value;
     g.cancelScheduledValues(t);
-    g.setValueAtTime(g.value, t);
+    g.setValueAtTime(from, t);
     g.linearRampToValueAtTime(0, t + STEAL_FADE_S);
     this._state = 'stealing';
     clearTimeout(this._settleTimer);

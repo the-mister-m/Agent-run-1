@@ -10,7 +10,9 @@ Live count: **28.** Four ruled or deferred to Brandon, three handed to an agent,
 from the 2026-08-24 Goto run, one scope question awaiting a yes/no, four new from the
 2026-08-25 skin specs session, one from 2026-08-31 (synth voice normalization — built, its
 reported problem unsolved, three open items), four new from
-2026-08-31 (Beat tool rework), four new from 2026-08-31 (skin sweep tokenization close), one
+2026-08-31 (Beat tool rework), four new from 2026-08-31 (skin sweep tokenization close), six new from 2026-09-04 (three concurrent
+sessions — trough height, flash feedback, dead `data-quality`, stale dev-splash token map,
+unverified roll audio, bus octaveShift), one
 new from 2026-08-31 (P4/S2 daw-shell-fix — **CLOSED 2026-08-31**, `shell-cleanup` deleted the
 ch1 demo outright), one new from 2026-08-31 (P4/S3 patch-synth — **BUILT AND HEARD
 2026-08-31**; `patch-synth-finish` closed three more the same day — the angle token, the
@@ -19,11 +21,36 @@ Brandon's), one new
 from 2026-08-31 (P4/S3 mixer-strips — live verification needed, Chrome
 incident ruling still needed; its ch1-collision bullet CLOSED 2026-08-31 same pass), one new
 from 2026-08-31 (P4/S3 arrangement — arm half of the global/per-lane split RULED and applied
-2026-08-31; punch half still open, `arrangement.js`'s per-lane punch not yet reconciled), one
+2026-08-31; punch half **CLOSED 2026-09-04** — wired to the transport project-wide, lane PUNCH UI cut), one
 new from 2026-08-31 (P4/S4 node-graph — **BUILT AND HEARD 2026-08-31**; its main open item,
 the port-0/sends tap split, **CLOSED 2026-08-31** by `strip-tap-fix` — two small cosmetic
 items left, both Brandon's), one new from 2026-09-01 (`arrange rebuild` — phase D
 unspecced).
+
+## NEW — 2026-09-07 — Rule 7 conflict, unruled
+
+- Output Style rule 7 and project CLAUDE.md rule 7 state opposite things about the 1M-token
+  context; flagged at session start of `finish scope`, not ruled. See
+  [session review](docs/reports/2026-09-07-session-review-finish-scope.md).
+
+## NEW — 2026-09-04 — three concurrent sessions (piano roll keys, mixer panel, noteOff seam), Brandon's desk
+
+- **Trough height** (mixer panel consolidation) — `--sp-95` too short, `--sp-230` full
+  stretch, no token between. Name the height or turn the dev bar.
+- **Flash feedback**, not started — click a region, it flashes; click blank track space, a
+  small flash there, scaled down where the visible change is already obvious. Brandon's
+  spec, ordered last, session ended before it began.
+- **`data-quality` dead in diatonic-keys** — still set at
+  [diatonic-keys.js:430](src/surfaces/diatonic-keys.js#L430), read by nothing now that the
+  brightness ladder replaced quality coloring. Leave or cut — Brandon's call.
+- **`tools/dev-splash.html:1057`'s generated token map is stale** — lists `--row-deg`/
+  `--note-deg` for piano-roll, doesn't know `--roll-key-w`. Decide whether it gets
+  regenerated.
+- **Piano roll audio unverified** — `tools/daw-window.html`'s new key strip has never been
+  pressed in a browser by anyone but Brandon watching a screenshot.
+- **Bus `octaveShift`** — a nonzero shift sounds the roll's key-strip preview an octave off
+  the stored note. Existing behavior, not a regression, not fixed.
+- Full detail: [2026-09-04 closer receipt](docs/reports/2026-09-04-closer-three-session-close.md).
 
 ## NEW — 2026-09-02 — dev-test tool (Chromebook load test), Brandon's desk
 

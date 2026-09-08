@@ -84,7 +84,6 @@ import {
   createScale,
   degreeIndexOf,
   degreeQuality,
-  degreeColor,
   isInKey,
   label as pitchLabel,
   midiOf,
@@ -128,10 +127,17 @@ const MAX_OCTAVES = 4;
  *  bottom of a two-octave roll at C3 and the top just under C5. This seat's number. */
 const DEFAULT_BASE_OCTAVE = 3;
 
-/** Seat question 1, Brandon via BUILDPLAN: "Is it always 12 chromatic rows? Yes."
- *  Twelve per octave, and the diatonic roll's seven are §4's seven stored degrees. */
+/** Rows drawn per octave. Always 12. */
 const CHROMATIC_ROWS_PER_OCTAVE = 12;
-const DIATONIC_ROWS_PER_OCTAVE = 7;
+
+/** Pitch classes that sit on a black key, measured from C. */
+const BLACK_PITCH_CLASSES = new Set([1, 3, 6, 8, 10]);
+
+/** The bus source id this roll auditions under. Never arm-gated, so the strip always sounds. */
+const PREVIEW_SOURCE = 'mouse';
+
+/** The step `_rowPosition()` counts by, so a tonic an octave up numbers 8. Not a row count. */
+const DEGREES_PER_OCTAVE = 7;
 
 /** `capture.js`'s own floor (`MIN_NOTE_LENGTH_TICKS`), restated so a note dragged to nothing
  *  is still a note rather than a `length: 0` §7 row. */
@@ -227,12 +233,10 @@ function byPosition(a, b) {
 // `keyboard.js` use. The DIFFERENCE, stated once more because it is deliberate: no `var(--x,
 // #hex)` fallbacks. See the header.
 //
-// THE SHADING, WHICH IS THE WHOLE POINT OF THE FILE:
-//   `--row-deg` is set per row, in JS, to `var(<token>)` where <token> is whatever
-//   `degreeColor(scale, i)` returned. This file never chooses which token; it only plumbs
-//   the one it was handed. An out-of-key row gets no `--row-deg` at all and falls to the
-//   dimmed ground — §4's "in-key rows are shaded, out-of-key rows are dimmed", which shows a
-//   student WHY the scale is a subset instead of hiding the notes that are not in it.
+// THE SHADING:
+//   Two shades, no hue. Rows carry `data-blackkey` and `data-inkey`; the root carries
+//   `data-overlay`. Under letters the light shade is the white keys, under solfege it is
+//   the in-key rows. Nothing is hidden either way — the dim rows are still drawn.
 //
 // THE REDUNDANT NON-COLOR CUE, which `ui/tokens.css` asked P3's surfaces for by name
 //   ("P3's surfaces should carry a redundant NON-COLOR cue for dim/augmented ... and for
@@ -248,7 +252,8 @@ let liveInstances = 0;
 const STYLE_TEXT = `
 .cbdaw-roll {
   --roll-row-h: var(--sp-9);
-  --roll-gutter: var(--sp-31);
+  --roll-gutter: var(--sp-39);
+  --roll-key-w: var(--sp-15);
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
   gap: var(--sp-3);
@@ -263,8 +268,12 @@ const STYLE_TEXT = `
   user-select: var(--usel-none);
   -webkit-user-select: var(--usel-none);
 }
-.cbdaw-roll[data-variant="compact"] { --roll-row-h: var(--sp-6); --roll-gutter: var(--sp-23); }
-.cbdaw-roll[data-variant="expanded"] { --roll-row-h: var(--sp-12); --roll-gutter: var(--sp-39); }
+.cbdaw-roll[data-variant="compact"] {
+  --roll-row-h: var(--sp-6); --roll-gutter: var(--sp-37); --roll-key-w: var(--sp-14);
+}
+.cbdaw-roll[data-variant="expanded"] {
+  --roll-row-h: var(--sp-12); --roll-gutter: var(--sp-65); --roll-key-w: var(--sp-28);
+}
 
 .cbdaw-roll__toolbar {
   display: var(--disp-flex);
@@ -344,13 +353,13 @@ const STYLE_TEXT = `
 .cbdaw-roll__ruler-cell {
   flex: var(--flex-1-1-0);
   text-align: var(--ta-center);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   font-variant-numeric: var(--num-tabular);
   color: var(--text-dim);
   padding: var(--sp-1) 0;
   border-radius: var(--r-cell);
 }
-.cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell { font-size: var(--fs-micro); padding: var(--sp-hair) 0; }
+.cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell { font-size: var(--fs-base); padding: var(--sp-hair) 0; }
 .cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell { font-size: var(--fs-2xl); padding: var(--sp-2) 0; }
 .cbdaw-roll__ruler-cell[data-beat="true"] { color: var(--text); font-weight: var(--w-bold); }
 .cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
@@ -371,16 +380,36 @@ const STYLE_TEXT = `
   height: var(--roll-row-h);
   box-sizing: var(--box-border-box);
 }
-.cbdaw-roll__row-label {
+/* the gutter holds the playable key strip and the letter, in that order */
+.cbdaw-roll__row-gutter {
   flex: var(--flex-0-0-auto);
   width: var(--roll-gutter);
   min-width: var(--roll-gutter);
   box-sizing: var(--box-border-box);
   display: var(--disp-flex);
+  align-items: var(--align-stretch);
+}
+.cbdaw-roll__key {
+  flex: var(--flex-0-0-auto);
+  width: var(--roll-key-w);
+  min-width: var(--roll-key-w);
+  box-sizing: var(--box-border-box);
+  /* every key is outlined so a black key reads as a key, not as a gap in the strip */
+  border: var(--bw) solid var(--line);
+  background: color-mix(in srgb, var(--text) 78%, var(--panel));
+  cursor: var(--cur-pointer);
+  touch-action: var(--touch-none);
+}
+.cbdaw-roll__row[data-blackkey="true"] .cbdaw-roll__key { background: var(--bg); }
+.cbdaw-roll__key.is-on { background: var(--accent); }
+.cbdaw-roll__row-label {
+  flex: var(--flex-1-1-auto);
+  box-sizing: var(--box-border-box);
+  display: var(--disp-flex);
   align-items: var(--align-center);
-  justify-content: var(--justify-flex-end);
+  justify-content: var(--justify-flex-start);
   gap: var(--sp-2);
-  padding-right: var(--sp-2h);
+  padding-left: var(--sp-1h);
   font-size: var(--fs-xs);
   line-height: var(--lh-none);
   color: var(--text-dim);
@@ -390,25 +419,23 @@ const STYLE_TEXT = `
 .cbdaw-roll[data-variant="expanded"] .cbdaw-roll__row-label { font-size: var(--fs-lg); }
 .cbdaw-roll__row[data-inkey="true"] .cbdaw-roll__row-label { color: var(--text); font-weight: var(--w-med); }
 
-/* THE SHADING. --row-deg is whatever token theory/scale.js named for this degree. */
+/* THE SHADING. Two shades, no hue. Which fact picks them depends on the label mode:
+   letters shade by white/black key, solfege shades by in-key/out-of-key. */
 .cbdaw-roll__row-cell {
   flex: var(--flex-1-1-auto);
-  border-top: var(--bw) solid var(--line);
+  /* lighter than BOTH row shades, so the rule reads on the dark rows as well as the light */
+  border-top: var(--bw) solid color-mix(in srgb, var(--text) 58%, transparent);
   border-left-width: var(--bw-3);
   border-left-style: var(--line-solid);
   border-left-color: var(--color-transparent);
   box-sizing: var(--box-border-box);
+  background: var(--bg);
 }
-.cbdaw-roll__row[data-inkey="true"] .cbdaw-roll__row-cell {
-  background: color-mix(in srgb, var(--row-deg) 17%, var(--panel));
-  border-left-color: var(--row-deg);
+.cbdaw-roll[data-overlay="letter"] .cbdaw-roll__row[data-blackkey="false"] .cbdaw-roll__row-cell {
+  background: color-mix(in srgb, var(--text) 22%, var(--panel));
 }
-.cbdaw-roll__row[data-inkey="false"] .cbdaw-roll__row-cell {
-  background: color-mix(in srgb, var(--panel) 45%, var(--bg));
-}
-/* the tonic reads louder than the other six — it is the row everything else is measured from */
-.cbdaw-roll__row[data-degree-index="0"] .cbdaw-roll__row-cell {
-  background: color-mix(in srgb, var(--row-deg) 30%, var(--panel));
+.cbdaw-roll[data-overlay="solfege"] .cbdaw-roll__row[data-inkey="true"] .cbdaw-roll__row-cell {
+  background: color-mix(in srgb, var(--text) 22%, var(--panel));
 }
 /* The non-color cue tokens.css asked P3 for. Border STYLE, not hue, not a glyph. */
 .cbdaw-roll__row[data-quality="major"] .cbdaw-roll__row-cell { border-left-style: var(--line-solid); }
@@ -435,7 +462,7 @@ const STYLE_TEXT = `
   overflow: var(--ov-hidden);
   cursor: var(--cur-grab);
   touch-action: var(--touch-none);
-  background: color-mix(in srgb, var(--note-deg) 40%, var(--panel));
+  background: color-mix(in srgb, var(--text) 55%, var(--panel));
 }
 .cbdaw-roll__note[data-inkey="false"] { background: color-mix(in srgb, var(--text-dim) 40%, var(--panel)); }
 .cbdaw-roll__note[data-selected="true"] { border-color: var(--accent); }
@@ -446,7 +473,7 @@ const STYLE_TEXT = `
   left: var(--sp-0);
   right: var(--sp-0);
   bottom: var(--sp-0);
-  background: var(--note-deg);
+  background: var(--text);
   opacity: var(--op-soft);
 }
 .cbdaw-roll__note[data-inkey="false"] .cbdaw-roll__note-fill { background: var(--text-dim); }
@@ -471,9 +498,9 @@ const STYLE_TEXT = `
   top: var(--sp-0);
   bottom: var(--sp-0);
   width: var(--sp-hair);
-  background: color-mix(in srgb, var(--line) 55%, transparent);
+  background: color-mix(in srgb, var(--text) 42%, transparent);
 }
-.cbdaw-roll__line[data-beat="true"] { background: var(--line); }
+.cbdaw-roll__line[data-beat="true"] { background: color-mix(in srgb, var(--text) 68%, transparent); }
 .cbdaw-roll__line[data-bar="true"] { background: var(--text-dim); width: var(--sp-1); }
 
 /* ---- SEAT QUESTION 5's second half: the velocity lane ---- */
@@ -547,10 +574,10 @@ export default class PianoRoll {
     // song tick this roll's bar 1 sits on. 0 for the standalone, a region's start in the DAW
     this._originTick = 0;
 
-    /** SEAT QUESTION 2 — Brandon's decision: the standalone shows a chromatic roll AND a
-     *  diatonic roll, both with diatonic shading; the DAW shows one roll. Both modes live
-     *  in this one file and a page decides by constructing two instances. */
-    this._rows = 'chromatic';
+    /** The track bus this roll auditions through. null = silent, and the roll still edits. */
+    this._bus = null;
+    /** The one note the key strip or a fresh note is holding down, released on pointer up. */
+    this._previewNote = null;
 
     /** §4's scale object. Replaced wholesale by `setScale`/the 'scale' subscription — never
      *  mutated in place, because `theory/scale.js`'s mutators are pure and return a NEW
@@ -559,12 +586,9 @@ export default class PianoRoll {
     this._state = null;
     this._stateUnsub = null;
 
-    /** §6, and this surface has BOTH of §6's axes because it is the only surface that is a
-     *  pitch surface and a rhythm surface at once. §6's own words: "Per-surface toggle.
-     *  There is no global overlay setting." Two per-instance properties, one per axis, each
-     *  taking exactly the enumeration §6 gives it. Flagged in the receipt. */
-    this._overlay = 'letter';       // 'none' | 'letter' | 'number' | 'solfege'  (pitch)
-    this._rulerOverlay = 'syllable'; // 'none' | 'syllable'                       (rhythm)
+    /** Two label axes, per instance. Pitch toggles; rhythm is fixed on. */
+    this._overlay = 'letter';        // 'letter' | 'solfege'
+    this._rulerOverlay = 'syllable'; // always on
 
     this._division = DEFAULT_DIVISION;
     this._bars = 1;
@@ -661,26 +685,6 @@ export default class PianoRoll {
     return this;
   }
 
-  // =======================================================================================
-  // SEAT QUESTION 2 — chromatic rows and diatonic rows, one file
-  // =======================================================================================
-
-  get rows() {
-    return this._rows;
-  }
-
-  set rows(mode) {
-    const next = mode === 'diatonic' ? 'diatonic' : 'chromatic';
-    if (next === this._rows) return;
-    this._rows = next;
-    if (this.mounted) {
-      this.el.dataset.rows = next;
-      this._renderRows();
-      this._renderNotes();
-      this._syncToolbar();
-    }
-  }
-
   get octaves() { return this._octaves; }
 
   set octaves(n) {
@@ -705,27 +709,10 @@ export default class PianoRoll {
     return midiOf(this._scale.tonic, this._baseOctave);
   }
 
-  /**
-   * The drawn pitches, LOW to HIGH.
-   *   chromatic — seat question 1, Brandon: "Is it always 12 chromatic rows? Yes."
-   *               Exactly 12 per octave, in-key and out-of-key alike. Nothing is hidden.
-   *   diatonic  — §4's seven stored degrees per octave, in degree order. `pitchClasses()`
-   *               can legitimately hold a REPEAT once a student moves one degree onto
-   *               another (scale.js says so and says not to "fix" it); this walks
-   *               `degrees` directly for the same reason, so two rows can share a pitch
-   *               and the student sees exactly what their own +/- did.
-   */
+  /** The drawn pitches, LOW to HIGH. 12 per octave, in-key and out-of-key alike. */
   _rowPitches() {
     const root = this._rootMidi();
     const out = [];
-    if (this._rows === 'diatonic') {
-      for (let o = 0; o < this._octaves; o++) {
-        for (let i = 0; i < DIATONIC_ROWS_PER_OCTAVE; i++) {
-          out.push(root + this._scale.degrees[i] + 12 * o);
-        }
-      }
-      return out;
-    }
     for (let o = 0; o < this._octaves; o++) {
       for (let s = 0; s < CHROMATIC_ROWS_PER_OCTAVE; s++) out.push(root + s + 12 * o);
     }
@@ -747,7 +734,7 @@ export default class PianoRoll {
     const i = degreeIndexOf(this._scale, midi);
     if (i < 0) return null;
     const octaveOffset = Math.floor((midi - this._rootMidi()) / 12);
-    return i + 1 + DIATONIC_ROWS_PER_OCTAVE * octaveOffset;
+    return i + 1 + DEGREES_PER_OCTAVE * octaveOffset;
   }
 
   // =======================================================================================
@@ -780,17 +767,52 @@ export default class PianoRoll {
   get overlay() { return this._overlay; }
 
   set overlay(mode) {
-    const allowed = ['none', 'letter', 'number', 'solfege'];
-    this._overlay = allowed.includes(mode) ? mode : 'none';
-    if (this.mounted) { this._renderRowLabels(); this._syncToolbar(); }
+    const allowed = ['letter', 'solfege'];
+    this._overlay = allowed.includes(mode) ? mode : 'letter';
+    // the row shading reads the label mode, so the root carries it for the CSS
+    if (this.mounted) {
+      this.el.dataset.overlay = this._overlay;
+      this._renderRowLabels();
+      this._syncToolbar();
+    }
   }
 
-  /** §6, rhythm axis. */
+  /** Rhythm axis. Always 'syllable'. */
   get rulerOverlay() { return this._rulerOverlay; }
 
-  set rulerOverlay(mode) {
-    this._rulerOverlay = mode === 'syllable' ? 'syllable' : 'none';
-    if (this.mounted) { this._renderRuler(); this._syncToolbar(); }
+  // =======================================================================================
+  // AUDITION — the key strip and note entry sound through one track bus
+  // =======================================================================================
+
+  get bus() { return this._bus; }
+
+  /** Swaps the bus this roll sounds through. Releases whatever the old one is holding. */
+  setBus(bus) {
+    if (bus === this._bus) return this;
+    this._previewOff();
+    this._bus = bus || null;
+    return this;
+  }
+
+  /** Holds one note down. Replaces any note already held, so the strip is monophonic. */
+  _previewOn(midi) {
+    if (!Number.isFinite(midi)) return;
+    this._previewOff();
+    if (!this._bus) return;
+    this._bus.emitNoteOn({ note: midi, velocity: DEFAULT_VELOCITY, source: PREVIEW_SOURCE });
+    this._previewNote = midi;
+    this._keyElFor(midi)?.classList.add('is-on');
+  }
+
+  _previewOff() {
+    if (this._previewNote === null) return;
+    this._keyElFor(this._previewNote)?.classList.remove('is-on');
+    this._bus?.emitNoteOff({ note: this._previewNote, source: PREVIEW_SOURCE });
+    this._previewNote = null;
+  }
+
+  _keyElFor(midi) {
+    return this._rowEls.find((r) => r.midi === midi)?.keyEl || null;
   }
 
   // =======================================================================================
@@ -980,6 +1002,7 @@ export default class PianoRoll {
 
   unmount() {
     if (!this.mounted) return this;
+    this._previewOff();
     if (this._rafHandle !== null) cancelAnimationFrame(this._rafHandle);
     this._rafHandle = null;
     this._detachInteraction();
@@ -1024,15 +1047,13 @@ export default class PianoRoll {
     const root = document.createElement('div');
     root.className = 'cbdaw-roll';
     root.dataset.variant = this.variant;
-    root.dataset.rows = this._rows;
+    root.dataset.overlay = this._overlay;
 
     const toolbar = document.createElement('div');
     toolbar.className = 'cbdaw-roll__toolbar';
     toolbar.innerHTML = `
-      <button type="button" data-act="rows" aria-pressed="false"></button>
-      <button type="button" data-act="triplet" aria-pressed="false">3</button>
+      <button type="button" data-act="triplet" aria-pressed="false">even</button>
       <button type="button" data-act="overlay"></button>
-      <button type="button" data-act="ruler-overlay" aria-pressed="true">e + a</button>
       <span class="cbdaw-roll__readout" data-readout="duration"></span>
       ${this.variant === 'expanded' ? `
         <span>
@@ -1181,26 +1202,32 @@ export default class PianoRoll {
 
       const inKey = isInKey(this._scale, midi);
       row.dataset.inkey = String(inKey);
+      // which piano key this row is, independent of the scale
+      row.dataset.blackkey = String(BLACK_PITCH_CLASSES.has(((midi % 12) + 12) % 12));
 
       if (inKey) {
         const i = degreeIndexOf(this._scale, midi);
         row.dataset.degreeIndex = String(i);
-        // §4: "a degree is colored by the quality of THE TRIAD built on it" — computed in
-        // theory/scale.js, read here. This file does not know what a triad is.
         row.dataset.quality = degreeQuality(this._scale, i);
-        row.style.setProperty('--row-deg', `var(${degreeColor(this._scale, i)})`);
-        // §4's `altered` is a DIFFERENT fact from the quality and gets its own mark.
+        // the student moved this degree — a separate fact from the quality
         row.dataset.altered = String(!!this._scale.altered?.[i]);
       }
 
+      const gutter = document.createElement('div');
+      gutter.className = 'cbdaw-roll__row-gutter';
+      const keyEl = document.createElement('div');
+      keyEl.className = 'cbdaw-roll__key';
+      keyEl.dataset.midi = String(midi);
       const labelEl = document.createElement('div');
       labelEl.className = 'cbdaw-roll__row-label';
+      gutter.appendChild(keyEl);
+      gutter.appendChild(labelEl);
       const cell = document.createElement('div');
       cell.className = 'cbdaw-roll__row-cell';
-      row.appendChild(labelEl);
+      row.appendChild(gutter);
       row.appendChild(cell);
       host.appendChild(row);
-      this._rowEls.push({ el: row, labelEl, midi });
+      this._rowEls.push({ el: row, labelEl, keyEl, midi });
     }
 
     // The note layer, the gridlines and the playhead sit over the rows' own field area,
@@ -1284,10 +1311,6 @@ export default class PianoRoll {
       el.dataset.inkey = String(inKey);
       el.dataset.offGrid = String(this._isOffGrid(note));
       el.dataset.selected = String(this._selected === note);
-      if (inKey) {
-        const i = degreeIndexOf(this._scale, note.note);
-        el.style.setProperty('--note-deg', `var(${degreeColor(this._scale, i)})`);
-      }
       el.style.left = `${this._pct(note.tick)}%`;
       el.style.width = `${Math.max(this._pct(note.length), 0.4)}%`;
       // A note whose pitch is outside the drawn range is parked at the nearest edge rather
@@ -1337,35 +1360,25 @@ export default class PianoRoll {
     const ri = this._rowEls.findIndex((r) => r.midi === note.note);
     if (ri >= 0) {
       refs.el.style.top = `calc(var(--roll-row-h) * ${ri})`;
-      const inKey = isInKey(this._scale, note.note);
-      refs.el.dataset.inkey = String(inKey);
-      if (inKey) {
-        refs.el.style.setProperty(
-          '--note-deg', `var(${degreeColor(this._scale, degreeIndexOf(this._scale, note.note))})`,
-        );
-      }
+      refs.el.dataset.inkey = String(isInKey(this._scale, note.note));
     }
   }
 
   _syncToolbar() {
     const t = this.nodes.toolbar;
     if (!t) return;
-    const rowsBtn = t.querySelector('[data-act="rows"]');
-    if (rowsBtn) {
-      // Two role words, not pitch or rhythm labels — the same class of chrome text
-      // `step-grid.js` puts on its own buttons. Nothing here names a note or a beat.
-      rowsBtn.textContent = this._rows === 'diatonic' ? 'diatonic' : 'chromatic';
-      rowsBtn.setAttribute('aria-pressed', String(this._rows === 'diatonic'));
-    }
     const tripletBtn = t.querySelector('[data-act="triplet"]');
-    if (tripletBtn) tripletBtn.setAttribute('aria-pressed', String(this._division === TRIPLET_DIVISION));
+    if (tripletBtn) {
+      // face reads the live subdivision: 16ths even, triplets odd
+      const odd = this._division === TRIPLET_DIVISION;
+      tripletBtn.textContent = odd ? 'odd' : 'even';
+      tripletBtn.setAttribute('aria-pressed', String(odd));
+    }
     const overlayBtn = t.querySelector('[data-act="overlay"]');
     if (overlayBtn) {
       overlayBtn.textContent = this._overlay;
-      overlayBtn.setAttribute('aria-pressed', String(this._overlay !== 'none'));
+      overlayBtn.setAttribute('aria-pressed', String(this._overlay === 'solfege'));
     }
-    const rulerBtn = t.querySelector('[data-act="ruler-overlay"]');
-    if (rulerBtn) rulerBtn.setAttribute('aria-pressed', String(this._rulerOverlay === 'syllable'));
     const barsOut = t.querySelector('[data-readout="bars"]');
     if (barsOut) barsOut.textContent = String(this._bars);
     const octOut = t.querySelector('[data-readout="octaves"]');
@@ -1441,6 +1454,9 @@ export default class PianoRoll {
       e.preventDefault();
       this._deleteNote(this._noteForEl(el));
     });
+    // on the window, so a pointer released off the roll still lifts the held note
+    this._addDom(window, 'pointerup', () => this._previewOff());
+    this._addDom(window, 'pointercancel', () => this._previewOff());
   }
 
   _detachInteraction() {
@@ -1490,6 +1506,14 @@ export default class PianoRoll {
   }
 
   _onFieldPointerDown(e) {
+    // the key strip plays, it does not edit — it never reaches the note logic below
+    const keyEl = e.target.closest('.cbdaw-roll__key');
+    if (keyEl) {
+      e.preventDefault();
+      this._previewOn(Number(keyEl.dataset.midi));
+      return;
+    }
+
     const noteEl = e.target.closest('.cbdaw-roll__note');
     e.preventDefault();
 
@@ -1620,6 +1644,8 @@ export default class PianoRoll {
     this._notes.push(note);
     this._notes.sort(byPosition);
     this._renderNotes();
+    // a note entered is a note heard, held until the pointer that drew it lifts
+    this._previewOn(midi);
     return note;
   }
 
@@ -1646,21 +1672,11 @@ export default class PianoRoll {
     const act = e.target?.dataset?.act;
     if (!act) return;
     switch (act) {
-      case 'rows':
-        this.rows = this._rows === 'chromatic' ? 'diatonic' : 'chromatic';
-        break;
       case 'triplet':
         this.setDivision(this._division === TRIPLET_DIVISION ? DEFAULT_DIVISION : TRIPLET_DIVISION);
         break;
-      case 'overlay': {
-        // §6's four pitch modes, cycled. The strings below are MODE NAMES, not labels — the
-        // labels themselves all come out of `label()`.
-        const modes = ['none', 'letter', 'number', 'solfege'];
-        this.overlay = modes[(modes.indexOf(this._overlay) + 1) % modes.length];
-        break;
-      }
-      case 'ruler-overlay':
-        this.rulerOverlay = this._rulerOverlay === 'syllable' ? 'none' : 'syllable';
+      case 'overlay':
+        this.overlay = this._overlay === 'letter' ? 'solfege' : 'letter';
         break;
       case 'bars-': this.bars = this._bars - 1; break;
       case 'bars+': this.bars = this._bars + 1; break;

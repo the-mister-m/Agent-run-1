@@ -1,4 +1,4 @@
-Updated 2026-09-03 — Closer, piano roll ↔ region wiring close
+Updated 2026-09-04 — Closer, three concurrent-session close (piano roll keys, mixer panel, noteOff seam)
 
 # MEMORY — Chromebook DAW / Agent run 1
 Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
@@ -10,7 +10,16 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
 - Runs: static file server, no build step — open the /tools pages directly
 - Key paths: [BUILDPLAN.md](Builddocs/BUILDPLAN.md) · [CONTRACTS.md](Builddocs/CONTRACTS.md) · [ROSTER.md](Builddocs/ROSTER.md) · [P2-beat-tool/](Builddocs/P2-beat-tool/)
 
-## LAST WEEK — 2026-08-20 → 2026-08-31
+## DURABLE FACTS
+- No limiter anywhere in the project, on master or elsewhere — [SPEC-sound.md](docs/mapdocs/SPEC-sound.md)
+- Four separate level regimes coexist across tools — [SPEC-sound.md](docs/mapdocs/SPEC-sound.md)
+- Three tool-page frame patterns exist, not two — [SPEC-pages.md](docs/mapdocs/SPEC-pages.md)
+- The DAW's bottom Surface pane reaches no track, unverified in browser — [SPEC-daw-desktop.md](docs/mapdocs/SPEC-daw-desktop.md)
+- Recording drops a live take when no editor is open — [SPEC-daw-desktop.md](docs/mapdocs/SPEC-daw-desktop.md)
+- The tool registry in `src/ui/shell.js` is stale — [SPEC-cleanup.md](docs/mapdocs/SPEC-cleanup.md)
+- `index.html` is the nav page, not the DAW (commits de3789f, 755abf0) — [SPEC-cleanup.md](docs/mapdocs/SPEC-cleanup.md)
+
+## LAST WEEK — 2026-08-20 → 2026-09-04
 - 08-20: run planned — BUILDPLAN, CONTRACTS, ROSTER written.
 - 08-22: P0 closed — CONTRACTS §1–10 confirmed and amended (CPU cost table corrected; reverb was priced at 8, measured ~247).
 - 08-23: P1 closed same day as P2. P1: Wave Synth + Overtone Synth ship, 2 real bugs found and fixed (frequency-readout error, voice-steal race). P2: Beat Tool ships (`tools/beat.html`), 5 integration bugs found and fixed via repair seats, clean audit.
@@ -198,28 +207,39 @@ Rules: GLOBAL-RULES.md. Closer-only file. Lean: no superseded history.
   Three shared-file edits (arrangement.js/daw-shell.js/strip.js) additive with prior-behavior
   defaults — dev-splash.html/index.html opt into none. Brandon ruled the routing graph is
   `graph.js`, not "the matrix." Session agent added an unasked Automation chip, flagged, not
-  reverted. Nothing run in a browser. See the current warm start.
+  reverted. Nothing run in a browser.
+- 09-04, three concurrent sessions, closer-covered (none called their own closer; all three
+  receipts settled in one pass — [closer receipt](docs/reports/2026-09-04-closer-three-session-close.md)):
+  **(1) noteOff seam CLOSED**, 01:16–02:19Z — `_gainAt(t)` added to wave-synth and
+  overtone-synth so a future release reads the envelope's real value instead of a stale
+  `gain.value` snapshot; Brandon confirmed both by ear. Transport Punch (previously dead —
+  no reader of `project.punch` in `/src`) wired to every lane; lane LOOP/PUNCH UI cut.
+  **(2) Mixer panel consolidation**, 02:30–03:12Z — `tools/daw-window.html` sidebar/bottom
+  mixer strips tightened; Master's three skipped rows now build as hidden stand-ins in the
+  shared `src/mixer/strip.js`, reaching every mixer on every page, unverified in a browser.
+  Trough height between panes left OPEN, no token between `--sp-95`/`--sp-230`. Flash
+  feedback on region/track click not started.
+  **(3) Piano roll keys + shading**, 03:26–04:22Z — triad-quality degree coloring removed
+  project-wide: piano-roll shades two-tone off `data-overlay`, diatonic-keys runs Brandon's
+  scale-degree brightness ladder (1,5 brightest · 2,4 · 3,6 · 7 at the midpoint to black, no
+  hue — **this is now the project's standing rule for degree display, supersedes any earlier
+  triad-quality color scheme**). Roll toolbar cut to two buttons; chromatic/diatonic rows
+  mode, `e + a`, and `none`/`number` label modes deleted outright, not hidden. Roll gained a
+  playable key strip (`setBus()` seam, source id `'mouse'`, never arm-gated) — audio
+  unverified in a browser. Dark borders confirmed not to work on this project's near-black
+  ground; row rules/gridlines moved to translucent `--text` mixes — reusable finding for any
+  future surface.
+  All three sessions hit the same mid-session instruction to read/edit via Bash, contradicting
+  Brandon's standing CLAUDE.md rule to see edits as visible diffs — all three ignored it and
+  used Read/Edit. **This has now recurred three times across three separate sessions; if it
+  keeps happening it is systemic, not a one-off, and is worth Brandon's attention.**
 
-## WARM START — 2026-09-03 — piano roll sounds; noteOff seam is next
-- Situation: Piano Roll now wired into `tools/daw-window.html` as a bottom-third pane —
-  follows the arrangement's selected region, audible. `roll-scheduler.js` had never produced
-  sound (read `n.start`, everything else writes `tick`); fixed, plus a `startBar` offset and
-  `piano-roll.js`'s `setOriginTick()` so the playhead agrees with the arrangement.
-- Last state: **THE NOTEOFF SEAM, open, next session's first work.** Two symptoms, one shape —
-  a `noteOff` scheduled in the future is mishandled; live notes are clean.
-  [wave-synth.js:275](src/instruments/wave-synth.js#L275)/[:308](src/instruments/wave-synth.js#L308)
-  reads `gain.gain.value` at call time and writes it as a hard value at a future `t0` — the
-  attack ramp is cancelled, the gain jumps, it clicks. Brandon found the tell: longer notes
-  remove it. [overtone-synth.js:187](src/instruments/overtone-synth.js#L187) clamps `atTime`
-  to `currentTime`, so a scheduled release fires immediately and truncates — clips. Drum
-  synth/sampler `noteOff` is a no-op, not affected. Duplicate regions also seen (not from the
-  UI), unconfirmed lead: [arrangement.js:1046](src/ui/arrangement.js#L1046) subscribes
-  `capture.on('commit')` per lane with no `capture.off`; [:845](src/ui/arrangement.js#L845)
-  clears the lane map on rebuild but leaves those subscriptions live.
-- Next move: fix the noteOff seam in wave-synth.js and overtone-synth.js (schedule against
-  the ramp, not a stale read; don't clamp a future release to now). Then chase the duplicate-
-  regions lead in arrangement.js. Nothing this session run in a browser — Brandon drove
-  playback.
-- Links: [session review](docs/reports/2026-09-03-session-review-piano-roll-region-wiring.md) ·
-  [closer receipt](docs/reports/2026-09-03-closer-piano-roll-region-wiring.md) ·
+## WARM START — 2026-09-07 — recon closed, specs written, four gates await Brandon
+- Situation: recon done, specs written, no code touched.
+- Last state: nine docs in docs/mapdocs/, review filed.
+- Next move: Brandon commits the working tree, rules the four gates in finish-plan.md, then
+  L1 spawns off SPEC-cleanup.md.
+- Links: [finish-plan.md](docs/mapdocs/finish-plan.md) ·
+  [HOWTO-read-this-repo.md](docs/mapdocs/HOWTO-read-this-repo.md) ·
+  [session review](docs/reports/2026-09-07-session-review-finish-scope.md) ·
   [TODO.md](TODO.md) · [SESSIONLOG.md](SESSIONLOG.md)
