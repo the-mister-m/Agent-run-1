@@ -243,6 +243,10 @@ const STYLE_TEXT = `
   --grid-dim: var(--text-dim, #93a1b8);
   --grid-accent: var(--accent, #34e5b4);
   --grid-warn: var(--warn, #ff7a1a);
+  --grid-label: var(--sp-37);
+  --grid-lead: calc(var(--grid-label) + var(--sp-1));
+  --grid-pad: var(--sp-2);
+  --grid-bars: 1;
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
   gap: var(--sp-3);
@@ -297,22 +301,30 @@ const STYLE_TEXT = `
   background: var(--grid-bg);
   border: var(--bw) solid var(--grid-line);
   border-radius: var(--r-ctl);
-  padding: var(--sp-2);
-  overflow: var(--ov-hidden);
+  padding: var(--grid-pad);
+  overflow-x: var(--ov-auto);
+  overflow-y: var(--ov-hidden);
 }
 
 /* Ruler + every lane row share this beat-group layout so a triplet lane's cells and a 16th
    lane's cells always land on the same beat boundaries — §13.2: "not two grid
    implementations." Nesting does the alignment; no per-step pixel math is needed. */
+/* one bar = the room beside the label; --grid-bars bars scroll sideways, label pinned */
 .cbdaw-grid__row {
   display: var(--disp-flex);
   align-items: var(--align-stretch);
   gap: var(--sp-1);
+  flex: var(--flex-0-0-auto);
+  width: calc(var(--grid-lead) + (var(--pct-100) - var(--grid-lead)) * var(--grid-bars));
 }
 .cbdaw-grid__row-label {
   flex: var(--flex-0-0-auto);
-  width: var(--sp-37);
-  min-width: var(--sp-37);
+  width: var(--grid-label);
+  min-width: var(--grid-label);
+  position: var(--pos-sticky);
+  left: var(--sp-0);
+  z-index: var(--z-raise-2);
+  background: var(--grid-bg);
   display: var(--disp-flex);
   align-items: var(--align-center);
   gap: var(--sp-2);
@@ -323,19 +335,8 @@ const STYLE_TEXT = `
   white-space: var(--ws-nowrap);
   text-overflow: var(--to-ellipsis);
 }
-.cbdaw-grid[data-variant="compact"] .cbdaw-grid__row-label { width: var(--sp-23); min-width: var(--sp-23); font-size: var(--fs-tiny); }
-.cbdaw-grid__row-label button {
-  font: var(--font-inherit);
-  font-size: var(--fs-tiny);
-  line-height: var(--lh-none);
-  color: var(--grid-dim);
-  background: var(--color-transparent);
-  border: var(--bw) solid var(--grid-line);
-  border-radius: var(--r-sm);
-  padding: var(--sp-hair) var(--sp-1h);
-  cursor: var(--cur-pointer);
-}
-.cbdaw-grid__row-label button[aria-pressed="true"] { color: var(--grid-accent); border-color: var(--grid-accent); }
+.cbdaw-grid[data-variant="compact"] { --grid-label: var(--sp-23); }
+.cbdaw-grid[data-variant="compact"] .cbdaw-grid__row-label { font-size: var(--fs-tiny); }
 
 .cbdaw-grid__beats {
   flex: var(--flex-1-1-auto);
@@ -593,6 +594,7 @@ export default class StepGrid {
         steps: l.steps.slice(),
       })),
     };
+    this._syncRulerToLanes();
     if (this.mounted) this._renderGrid();
     return true;
   }
@@ -600,6 +602,7 @@ export default class StepGrid {
   /** Replaces the pattern with an empty one `bars` long. */
   resetPattern(bars) {
     this._pattern = makePattern(bars, this._clock.timeSignature.top, DEFAULT_DIVISION);
+    this._syncRulerToLanes();
     if (this.mounted) this._renderGrid();
     return this;
   }
@@ -643,7 +646,10 @@ export default class StepGrid {
     const top = this._clock.timeSignature.top;
     lane.steps = resizeLaneSteps(lane.steps, this._pattern.bars, top, next);
     lane.division = next;
-    if (this.mounted) this._renderLane(laneIndex);
+    if (this.mounted) {
+      this._renderLane(laneIndex);
+      this._syncToolbarReadouts();
+    }
   }
 
   /** Convenience for the common case (and the DONE-CHECK's "switch to triplets" test): sets
@@ -652,6 +658,18 @@ export default class StepGrid {
   setDivisionAll(division) {
     this.setRulerDivision(division);
     for (let i = 0; i < this._pattern.lanes.length; i++) this.setLaneDivision(i, division);
+    if (this.mounted) this._syncToolbarReadouts();
+  }
+
+  /** The toolbar Triplet toggle's state: true only when every lane is in triplets. */
+  get triplet() {
+    const lanes = this._pattern.lanes;
+    return lanes.length > 0 && lanes.every((l) => l.division === TRIPLET_DIVISION);
+  }
+
+  /** Points the ruler at the toggle's state, straight unless every lane is triplet. */
+  _syncRulerToLanes() {
+    this._rulerDivision = this.triplet ? TRIPLET_DIVISION : DEFAULT_DIVISION;
   }
 
   // =========================================================================================
@@ -780,6 +798,7 @@ export default class StepGrid {
   }
 
   _renderGrid() {
+    this.el?.style.setProperty('--grid-bars', String(this._pattern.bars));
     this._renderTimeSig();
     this._renderRuler();
     for (let i = 0; i < this._pattern.lanes.length; i++) this._renderLane(i);
@@ -875,37 +894,15 @@ export default class StepGrid {
       el.innerHTML = `
         <div class="cbdaw-grid__row-label">
           <span data-lane-name>Row ${index + 1}</span>
-          <button type="button" data-lane-act="division" aria-pressed="false">16</button>
         </div>
         <div class="cbdaw-grid__beats"></div>`;
       body.appendChild(el);
       row = { el, beats: el.querySelector('.cbdaw-grid__beats') };
       this.nodes.lanes[index] = row;
       this._addDom(el, 'pointerdown', (e) => this._onCellPointerDown(e, index));
-      // Reads `this._pattern.lanes[index]` FRESH on every click, rather than closing over
-      // the `lane` object captured above at first render. `setPattern()` replaces
-      // `this._pattern.lanes` with new lane objects wholesale (see `setPattern`, section 4)
-      // — and `capture.js` calls `setPattern()` on every live-projected note during
-      // recording — so a closure holding the object from mount time goes stale the moment
-      // a take is in progress. This listener is attached exactly once per lane row (this
-      // `if (!row)` branch), so it must never assume the object it can see today is the
-      // object it will need tomorrow; `index` (the lane's fixed position, §14.1) is the
-      // only thing safe to close over. Fixes receipt-beat-shell.md item 4 / OPEN DECISIONS
-      // item 6: the button silently no-op'd after any recording because it toggled off a
-      // frozen division value instead of the lane's real, current one.
-      this._addDom(el.querySelector('[data-lane-act="division"]'), 'click', (e) => {
-        e.stopPropagation();
-        const current = this._pattern.lanes[index];
-        if (!current) return;
-        const next = current.division === TRIPLET_DIVISION ? DEFAULT_DIVISION : TRIPLET_DIVISION;
-        this.setLaneDivision(index, next);
-      });
     }
 
     this._renderLaneLabel(index);
-    const divBtn = row.el.querySelector('[data-lane-act="division"]');
-    divBtn.textContent = lane.division === TRIPLET_DIVISION ? 'T' : String(lane.division);
-    divBtn.setAttribute('aria-pressed', String(lane.division === TRIPLET_DIVISION));
 
     // `bars` IS IN THE WIDTH, matching `_renderRuler()` group for group. The lane's own
     // `steps` array is already `bars * top * division` long (`stepsForLane`), `_onTick`
@@ -965,7 +962,7 @@ export default class StepGrid {
     const overlayBtn = this.nodes.toolbar?.querySelector('[data-act="overlay"]');
     if (overlayBtn) overlayBtn.setAttribute('aria-pressed', String(this._overlay === 'syllable'));
     const tripletBtn = this.nodes.toolbar?.querySelector('[data-act="triplet"]');
-    if (tripletBtn) tripletBtn.setAttribute('aria-pressed', String(this._rulerDivision === TRIPLET_DIVISION));
+    if (tripletBtn) tripletBtn.setAttribute('aria-pressed', String(this.triplet));
   }
 
   // =========================================================================================
@@ -1051,7 +1048,7 @@ export default class StepGrid {
     if (!act) return;
     switch (act) {
       case 'triplet':
-        this.setDivisionAll(this._rulerDivision === TRIPLET_DIVISION ? DEFAULT_DIVISION : TRIPLET_DIVISION);
+        this.setDivisionAll(this.triplet ? DEFAULT_DIVISION : TRIPLET_DIVISION);
         break;
       case 'overlay':
         this.overlay = this._overlay === 'syllable' ? 'none' : 'syllable';
@@ -1142,8 +1139,12 @@ export default class StepGrid {
     if (!(patternTicks > 0)) return;
     const local = (this._clock.positionTicks ?? 0) - this._originTick;
     const pos = mod(local, patternTicks);
-    const pct = (pos / patternTicks) * 100;
-    if (this.nodes.playhead) this.nodes.playhead.style.left = `${pct}%`;
+    // fraction of the whole row field, same width math as .cbdaw-grid__row
+    const span = (pos / patternTicks) * this._pattern.bars;
+    if (this.nodes.playhead) {
+      this.nodes.playhead.style.left =
+        `calc(var(--grid-pad) + var(--grid-lead) + (var(--pct-100) - var(--grid-pad) * 2 - var(--grid-lead)) * ${span})`;
+    }
 
     this._paintPlayingCells(pos, ts);
   }

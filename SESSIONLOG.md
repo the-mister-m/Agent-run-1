@@ -1995,3 +1995,38 @@ lines, `tools/patch-synth.html` new, one line appended to `src/ui/tokens.css`.
   (voice.unison); row 9 fails — a DAW track set to Wave Synth via `tracks.setInstrumentType`
   never mounts a live `.instrument` (checked to 3s). LINK:
   [2026-09-08-wave-synth-test-receipt.md](docs/reports/2026-09-08-wave-synth-test-receipt.md)
+- 2026-10-01 tool fixes Opus builder: five jobs from docs/handoffs/2026-10-01-tool-fixes-brief.md.
+  Voice shutoff: core/audio.js weights each voice by time (0 before start, 1 held, linear to 0
+  across its reported fade) and rebuilds the channel gain curve from those times — no upward
+  step left outside 5 ms steal fades (old code: 0.37-0.51 gain rise in 2 ms). Three synths:
+  earlier release wins, Stop reaches releases already scheduled in the future, overtone steals at the note's start, a future
+  release keeps the decay ramp. Keyboard labels ♯/♭/both/off; patch synth Controllers group;
+  step-grid triplet is one toolbar toggle; beat tool Clear. Waiting on Brandon: ears on
+  arpeggios in the DAW, and what `responseMs` should do now that it shapes nothing. LINK:
+  [2026-10-01-tool-fixes-receipt.md](docs/reports/2026-10-01-tool-fixes-receipt.md)
+- 2026-10-01 GoTo session agent (Opus 5.5), no closer per Brandon. Piano roll and step-grid
+  keep bar width at 100% zoom and scroll as regions grow or loop; step-grid label column
+  pinned and playhead on the row width math. Piano roll ruler gets song-bar tags. Arrangement
+  ruler reads `1 1.2 1.3 1.4 2`, labels padded off ticks, short beat ticks, bright bar
+  numbers; Brandon tuned heights himself. Comp-builder (handed over by agent-run-1-1e after
+  a read-only check): Comp Positions octave button, every drop re-stacks the column bottom to
+  top. Brandon ruled: own octave button, order by square, re-stack whole column. Waiting on
+  Brandon: ears on comp squares. LINK:
+  [2026-10-01-goto-session-receipt.md](docs/reports/2026-10-01-goto-session-receipt.md)
+- 2026-10-01 limiter test GoTo subagent (Opus 5.5), from docs/handoffs/2026-10-01-limiter-test-handoff.md.
+  No src/ or tools/ edits; Brandon's audio.js limiter edit untouched. Overtone gain row was a
+  test bug (its `_out` is the channel) — fixed in roll-render.html, now passes. Drum step
+  pattern through roll-scheduler fails voice leveling: ducks 14.7 ms early, 0.43 upward step
+  in play, 0.67 at Stop. DAW-style mix (new mix-render): drum + simple never clips off/now/old;
+  limiter does 0 dB reduction during music, only ~0.2 dB makeup gain. 4-lane stress clips on
+  the first downbeat with the limiter off (+1.50 dBFS) and on (+0.98 now, +0.22 old). The
+  −8.18 dB reading is the compressor's startup. Waiting on Brandon: keep or remove the master
+  limiter; drum-synth leveling. LINK:
+  [2026-10-01-limiter-test-receipt.md](docs/reports/2026-10-01-limiter-test-receipt.md)
+- 2026-10-01 GoTo session agent, late: master limiter located (`audio.js:403`, Sound Lab
+  switch only, default off; Brandon's uncommitted edit −0.5 dB / 5:1 / 10 ms). Drum synth
+  read and tested off the tool-fixes voice rules (drum-harness 14/7: 80 ms early duck, 0.43
+  step on free, 0.58 on Stop). Master and roll renders built, then handed to a GoTo Opus
+  subagent at Brandon's call via docs/handoffs/2026-10-01-limiter-test-handoff.md. Memory
+  warm start and CLAUDE.md map updated at Brandon's go, no closer. LINK:
+  [2026-10-01-goto-session-receipt.md](docs/reports/2026-10-01-goto-session-receipt.md) §6

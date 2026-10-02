@@ -123,6 +123,11 @@ const MAX_BARS = 8;
 const DEFAULT_OCTAVES = 2;
 const MAX_OCTAVES = 4;
 
+/** Sideways zoom. 1 fits the field to the roll; above 1 the boxes widen and the body scrolls. */
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 8;
+const ZOOM_STEP = 1.5;
+
 /** The octave the lowest drawn row sits in. §15.1: middle C (C4) is midi 60, so 3 puts the
  *  bottom of a two-octave roll at C3 and the top just under C5. This seat's number. */
 const DEFAULT_BASE_OCTAVE = 3;
@@ -205,6 +210,12 @@ function clampOctaves(n) {
   return Math.max(1, Math.min(MAX_OCTAVES, v));
 }
 
+function clampZoom(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return ZOOM_MIN;
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(v * 1000) / 1000));
+}
+
 function clampDivision(n) {
   const v = Math.round(Number(n));
   return SUPPORTED_DIVISIONS.includes(v) ? v : DEFAULT_DIVISION;
@@ -254,6 +265,8 @@ const STYLE_TEXT = `
   --roll-row-h: var(--sp-9);
   --roll-gutter: var(--sp-39);
   --roll-key-w: var(--sp-15);
+  --roll-zoom: 1;
+  --roll-bars: 1;
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
   gap: var(--sp-3);
@@ -315,27 +328,39 @@ const STYLE_TEXT = `
   border: var(--bw) solid var(--line);
   border-radius: var(--r-ctl);
   padding: var(--sp-2);
-  overflow: var(--ov-hidden);
+  overflow-x: var(--ov-auto);
+  overflow-y: var(--ov-hidden);
 }
 
 /* Every stripe below is one row: a gutter cell of fixed width and a field that fills the
    rest. The ruler uses the identical two-part shape, which is what keeps a note's percentage
-   position and a ruler cell's flex position on the same vertical line without pixel math. */
-.cbdaw-roll__stripe { display: var(--disp-flex); align-items: var(--align-stretch); }
+   position and a ruler cell's flex position on the same vertical line without pixel math.
+   The field is --roll-zoom times --roll-bars times the room beside the gutter; the gutter stays pinned. */
+.cbdaw-roll__stripe {
+  display: var(--disp-flex);
+  align-items: var(--align-stretch);
+  flex: var(--flex-0-0-auto);
+  width: calc(var(--roll-gutter) + (var(--pct-100) - var(--roll-gutter)) * var(--roll-zoom) * var(--roll-bars));
+}
 .cbdaw-roll__gutter {
   flex: var(--flex-0-0-auto);
   width: var(--roll-gutter);
   min-width: var(--roll-gutter);
   padding-right: var(--sp-2);
   box-sizing: var(--box-border-box);
+  position: var(--pos-sticky);
+  left: var(--sp-0);
+  z-index: var(--z-raise-2);
+  background: var(--bg);
 }
-.cbdaw-roll__field { flex: var(--flex-1-1-auto); position: var(--pos-relative); }
+.cbdaw-roll__field { flex: var(--flex-1-1-auto); min-width: var(--sp-0); position: var(--pos-relative); }
 
 /* ---- the ruler: §13.3's labels, drawn by beat group so triplets and 16ths land on the
    same beat boundaries — §13.2, "not two grid implementations." ---- */
 .cbdaw-roll__ruler { display: var(--disp-flex); gap: var(--sp-hair); }
 .cbdaw-roll__bar {
   flex: var(--flex-1-1-0);
+  min-width: var(--sp-0);
   display: var(--disp-flex);
   gap: var(--sp-hair);
   border-left: calc(var(--bw) * 2) solid var(--line);
@@ -344,6 +369,7 @@ const STYLE_TEXT = `
 .cbdaw-roll__bar:first-child { border-left: var(--none); padding-left: var(--sp-0); }
 .cbdaw-roll__beat {
   flex: var(--flex-1-1-0);
+  min-width: var(--sp-0);
   display: var(--disp-flex);
   gap: var(--sp-hair);
   border-left: var(--bw) solid var(--line);
@@ -352,6 +378,8 @@ const STYLE_TEXT = `
 .cbdaw-roll__beat:first-child { border-left: var(--none); padding-left: var(--sp-0); }
 .cbdaw-roll__ruler-cell {
   flex: var(--flex-1-1-0);
+  min-width: var(--sp-0);
+  overflow: var(--ov-hidden);
   text-align: var(--ta-center);
   font-size: var(--fs-md);
   font-variant-numeric: var(--num-tabular);
@@ -362,6 +390,13 @@ const STYLE_TEXT = `
 .cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell { font-size: var(--fs-base); padding: var(--sp-hair) 0; }
 .cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell { font-size: var(--fs-2xl); padding: var(--sp-2) 0; }
 .cbdaw-roll__ruler-cell[data-beat="true"] { color: var(--text); font-weight: var(--w-bold); }
+.cbdaw-roll__ruler-bar {
+  display: var(--disp-block);
+  font-size: var(--fs-tiny);
+  font-weight: var(--w-med);
+  color: var(--accent);
+  line-height: var(--lh-tight);
+}
 .cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
 /* SEAT QUESTION 4 — "note length must relate to the ruler." While a note is drawn or
    resized, the ruler cells it covers light up. The length is read in the counting labels the
@@ -388,6 +423,10 @@ const STYLE_TEXT = `
   box-sizing: var(--box-border-box);
   display: var(--disp-flex);
   align-items: var(--align-stretch);
+  position: var(--pos-sticky);
+  left: var(--sp-0);
+  z-index: var(--z-raise-2);
+  background: var(--bg);
 }
 .cbdaw-roll__key {
   flex: var(--flex-0-0-auto);
@@ -596,6 +635,7 @@ export default class PianoRoll {
 
     this._division = DEFAULT_DIVISION;
     this._bars = 1;
+    this._zoom = ZOOM_MIN;
     this._octaves = DEFAULT_OCTAVES;
     this._baseOctave = DEFAULT_BASE_OCTAVE;
 
@@ -764,7 +804,34 @@ export default class PianoRoll {
     const next = clampBars(n);
     if (next === this._bars) return;
     this._bars = next;
+    this._applyZoom();
     if (this.mounted) this._renderAll();
+  }
+
+  get zoom() { return this._zoom; }
+
+  /** Sideways zoom, ZOOM_MIN..ZOOM_MAX. The centre of the visible field stays put. */
+  set zoom(n) {
+    const next = clampZoom(n);
+    if (next === this._zoom) return;
+    const body = this.nodes.body;
+    const gutter = this._gutterWidth();
+    // centre of the visible field, as a fraction of the whole field
+    let centre = null;
+    if (body && body.scrollWidth - gutter > 0) {
+      centre = (body.scrollLeft + (body.clientWidth - gutter) / 2) / (body.scrollWidth - gutter);
+    }
+    this._zoom = next;
+    this._applyZoom();
+    if (body && centre !== null) {
+      body.scrollLeft = Math.max(0, centre * (body.scrollWidth - gutter) - (body.clientWidth - gutter) / 2);
+    }
+    if (this.mounted) this._syncToolbar();
+  }
+
+  _applyZoom() {
+    this.el?.style.setProperty('--roll-zoom', String(this._zoom));
+    this.el?.style.setProperty('--roll-bars', String(this._bars));
   }
 
   /** §6, pitch axis. */
@@ -838,7 +905,10 @@ export default class PianoRoll {
   /** Places this roll's bar 1 on the song timeline. Only the playhead reads it — note ticks
    *  stay region-local. */
   setOriginTick(tick) {
-    this._originTick = Number.isFinite(tick) ? tick : 0;
+    const next = Number.isFinite(tick) ? tick : 0;
+    if (next === this._originTick) return this;
+    this._originTick = next;
+    if (this.mounted) this._renderRuler();
     return this;
   }
 
@@ -970,6 +1040,14 @@ export default class PianoRoll {
     return s > 0 ? Math.round(tick / s) * s : tick;
   }
 
+  /** The start of the grid box holding `tick`, kept inside the field. */
+  _snapDown(tick) {
+    const s = this._stepTicks();
+    if (!(s > 0)) return tick;
+    const last = Math.max(0, this._totalTicks() - s);
+    return Math.min(last, Math.floor(tick / s) * s);
+  }
+
   /** §13.5's off-grid test, derived rather than stored: this file's notes carry §7's four
    *  fields and nothing else, so "off-grid" is a question about the tick, not a flag. */
   _isOffGrid(note) {
@@ -1068,6 +1146,11 @@ export default class PianoRoll {
       <button type="button" data-act="triplet" aria-pressed="false">even</button>
       <button type="button" data-act="overlay"></button>
       <span class="cbdaw-roll__readout" data-readout="duration"></span>
+      <span>
+        <button type="button" data-act="zoom-" title="Zoom out">−</button>
+        <span class="cbdaw-roll__readout" data-readout="zoom"></span>
+        <button type="button" data-act="zoom+" title="Zoom in">+</button>
+      </span>
       ${this.variant === 'expanded' ? `
         <span>
           <button type="button" data-act="bars-">-</button>
@@ -1136,6 +1219,7 @@ export default class PianoRoll {
     this.nodes.readout = toolbar.querySelector('[data-readout="duration"]');
 
     target.appendChild(root);
+    this._applyZoom();
     this._attachInteraction();
   }
 
@@ -1171,6 +1255,8 @@ export default class PianoRoll {
     ruler.textContent = '';
     const top = this._ts().top;
     const division = this._division;
+    // song bar of this roll's bar 1
+    const startBar = Math.round(this._originTick / ticksPerBar(this._ts())) + 1;
 
     for (let bar = 0; bar < this._bars; bar++) {
       const barEl = document.createElement('div');
@@ -1186,6 +1272,12 @@ export default class PianoRoll {
           cell.dataset.step = String(bar * this._stepsPerBar() + stepInBar);
           cell.textContent =
             this._rulerOverlay === 'syllable' || c === 0 ? stepLabel(stepInBar, division) : '';
+          if (b === 0 && c === 0) {
+            const barTag = document.createElement('span');
+            barTag.className = 'cbdaw-roll__ruler-bar';
+            barTag.textContent = String(startBar + bar);
+            cell.appendChild(barTag);
+          }
           group.appendChild(cell);
         }
         barEl.appendChild(group);
@@ -1397,6 +1489,12 @@ export default class PianoRoll {
     if (barsOut) barsOut.textContent = String(this._bars);
     const octOut = t.querySelector('[data-readout="octaves"]');
     if (octOut) octOut.textContent = String(this._octaves);
+    const zoomOut = t.querySelector('[data-readout="zoom"]');
+    if (zoomOut) zoomOut.textContent = `${Math.round(this._zoom * 100)}%`;
+    const zoomLess = t.querySelector('[data-act="zoom-"]');
+    if (zoomLess) zoomLess.disabled = this._zoom <= ZOOM_MIN;
+    const zoomMore = t.querySelector('[data-act="zoom+"]');
+    if (zoomMore) zoomMore.disabled = this._zoom >= ZOOM_MAX;
     this._syncDurationReadout();
   }
 
@@ -1506,8 +1604,13 @@ export default class PianoRoll {
     const host = this.nodes.rows;
     if (!host) return null;
     const r = host.getBoundingClientRect();
-    const gutter = this._rowEls[0]?.labelEl.getBoundingClientRect().width ?? 0;
+    const gutter = this._gutterWidth();
     return { left: r.left + gutter, width: r.width - gutter, top: r.top, height: r.height };
+  }
+
+  /** Width of the whole row gutter: key strip plus label. */
+  _gutterWidth() {
+    return this._rowEls[0]?.labelEl.parentElement.getBoundingClientRect().width ?? 0;
   }
 
   /** Row index under a client y, and the pitch it draws. */
@@ -1527,6 +1630,8 @@ export default class PianoRoll {
       this._previewOn(Number(keyEl.dataset.midi));
       return;
     }
+    // the rest of the gutter is not the field
+    if (e.target.closest('.cbdaw-roll__row-gutter')) return;
 
     const noteEl = e.target.closest('.cbdaw-roll__note');
     e.preventDefault();
@@ -1555,7 +1660,7 @@ export default class PianoRoll {
     // empty field: create, then keep dragging to set the length
     const row = this._rowAt(e.clientY);
     if (!row) return;
-    const note = this._createNote(this._snap(this._tickAt(e.clientX)), row.midi);
+    const note = this._createNote(this._snapDown(this._tickAt(e.clientX)), row.midi);
     if (!note) return;
     this._select(note);
     const refs = this._noteEls.get(note);
@@ -1696,6 +1801,8 @@ export default class PianoRoll {
       case 'bars+': this.bars = this._bars + 1; break;
       case 'oct-': this.octaves = this._octaves - 1; break;
       case 'oct+': this.octaves = this._octaves + 1; break;
+      case 'zoom-': this.zoom = this._zoom / ZOOM_STEP; break;
+      case 'zoom+': this.zoom = this._zoom * ZOOM_STEP; break;
       default: break;
     }
   }

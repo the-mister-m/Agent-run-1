@@ -189,64 +189,145 @@ function sweepRegistry() {
 // ---------------------------------------------------------------------------------------
 // 4a · SYNTH VOICE NORMALIZATION
 // ---------------------------------------------------------------------------------------
-// Channel gain scales with that channel's live voice count: gain(n) = n ** -exponent,
-// gain(0) = 1. A channel created without a synthVoiceId is skipped and holds gain 1.
-// Ducks are written instantly at the new voice's start time; recovery is smoothed.
+// Channel gain scales with that channel's weighted voice count: gain(n) = n ** -exponent
+// for n > 1, else 1. A channel created without a synthVoiceId is skipped and holds gain 1.
+// A voice weighs 0 before its start time, 1 while held, and falls linearly to 0 across
+// the fade it reports through voicePool.fade(). The whole future gain curve is rebuilt
+// from those times on every change: a duck lands as a step at the voice's start time,
+// recovery follows the fade.
 
 const normState = { mode: 'per-instrument', exponent: 0.8, responseMs: .05, voiceLayer: true };
+
+// voice -> { instrumentId, start, points }, in ctx seconds. `points` is null while held,
+// else [[t, w], ...]: weight 1 up to the first point, linear between points, 0 after the
+// last. Kept until free(), so a stolen voice still weighs across its 5 ms fade after the
+// governor stops counting it.
+const weights = new Map();
+
+// Linear pieces per unit of count change on one curve segment.
+const CURVE_STEPS_PER_VOICE = 8;
+const CURVE_STEPS_MAX = 32;
 
 function clamp(v, lo, hi) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : null;
 }
 
-/** Live voice count per normalizing channel id. Zero-filled so a silent channel is listed. */
-function synthVoiceCounts() {
-  const counts = new Map();
-  for (const id of channels.values()) if (id !== null) counts.set(id, 0);
-  if (counts.size === 0) return counts;
-  for (const meta of registry.values()) {
-    if (counts.has(meta.instrumentId)) counts.set(meta.instrumentId, counts.get(meta.instrumentId) + 1);
+/** One voice's weight at time t. `left` reads the instant just before t. */
+function weightAt(w, t, left = false) {
+  if (left ? t <= w.start : t < w.start) return 0;
+  const p = w.points;
+  if (p === null || t <= p[0][0]) return 1;
+  for (let i = 1; i < p.length; i++) {
+    const [t1, w1] = p[i];
+    if (t < t1) {
+      const [t0, w0] = p[i - 1];
+      return w0 + ((w1 - w0) * (t - t0)) / (t1 - t0);
+    }
   }
+  return 0;
+}
+
+/** Summed weight of `list` at time t. */
+function countAt(list, t, left = false) {
+  let n = 0;
+  for (const w of list) n += weightAt(w, t, left);
+  return n;
+}
+
+/** Channel gain for a weighted count. One voice or less holds 1. */
+function gainFor(n) {
+  if (normState.mode === 'off' || n <= 1) return 1;
+  return Math.pow(n, -normState.exponent);
+}
+
+/** Weight entries per normalizing channel id, plus every entry under 'all'. */
+function weightLists() {
+  const lists = new Map();
+  for (const id of channels.values()) if (id !== null) lists.set(id, []);
+  const all = [];
+  for (const w of weights.values()) {
+    const list = lists.get(w.instrumentId);
+    if (!list) continue;
+    list.push(w);
+    all.push(w);
+  }
+  return { lists, all };
+}
+
+/** Weighted voice count per normalizing channel id at time t. Zero-filled. */
+function synthVoiceCounts(t = ctx.currentTime) {
+  const counts = new Map();
+  const { lists } = weightLists();
+  for (const [id, list] of lists) counts.set(id, countAt(list, t));
   return counts;
 }
 
-/** Writes every normalizing channel to its target gain at `when`. No-op when none exist. */
-function renormalize(when) {
-  const counts = synthVoiceCounts();
-  if (counts.size === 0) return;
+/** Writes one channel's gain curve from `at` to the last breakpoint in `list`. */
+function writeCurve(param, list, at) {
+  const times = new Set();
+  for (const w of list) {
+    if (w.start > at) times.add(w.start);
+    if (w.points) for (const [t] of w.points) if (t > at) times.add(t);
+  }
+  const points = Array.from(times).sort((a, b) => a - b);
 
-  let total = 0;
-  for (const n of counts.values()) total += n;
+  param.cancelScheduledValues(at);
+  let prevT = at;
+  let prevN = countAt(list, at);
+  param.setValueAtTime(gainFor(prevN), at);
 
-  const at = Math.max(ctx.currentTime, Number.isFinite(when) ? when : 0);
-  const tau = Math.max(0.001, normState.responseMs / 1000);
-
-  for (const [node, id] of channels) {
-    if (id === null) continue;
-    let gain = 1;
-    if (normState.mode !== 'off') {
-      // master mode changes the count, never the node the gain lands on.
-      const n = normState.mode === 'master' ? total : counts.get(id);
-      if (n > 0) gain = Math.pow(n, -normState.exponent);
+  for (const t of points) {
+    const leftN = countAt(list, t, true);
+    if (gainFor(leftN) !== gainFor(prevN)) {
+      const steps = Math.min(CURVE_STEPS_MAX, Math.max(1, Math.ceil(Math.abs(leftN - prevN) * CURVE_STEPS_PER_VOICE)));
+      for (let k = 1; k <= steps; k++) {
+        const tk = prevT + ((t - prevT) * k) / steps;
+        const nk = k === steps ? leftN : prevN + ((leftN - prevN) * k) / steps;
+        param.linearRampToValueAtTime(gainFor(nk), tk);
+      }
     }
-    if (gain < node.gain.value) {
-      node.gain.cancelScheduledValues(at);
-      node.gain.setValueAtTime(gain, at);
-    } else {
-      node.gain.setTargetAtTime(gain, at, tau);
-    }
+    const rightN = countAt(list, t);
+    if (gainFor(rightN) !== gainFor(leftN)) param.setValueAtTime(gainFor(rightN), t);
+    prevT = t;
+    prevN = rightN;
   }
 }
 
-/** Per-voice output gain. Set once at creation, never written again. Skips the duck
- *  entirely when voiceLayer is off, so the node holds gain 1 for its whole life. */
-export function createVoiceOut(instrumentId, dest) {
+/** Rebuilds every normalizing channel's gain curve from now. No-op when none exist. */
+function renormalize() {
+  const { lists, all } = weightLists();
+  if (lists.size === 0) return;
+  const at = ctx.currentTime;
+  for (const [node, id] of channels) {
+    if (id === null) continue;
+    // master mode changes the count, never the node the gain lands on.
+    writeCurve(node.gain, normState.mode === 'master' ? all : lists.get(id), at);
+  }
+}
+
+let renormalizeQueued = false;
+
+/** Coalesces every change in one task into a single rebuild. */
+function queueRenormalize() {
+  if (renormalizeQueued) return;
+  renormalizeQueued = true;
+  queueMicrotask(() => {
+    renormalizeQueued = false;
+    renormalize();
+  });
+}
+
+/** Per-voice output gain. Set once at creation from the instrument's weighted voice count
+ *  at `atTime`, this voice included. Skips the duck entirely when voiceLayer is off, so the
+ *  node holds gain 1 for its whole life. */
+export function createVoiceOut(instrumentId, dest, atTime) {
   const node = ctx.createGain();
 
   if (normState.voiceLayer) {
+    const t = Number.isFinite(atTime) ? Math.max(atTime, ctx.currentTime) : ctx.currentTime;
     let n = 1;
-    for (const meta of registry.values()) if (meta.instrumentId === instrumentId) n++;
+    for (const w of weights.values()) if (w.instrumentId === instrumentId) n += weightAt(w, t);
     node.gain.value = Math.pow(n, -normState.exponent);
   }
 
@@ -275,6 +356,7 @@ export const synthVoiceNorm = {
     renormalize();
   },
 
+  /** Stored and reported only. The gain curve follows each voice's fade, not this value. */
   get responseMs() {
     return normState.responseMs;
   },
@@ -293,7 +375,8 @@ export const synthVoiceNorm = {
   },
 
   /** Snapshot for the dev box readout: [{ id, voices, gain }], one per normalizing
-   *  channel on this page. Empty array means no channel opted in. */
+   *  channel on this page. `voices` is the weighted count now. Empty array means no
+   *  channel opted in. */
   readout() {
     const counts = synthVoiceCounts();
     let total = 0;
@@ -324,10 +407,10 @@ export function setMasterLimiter(on) {
   if (on) {
     masterGain.disconnect(masterAnalyser);
     const node = ctx.createDynamicsCompressor();
-    node.threshold.value = -1;
+    node.threshold.value = -.5;
     node.knee.value = 0;
-    node.ratio.value = 20;
-    node.attack.value = 0.001;
+    node.ratio.value = 5;
+    node.attack.value = 0.01;
     node.release.value = 0.05;
     masterGain.connect(node);
     node.connect(masterAnalyser);
@@ -357,16 +440,40 @@ export const voicePool = {
       cost,
     });
     governorAllocatedWeight += cost;
-    renormalize(atTime);
+    const start = Number.isFinite(atTime) ? Math.max(atTime, ctx.currentTime) : ctx.currentTime;
+    weights.set(voice, { instrumentId, start, points: null });
+    queueRenormalize();
+  },
+
+  /** Called by a voice whenever it schedules its release or steal fade, in ctx seconds.
+   *  The weight keeps its curve up to startTime, then falls linearly from its value there
+   *  to 0 at endTime. Anything it had scheduled from startTime on is dropped. */
+  fade(voice, startTime, endTime) {
+    const w = weights.get(voice);
+    if (!w || !Number.isFinite(startTime) || !Number.isFinite(endTime)) return;
+    // Faded out before it started: it never sounds and never counts.
+    if (endTime <= w.start) {
+      weights.delete(voice);
+      queueRenormalize();
+      return;
+    }
+    const s = Math.max(startTime, w.start);
+    const e = Math.max(endTime, s + 0.0005);
+    const from = weightAt(w, s);
+    const kept = w.points ? w.points.filter(([t]) => t < s) : [];
+    w.points = [...kept, [s, from], [e, 0]];
+    queueRenormalize();
   },
 
   /** Called by Voice.free() once it has disconnected its own nodes (§11.1). */
   release(voice) {
+    const hadWeight = weights.delete(voice);
     const meta = registry.get(voice);
-    if (!meta) return;
-    governorAllocatedWeight = Math.max(0, governorAllocatedWeight - meta.cost);
-    registry.delete(voice);
-    renormalize();
+    if (meta) {
+      governorAllocatedWeight = Math.max(0, governorAllocatedWeight - meta.cost);
+      registry.delete(voice);
+    }
+    if (meta || hadWeight) queueRenormalize();
   },
 
   /** Returns the DAW's longest-released voice, or if none is releasing, its
@@ -413,7 +520,6 @@ export const voicePool = {
       if (meta) {
         governorAllocatedWeight = Math.max(0, governorAllocatedWeight - meta.cost);
         registry.delete(target);
-        renormalize();
       }
     }
 
@@ -566,6 +672,7 @@ export function dispose() {
   }
 
   registry.clear();
+  weights.clear();
   governorAllocatedWeight = 0;
 
   return ctx.close().then(() => ({ nodesDisconnected, listenersDropped }));

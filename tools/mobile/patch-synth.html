@@ -17,6 +17,8 @@
     core/audio.js ................ context, channel, unlock
     core/input.js ................ the note bus every surface emits on
     surfaces/keyboard.js ......... the 12-note keyboard that plays it
+    surfaces/scale-circle.js ..... the harmony circle, shown from the Controllers group
+    core/state.js ................ the scale store the circle reads
     instruments/patch-synth.js ... the instrument this page drives
     ui/shell.js .................. file menu, CPU meter, shared shell stylesheet
 -->
@@ -60,6 +62,8 @@
 
   .pt-keys__host > * { width: var(--pct-100); }
 
+  .pt-page .cbdaw-panel[hidden] { display: var(--disp-none); }
+
   .pt-note { font-size: var(--fs-base); line-height: var(--lh-base); color: var(--text-dim, #93a1b8); }
   .pt-note code { color: var(--accent, #34e5b4); font-family: var(--font-mono); }
   .pt-steps {
@@ -96,6 +100,8 @@ import { toolsForLayout, createFileMenu, createCpuMeter, acquireShellStyle, rele
 import { ctx, unlock, createChannel, releaseChannel } from '../../src/core/audio.js';
 import { input } from '../../src/core/input.js';
 import Keyboard from '../../src/surfaces/keyboard.js';
+import ScaleCircle from '../../src/surfaces/scale-circle.js';
+import { state } from '../../src/core/state.js';
 import PatchSynth from '../../src/instruments/patch-synth.js';
 
 // This page's layout.
@@ -148,6 +154,8 @@ class PatchSynthPage {
     this.channels = [];
     this.synth = null;
     this.keys = null;
+    this.circle = null;
+    this.panels = {};
     this.menu = null;
     this.cpu = null;
     this.hosts = {};
@@ -206,6 +214,8 @@ class PatchSynthPage {
       'drag from an out dot to an in dot to run a cable — click a cable to pull it'
     );
     patchPanel.el.appendChild(el('ol', 'pt-steps',
+      '<li><b>Pick what you play.</b> Controllers shows or hides the 12-note keyboard and ' +
+      'the harmony circle below the patch.</li>' +
       '<li><b>Add parts.</b> Sources, Modulators and Processors are open; Math is last and ' +
       'closed, and you never need it.</li>' +
       '<li><b>Wire them.</b> Grey dots are audio, green are control. Audio cannot go into a ' +
@@ -233,9 +243,23 @@ class PatchSynthPage {
     const keysHost = el('div', 'pt-keys__host');
     keysPanel.el.appendChild(keysHost);
     this.hosts.keys = keysHost;
+    this.panels.keys = keysPanel.el;
     root.appendChild(keysPanel.el);
 
     this.keys = new Keyboard(keysHost, input);
+
+    // ——— 4b · the harmony circle, hidden until Controllers shows it ————————————
+    const circlePanel = panel(
+      'Harmony Circle',
+      'inner ring plays the degree, outer ring plays the chord — the patch is monophonic, ' +
+      'so a chord sounds one note'
+    );
+    const circleHost = el('div', 'pt-circle__host');
+    circlePanel.el.appendChild(circleHost);
+    this.hosts.circle = circleHost;
+    this.panels.circle = circlePanel.el;
+    circlePanel.el.hidden = true;
+    root.appendChild(circlePanel.el);
 
     // ——— 5 · the live monitor ————————————————————————————————————————
     this._wireLiveMonitoring();
@@ -247,6 +271,12 @@ class PatchSynthPage {
     this.synth.mountExpanded(this.hosts.patch);
     this.keys.mountExpanded(this.hosts.keys);
 
+    // Controllers palette group: keyboard shown at load, circle hidden.
+    this.synth.setControllers([
+      { id: 'keyboard', label: 'Keyboard', active: true, onToggle: (on) => this._showKeys(on) },
+      { id: 'circle', label: 'Harmony Circle', active: false, onToggle: (on) => this._showCircle(on) },
+    ]);
+
     // Async gate. Nothing on this page awaits it; only sound waits.
     if (typeof this.synth.ready === 'function') {
       this.synth.ready().catch((err) => console.error('[patch-synth.html] ready() failed:', err));
@@ -257,6 +287,27 @@ class PatchSynthPage {
 
     this.mounted = true;
     return this;
+  }
+
+  // ——— CONTROLLERS ——————————————————————————————————————————————————————————
+  // A hidden surface is unmounted, so it holds no notes and hears no keys.
+
+  /** Shows or hides the 12-note keyboard panel. */
+  _showKeys(on) {
+    this.panels.keys.hidden = !on;
+    if (on) this.keys.mountExpanded(this.hosts.keys);
+    else this.keys.unmount();
+  }
+
+  /** Shows or hides the harmony circle panel. Built on first show. */
+  _showCircle(on) {
+    this.panels.circle.hidden = !on;
+    if (on) {
+      if (!this.circle) this.circle = new ScaleCircle(this.hosts.circle, input, state);
+      this.circle.mountExpanded(this.hosts.circle);
+    } else if (this.circle) {
+      this.circle.unmount();
+    }
   }
 
   // ——— LIVE MONITORING ————————————————————————————————————————————————————
@@ -308,6 +359,7 @@ class PatchSynthPage {
     report.notesReleased = input.allNotesOff();
 
     if (this.keys) { report.keys = this.keys.dispose(); this.keys = null; }
+    if (this.circle) { report.circle = this.circle.dispose(); this.circle = null; }
     if (this.synth) { report.synth = this.synth.dispose(); this.synth = null; }
 
     for (const ch of this.channels) releaseChannel(ch);

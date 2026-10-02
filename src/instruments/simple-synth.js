@@ -150,10 +150,10 @@ class Voice {
     return this._peak * clamp(this._envelope.sustain, 0, 1);
   }
 
-  /** The scheduled gain at absolute time t. Release branch while releasing, else
-   *  attack, decay, sustain. */
+  /** The scheduled gain at absolute time t. Release branch from the release start on,
+   *  else attack, decay, sustain. */
   _gainAt(t) {
-    if (this._state === 'releasing') {
+    if (this._state === 'releasing' && t >= this._releaseT0) {
       const start = this._releaseT0;
       const end = Math.max(start + this._envelope.release, start + 0.001);
       if (t <= start) return this._releaseFrom;
@@ -219,21 +219,34 @@ class Voice {
       this._scheduleAttackDecay(now, this.gain.gain.value);
     } else if (this._state === 'releasing') {
       // A release in flight re-aims at the new release time, anchored to _releaseT0.
-      this._scheduleRelease(now, this.gain.gain.value);
+      const from = Math.max(now, this._releaseT0);
+      this._scheduleRelease(from, from > now ? this._gainAt(from) : this.gain.gain.value);
     }
   }
 
-  /** Starts the release stage. The voice frees itself when the ramp completes. */
+  /** Starts the release stage. The voice frees itself when the ramp completes.
+   *  An earlier release replaces a later scheduled one; a later one is ignored. */
   release(atTime) {
     if (this._state === 'free' || this._state === 'stealing') return;
-    const t0 = atTime ?? this.ctx.currentTime;
-    // Read before the state moves to 'releasing'.
-    const currentVal = t0 > this.ctx.currentTime ? this._gainAt(t0) : this.gain.gain.value;
+    const now = this.ctx.currentTime;
+    const t0 = Math.max(atTime ?? now, now);
+    if (this._state === 'releasing' && t0 >= this._releaseT0) return;
+    // Read before _releaseT0 moves.
+    const currentVal = t0 > now ? this._gainAt(t0) : this.gain.gain.value;
 
     this._clearTimers();
     this._state = 'releasing';
     this._releaseT0 = t0;
     this._scheduleRelease(t0, currentVal);
+  }
+
+  /** Cancels automation from t and pins the gain to value there. A future t keeps the
+   *  ramp in flight by ramping to value instead of stepping. */
+  _anchor(t, value) {
+    const g = this.gain.gain;
+    g.cancelScheduledValues(t);
+    if (t > this.ctx.currentTime) g.linearRampToValueAtTime(value, t);
+    else g.setValueAtTime(value, t);
   }
 
   /** Writes the release ramp, anchored to _releaseT0, and re-arms the self-free timer. */
@@ -245,9 +258,9 @@ class Voice {
     // Where the release ramp starts, read back by _gainAt.
     this._releaseFrom = fromValue;
 
-    g.cancelScheduledValues(fromTime);
-    g.setValueAtTime(fromValue, fromTime);
+    this._anchor(fromTime, fromValue);
     g.linearRampToValueAtTime(0, end);
+    voicePool.fade(this, this._releaseT0, end);
 
     if (this._freeTimer) {
       clearTimeout(this._freeTimer);
@@ -260,18 +273,18 @@ class Voice {
   /** Forced release: linear fade to 0 over 5ms, then free(). */
   steal(atTime) {
     if (this._state === 'free') return;
-    const t0 = atTime ?? this.ctx.currentTime;
+    const now = this.ctx.currentTime;
+    const t0 = Math.max(atTime ?? now, now);
     // Read before the state moves to 'stealing'.
-    const currentVal = t0 > this.ctx.currentTime ? this._gainAt(t0) : this.gain.gain.value;
+    const currentVal = t0 > now ? this._gainAt(t0) : this.gain.gain.value;
 
     this._clearTimers();
     this._state = 'stealing';
-    this.gain.gain.cancelScheduledValues(t0);
-    this.gain.gain.setValueAtTime(currentVal, t0);
+    this._anchor(t0, currentVal);
     this.gain.gain.linearRampToValueAtTime(0, t0 + 0.005);
+    voicePool.fade(this, t0, t0 + 0.005);
 
-    const nowWall = this.ctx.currentTime;
-    const freeMs = Math.max(0, (t0 + 0.005 - nowWall) * 1000) + 5;
+    const freeMs = Math.max(0, (t0 + 0.005 - now) * 1000) + 5;
     this._freeTimer = setTimeout(() => this.free(), freeMs);
   }
 
@@ -428,7 +441,7 @@ export default class SimpleSynth {
       }
     }
 
-    const voice = new Voice(this.ctx, createVoiceOut(SimpleSynth.id, this._mixGain), cost);
+    const voice = new Voice(this.ctx, createVoiceOut(SimpleSynth.id, this._mixGain, t0), cost);
     voice.onFree = () => {
       this._voices.delete(voice);
       const set = this._noteToVoices.get(note);
@@ -460,7 +473,8 @@ export default class SimpleSynth {
     const set = this._noteToVoices.get(note);
     if (!set) return;
     const t0 = atTime ?? this.ctx.currentTime;
-    for (const voice of Array.from(set)) voice.release(t0);
+    // A voice already releasing keeps its own release.
+    for (const voice of Array.from(set)) if (voice.state !== 'releasing') voice.release(t0);
   }
 
   allNotesOff() {

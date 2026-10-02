@@ -2,9 +2,17 @@ import { input as sharedInput, DEFAULT_VELOCITY } from '../core/input.js';
 
 const BASE_NOTE = 60;
 const BLACK_PC = new Set([1, 3, 6, 8, 10]);
-const OVERLAYS = ['none', 'letter', 'number', 'solfege'];
+const OVERLAYS = ['sharp', 'flat', 'both', 'off'];
+const DEFAULT_OVERLAY = 'sharp';
+
+// older overlay values still accepted by the setter
+const OVERLAY_ALIASES = { letter: 'sharp', none: 'off' };
+
+// button text per overlay
+const OVERLAY_TEXT = { sharp: '♯', flat: '♭', both: 'both', off: 'off' };
 
 const PLACEHOLDER_LETTERS = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+const FLAT_LETTERS = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
 
 const WHITE_KEYS = [
   'KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH',
@@ -52,15 +60,18 @@ export function qwertyLayoutFor(positionShift) {
   return { white, black };
 }
 
-// the label string for one key, or null
+// the label string for one key, or null; 'both' stacks a black key's two names
 function labelFor(pitchClass, overlay) {
   switch (overlay) {
-    case 'letter':
+    case 'sharp':
       return PLACEHOLDER_LETTERS[pitchClass];
-    case 'number':
-    case 'solfege':
-      return null;
-    case 'none':
+    case 'flat':
+      return FLAT_LETTERS[pitchClass];
+    case 'both':
+      return BLACK_PC.has(pitchClass)
+        ? `${PLACEHOLDER_LETTERS[pitchClass]}\n${FLAT_LETTERS[pitchClass]}`
+        : PLACEHOLDER_LETTERS[pitchClass];
+    case 'off':
     default:
       return null;
   }
@@ -167,7 +178,11 @@ const STYLE_TEXT = `
   color: var(--kbd-text);
   font-variant-numeric: var(--num-tabular);
 }
-.cbdaw-kbd__seam { color: var(--warn, #ff7a1a); font-size: var(--fs-base); }
+.cbdaw-kbd__label {
+  white-space: var(--ws-prewrap);
+  text-align: var(--ta-center);
+  line-height: var(--lh-tight);
+}
 `;
 
 // add the shared stylesheet
@@ -199,7 +214,7 @@ export default class Keyboard {
     this.defaultTarget = el;
     this.variant = 'expanded';
 
-    this._overlay = 'letter';
+    this._overlay = DEFAULT_OVERLAY;
 
     this.pointerNotes = new Map();
     this.keyNoteRefs = new Map();
@@ -208,7 +223,7 @@ export default class Keyboard {
     this.qwerty = buildQwertyMap(this.input.positionShift);
 
     this.nodes = { keys: null, controls: null, octaveReadout: null, positionReadout: null,
-                   overlayButton: null, seam: null };
+                   overlayButton: null };
     this.keyEls = [];
     this.domListeners = [];
     this.busUnsubs = [];
@@ -232,8 +247,9 @@ export default class Keyboard {
   }
   // change the label overlay
   set overlay(value) {
-    if (!OVERLAYS.includes(value)) return;
-    this._overlay = value;
+    const next = OVERLAY_ALIASES[value] ?? value;
+    if (!OVERLAYS.includes(next)) return;
+    this._overlay = next;
     if (this.mounted) this._renderLabels();
   }
 
@@ -272,7 +288,7 @@ export default class Keyboard {
     this.el = null;
     this.keyEls = [];
     this.nodes = { keys: null, controls: null, octaveReadout: null, positionReadout: null,
-                   overlayButton: null, seam: null };
+                   overlayButton: null };
     this.litCounts.clear();
     this.mounted = false;
     releaseStyle();
@@ -372,10 +388,7 @@ export default class Keyboard {
       const text = labelFor(pc, this._overlay);
       key.firstChild.textContent = text ?? '';
     }
-    if (this.nodes.seam) {
-      const pending = this._overlay === 'number' || this._overlay === 'solfege';
-      this.nodes.seam.textContent = pending ? 'labels pending theory/scale.js (P3)' : '';
-    }
+    if (this.nodes.overlayButton) this.nodes.overlayButton.textContent = OVERLAY_TEXT[this._overlay];
   }
 
   // draw the octave, position and overlay bar
@@ -394,15 +407,13 @@ export default class Keyboard {
         <button type="button" data-act="pos+" aria-label="position up">+</button>
       </span>
       <span class="cbdaw-kbd__group">labels
-        <button type="button" data-act="overlay" data-overlay-button>letter</button>
-      </span>
-      <span class="cbdaw-kbd__seam"></span>`;
+        <button type="button" data-act="overlay" data-overlay-button aria-label="key labels">♯</button>
+      </span>`;
 
     this.nodes.controls = bar;
     this.nodes.octaveReadout = bar.querySelector('[data-readout="octave"]');
     this.nodes.positionReadout = bar.querySelector('[data-readout="position"]');
     this.nodes.overlayButton = bar.querySelector('[data-overlay-button]');
-    this.nodes.seam = bar.querySelector('.cbdaw-kbd__seam');
     root.appendChild(bar);
     this._renderReadouts();
     this._renderLabels();
@@ -415,7 +426,7 @@ export default class Keyboard {
     this.nodes.octaveReadout.textContent = oct > 0 ? `+${oct}` : String(oct);
     this.nodes.positionReadout.textContent =
       PLACEHOLDER_LETTERS[normalizePc(this.input.positionShift)];
-    this.nodes.overlayButton.textContent = this._overlay;
+    this.nodes.overlayButton.textContent = OVERLAY_TEXT[this._overlay];
   }
 
   // light the key for a sounding note

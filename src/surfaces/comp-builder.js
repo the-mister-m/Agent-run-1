@@ -32,6 +32,7 @@
 import {
   spellingOf,
   spellingOfPc,
+  midiOf,
 } from '../theory/scale.js';
 
 import {
@@ -69,6 +70,9 @@ const DEFAULT_DEGREES = Object.freeze([0, 4, 5, 3, 1]);
 const BASE_OCTAVE = 4;
 const OCTAVE_MIN = 1;
 const OCTAVE_MAX = 7;
+
+/** Highest midi a comp square may hold. */
+const MIDI_MAX = 127;
 
 /** How far a +/- may bend one tone before the control stops. Two semitones each way is
  *  `scale.js`'s own DEGREE_CLAMP, reused so the two +/- controls on this page behave alike. */
@@ -298,6 +302,8 @@ export default class CompBuilder {
     this.el = null;
     this.mounted = false;
     this.octave = BASE_OCTAVE;
+    /** Comp Positions floor octave — the bottom square's range. */
+    this.compOctave = BASE_OCTAVE;
 
     this.player = null;
     this.held = new Set();
@@ -345,6 +351,20 @@ export default class CompBuilder {
     if (!Number.isFinite(next) || next === this.octave) return this;
     this._releaseAll();
     this.octave = next;
+    if (this.mounted) this._render();
+    return this;
+  }
+
+  /** Comp Positions floor octave. Clamped; shifts every placed comp note by the same octaves. */
+  setCompOctave(n) {
+    const next = Math.min(OCTAVE_MAX, Math.max(OCTAVE_MIN, Math.trunc(n)));
+    if (!Number.isFinite(next) || next === this.compOctave) return this;
+    this._releaseAll();
+    const shift = (next - this.compOctave) * 12;
+    this.compOctave = next;
+    for (const slot of this.slots) {
+      slot.comp = slot.comp.map((m) => (m === null ? null : Math.min(MIDI_MAX, Math.max(0, m + shift))));
+    }
     if (this.mounted) this._render();
     return this;
   }
@@ -467,6 +487,20 @@ export default class CompBuilder {
       next[rows - 1 - k] = slot.comp[slot.comp.length - 1 - k];
     }
     slot.comp = next;
+  }
+
+  /** Re-octaves a comp column bottom to top: lowest filled square = its pitch class's first
+   *  note at or above the comp floor; each filled square above = next one above the square below. */
+  _stackComp(slot) {
+    let below = midiOf(0, this.compOctave) - 1;
+    for (let r = slot.comp.length - 1; r >= 0; r--) {
+      const m = slot.comp[r];
+      if (m === null) continue;
+      let next = below + 1 + mod(mod(m, 12) - (below + 1), 12);
+      while (next > MIDI_MAX) next -= 12;
+      slot.comp[r] = next;
+      below = next;
+    }
   }
 
   /**
@@ -681,35 +715,40 @@ export default class CompBuilder {
     });
   }
 
-  /** The floor stepper. Sets `this.octave`, which `voicing()` reads for every slot. */
-  _renderFloor(host) {
+  /** Octave stepper. Default: `this.octave`, which `voicing()` reads for every slot. */
+  _renderFloor(host, {
+    text = 'Lowest note sits in octave',
+    aria = 'lowest octave',
+    value: current = this.octave,
+    set = (n) => this.setOctave(n),
+  } = {}) {
     const row = document.createElement('div');
     row.className = 'cb-floor';
 
     const label = document.createElement('span');
     label.className = 'cb-floor__label';
-    label.textContent = 'Lowest note sits in octave';
+    label.textContent = text;
     row.appendChild(label);
 
     const down = document.createElement('button');
     down.type = 'button';
     down.textContent = '−';
-    down.disabled = this.octave <= OCTAVE_MIN;
-    down.setAttribute('aria-label', 'lowest octave down');
-    this._listen(down, 'click', () => this.setOctave(this.octave - 1));
+    down.disabled = current <= OCTAVE_MIN;
+    down.setAttribute('aria-label', `${aria} down`);
+    this._listen(down, 'click', () => set(current - 1));
     row.appendChild(down);
 
     const value = document.createElement('span');
     value.className = 'cb-floor__value';
-    value.textContent = String(this.octave);
+    value.textContent = String(current);
     row.appendChild(value);
 
     const up = document.createElement('button');
     up.type = 'button';
     up.textContent = '+';
-    up.disabled = this.octave >= OCTAVE_MAX;
-    up.setAttribute('aria-label', 'lowest octave up');
-    this._listen(up, 'click', () => this.setOctave(this.octave + 1));
+    up.disabled = current >= OCTAVE_MAX;
+    up.setAttribute('aria-label', `${aria} up`);
+    this._listen(up, 'click', () => set(current + 1));
     row.appendChild(up);
 
     host.appendChild(row);
@@ -793,6 +832,14 @@ export default class CompBuilder {
     host.textContent = '';
     const scale = this.scale;
 
+    // comp floor stepper
+    this._renderFloor(host, {
+      text: 'Bottom square sits in octave',
+      aria: 'comp octave',
+      value: this.compOctave,
+      set: (n) => this.setCompOctave(n),
+    });
+
     const cols = document.createElement('div');
     cols.className = 'cb-cols';
 
@@ -835,6 +882,7 @@ export default class CompBuilder {
           const n = Number(raw);
           if (!Number.isFinite(n)) return;
           slot.comp[r] = n;
+          this._stackComp(slot);
           this._render();
         });
 

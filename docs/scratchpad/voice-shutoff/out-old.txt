@@ -1,0 +1,86 @@
+
+# simple: scheduled arpeggio
+FAIL  simple arpeggio: channel gain has no upward step outside steal fades  — instant rise 0.0000, largest rise in 2 ms 0.3680 at +1.2800s, largest drop 0.4257, rise in 2 ms inside a 5 ms steal fade 0.0000
+PASS  simple arpeggio: weighted count returns to 0  — count 0
+PASS  simple arpeggio: every voice freed  — 0 left
+PASS  simple arpeggio: channel gain back to 1  — gain 1.0000
+
+# simple: re-struck chord
+FAIL  simple re-struck chord: channel gain has no upward step outside steal fades  — instant rise 0.0001, largest rise in 2 ms 0.5056 at +1.4050s, rise in 2 ms inside a 5 ms steal fade 0.0000
+PASS  simple re-struck chord: weighted count returns to 0  — count 0
+PASS  simple re-struck chord: every voice freed  — 0 left
+
+# simple: Stop cuts a pre-scheduled release
+PASS  simple Stop: envelopes reach 0 one release after Stop  — max env 0.0000 at Stop+0.31s (note was scheduled to 2s)
+PASS  simple Stop: voices freed before their old scheduled release  — 0 left at Stop+0.4s
+PASS  simple Stop: weighted count 0  — count 0
+
+# simple: short note keeps its decay ramp
+FAIL  simple short note: envelope has no step through decay into release  — largest rise 0.0000, largest drop 0.0216, env at noteOff 0.7784
+
+# simple: repeated pitch
+PASS  simple repeated pitch: first voice still sounding up to the new note's start  — first env 0.5600 at +0.17s (new note at +0.2s)
+FAIL  simple repeated pitch: first voice's release not pushed back  — first env 0.0806 at +1.12s (its release ends at +1.1s or sooner)
+PASS  simple repeated pitch: weighted count returns to 0  — count 0
+
+# simple: per-voice gain at birth
+skip (new API only)
+
+# overtone: scheduled arpeggio
+FAIL  overtone arpeggio: channel gain has no upward step outside steal fades  — instant rise 0.0000, largest rise in 2 ms 0.3680 at +1.1650s, largest drop 0.4257, rise in 2 ms inside a 5 ms steal fade 0.0000
+PASS  overtone arpeggio: weighted count returns to 0  — count 0
+PASS  overtone arpeggio: every voice freed  — 0 left
+PASS  overtone arpeggio: channel gain back to 1  — gain 1.0000
+
+# overtone: re-struck chord
+FAIL  overtone re-struck chord: channel gain has no upward step outside steal fades  — instant rise 0.0001, largest rise in 2 ms 0.5056 at +1.4150s, rise in 2 ms inside a 5 ms steal fade 0.0000
+PASS  overtone re-struck chord: weighted count returns to 0  — count 0
+PASS  overtone re-struck chord: every voice freed  — 0 left
+
+# overtone: Stop cuts a pre-scheduled release
+FAIL  overtone Stop: envelopes reach 0 one release after Stop  — max env 0.5600 at Stop+0.31s (note was scheduled to 2s)
+FAIL  overtone Stop: voices freed before their old scheduled release  — 2 left at Stop+0.4s
+FAIL  overtone Stop: weighted count 0  — count 2
+
+# overtone: short note keeps its decay ramp
+FAIL  overtone short note: envelope has no step through decay into release  — largest rise 0.0000, largest drop 0.0216, env at noteOff 0.7784
+
+# overtone: repeated pitch
+FAIL  overtone repeated pitch: first voice still sounding up to the new note's start  — first env 0.0000 at +0.17s (new note at +0.2s)
+PASS  overtone repeated pitch: first voice's release not pushed back  — first env 0.0000 at +1.12s (its release ends at +1.1s or sooner)
+PASS  overtone repeated pitch: weighted count returns to 0  — count 0
+
+# overtone: per-voice gain at birth
+skip (new API only)
+
+# wave: scheduled arpeggio
+FAIL  wave arpeggio: channel gain has no upward step outside steal fades  — instant rise 0.0000, largest rise in 2 ms 0.3680 at +1.1550s, largest drop 0.4257, rise in 2 ms inside a 5 ms steal fade 0.0000
+PASS  wave arpeggio: weighted count returns to 0  — count 0
+PASS  wave arpeggio: every voice freed  — 0 left
+PASS  wave arpeggio: channel gain back to 1  — gain 1.0000
+
+# wave: re-struck chord
+FAIL  wave re-struck chord: channel gain has no upward step outside steal fades  — instant rise 0.0001, largest rise in 2 ms 0.5056 at +1.4050s, rise in 2 ms inside a 5 ms steal fade 0.0000
+PASS  wave re-struck chord: weighted count returns to 0  — count 0
+PASS  wave re-struck chord: every voice freed  — 0 left
+
+# wave: Stop cuts a pre-scheduled release
+FAIL  wave Stop: envelopes reach 0 one release after Stop  — max env 0.6000 at Stop+0.31s (note was scheduled to 2s)
+FAIL  wave Stop: voices freed before their old scheduled release  — 2 left at Stop+0.4s
+FAIL  wave Stop: weighted count 0  — count 2
+
+# wave: short note keeps its decay ramp
+FAIL  wave short note: envelope has no step through decay into release  — largest rise 0.0000, largest drop 0.0180, env at noteOff 0.7820
+
+# wave: repeated pitch
+PASS  wave repeated pitch: first voice still sounding up to the new note's start  — first env 0.5580 at +0.17s (new note at +0.2s)
+PASS  wave repeated pitch: first voice's release not pushed back  — first env 0.0000 at +1.12s (its release ends at +1.1s or sooner)
+PASS  wave repeated pitch: weighted count returns to 0  — count 0
+
+# wave: per-voice gain at birth
+skip (new API only)
+
+# overtone: steal of a releasing voice keeps the release weight
+skip (new API only)
+
+old: 25 pass, 17 fail

@@ -189,7 +189,7 @@ class Voice {
    *  value and not the one at `t`. Follows the same branch the automation took: release
    *  ramp while 'releasing', otherwise attack -> decay -> sustain. */
   _gainAt(t) {
-    if (this._state === 'releasing') {
+    if (this._state === 'releasing' && t >= this._releaseT0) {
       const start = this._releaseT0;
       const end = Math.max(start + this._env.release, start + 0.001);
       if (t <= start) return this._releaseFrom;
@@ -205,18 +205,29 @@ class Voice {
     return sustain;
   }
 
+  /** Cancels automation from t and pins the envelope to value there. A future t keeps the
+   *  ramp in flight by ramping to value instead of stepping. */
+  _anchor(t, value) {
+    const g = this.envGain.gain;
+    g.cancelScheduledValues(t);
+    if (t > this._ctx.currentTime) g.linearRampToValueAtTime(value, t);
+    else g.setValueAtTime(value, t);
+  }
+
+  /** An earlier release replaces a later scheduled one; a later one is ignored. */
   release(atTime) {
-    if (this._state === 'free' || this._state === 'releasing' || this._state === 'stealing') return;
+    if (this._state === 'free' || this._state === 'stealing') return;
     const ctx = this._ctx;
     const t = Math.max(atTime ?? ctx.currentTime, ctx.currentTime);
+    if (this._state === 'releasing' && t >= this._releaseT0) return;
     const g = this.envGain.gain;
-    // read before the state moves to 'releasing' — _gainAt branches on it
+    // read before _releaseT0 moves — _gainAt branches on it
     const from = t > ctx.currentTime ? this._gainAt(t) : g.value;
     this._releaseT0 = t;
     this._releaseFrom = from;
-    g.cancelScheduledValues(t);
-    g.setValueAtTime(from, t);
+    this._anchor(t, from);
     g.linearRampToValueAtTime(0, t + this._env.release);
+    voicePool.fade(this, t, t + this._env.release);
     this._state = 'releasing';
     clearTimeout(this._settleTimer);
     clearTimeout(this._releaseTimer);
@@ -237,9 +248,9 @@ class Voice {
     const g = this.envGain.gain;
     // read before the state moves to 'stealing' — _gainAt branches on it
     const from = t > ctx.currentTime ? this._gainAt(t) : g.value;
-    g.cancelScheduledValues(t);
-    g.setValueAtTime(from, t);
+    this._anchor(t, from);
     g.linearRampToValueAtTime(0, t + STEAL_FADE_S);
+    voicePool.fade(this, t, t + STEAL_FADE_S);
     this._state = 'stealing';
     clearTimeout(this._settleTimer);
     clearTimeout(this._releaseTimer);
@@ -376,13 +387,13 @@ export default class OvertoneSynth {
     // under the same note key.
     const existing = this._voicesByNote.get(note);
     if (existing && existing.state !== 'free' && existing.state !== 'stealing') {
-      existing.steal(this._ctx.currentTime);
+      existing.steal(t);
     }
 
     const cost = OvertoneSynth.VOICE_CPU_WEIGHT;
 
     const allocate = () => {
-      const voice = new Voice(this._ctx, createVoiceOut(OvertoneSynth.id, this._instrumentGain), cost, this._partials, this._env);
+      const voice = new Voice(this._ctx, createVoiceOut(OvertoneSynth.id, this._instrumentGain, t), cost, this._partials, this._env);
       voice.trigger(note, velocity, t);
       voicePool.register(voice, OvertoneSynth.id, t);
       this._allVoices.add(voice);
@@ -418,7 +429,7 @@ export default class OvertoneSynth {
     // No onFree registration is needed here: `target`'s own cleanup callback (dropping it
     // from _allVoices/_voicesByNote) was registered inside allocate() when it was first
     // allocated, and if it belongs to another instrument its cleanup is that instrument's.
-    target.steal(this._ctx.currentTime);
+    target.steal(t);
     if (!governor.request(cost)) {
       // still refused after the one retry §11.2 specifies (should not occur — steal()
       // drops voicePool.count by exactly one, synchronously, in a single-threaded
@@ -438,11 +449,7 @@ export default class OvertoneSynth {
   }
 
   allNotesOff() {
-    for (const voice of this._allVoices) {
-      if (voice.state !== 'free' && voice.state !== 'releasing' && voice.state !== 'stealing') {
-        voice.release(this._ctx.currentTime);
-      }
-    }
+    for (const voice of this._allVoices) voice.release(this._ctx.currentTime);
   }
 
   // ---- params (§11.3 envelope + §11.5 exact path list) -------------------------------

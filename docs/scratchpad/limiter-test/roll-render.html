@@ -1,0 +1,178 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Piano roll render</title>
+<script type="module">
+// Piano roll render — 2026-10-01 GoTo session. Throwaway.
+// The real clock + roll-scheduler + tracks + regions play a looped piano-roll region into one
+// synth on an OfflineAudioContext. setTimeout/setInterval run on ctx time: the render suspends
+// every 5 ms, fires due timers, and runs the clock's 25 ms interval.
+// Query: inst=simple|overtone|wave|drum · mode=audio|gain · lim=off|now
+//   drum plays a step-grid pattern region through schedulePattern (2026-10-01 handoff job 2).
+//   gain mode mutes the synth and feeds 1 into its channel, so the render IS the channel gain.
+const SR = 48000;
+const LEN = 6;
+const q = new URLSearchParams(location.search);
+const inst = q.get('inst') || 'simple';
+const mode = q.get('mode') || 'audio';
+const lim = q.get('lim') || 'off';
+
+let off = null;
+window.AudioContext = function () { off = new OfflineAudioContext(2, SR * LEN, SR); return off; };
+const now = () => (off ? off.currentTime : 0);
+const timers = [];
+let seq = 0;
+window.setTimeout = (fn, ms = 0) => { const id = ++seq; timers.push({ id, due: now() + ms / 1000, fn }); return id; };
+window.clearTimeout = (id) => { const i = timers.findIndex((t) => t.id === id); if (i !== -1) timers.splice(i, 1); };
+const intervals = [];
+window.setInterval = (fn, ms) => { const id = ++seq; intervals.push({ id, fn, every: ms / 1000, next: now() + ms / 1000 }); return id; };
+window.clearInterval = (id) => { const i = intervals.findIndex((t) => t.id === id); if (i !== -1) intervals.splice(i, 1); };
+
+const audio = await import('../../../src/core/audio.js');
+const { clock } = await import('../../../src/core/clock.js');
+const { createRollScheduler } = await import('../../../src/core/roll-scheduler.js');
+const tracksMod = await import('../../../src/core/tracks.js');
+const regionsMod = await import('../../../src/core/regions.js');
+const tracks = tracksMod.tracks ?? tracksMod.default;
+const regions = regionsMod.regions ?? regionsMod.default;
+const file = { simple: 'simple-synth', overtone: 'overtone-synth', wave: 'wave-synth', drum: 'drum-synth' }[inst];
+const Synth = (await import(`../../../src/instruments/${file}.js`)).default;
+const { ctx } = audio;
+
+if (lim === 'now') audio.setMasterLimiter(true);
+try { clock.metronome = false; } catch (e) { /* no metronome setter */ }
+
+// one track, one synth on its own normalizing channel, as strip.js builds it
+const channel = audio.createChannel(Synth.id);
+const synth = new Synth(ctx, channel);
+const track = tracks.add({ name: 'roll' });
+tracks.setInstrument(track.id, synth);
+
+if (mode === 'gain') {
+  if (synth._mixGain) synth._mixGain.gain.value = 0;
+  if (synth._instrumentGain) synth._instrumentGain.gain.value = 0;
+  if (synth._masterGain) synth._masterGain.gain.value = 0; // drum-synth sum bus
+  if (synth._out && synth._out !== channel) synth._out.gain.value = 0; // overtone's _out is the channel
+  const dc = ctx.createConstantSource();
+  dc.offset.value = 1;
+  dc.connect(channel);
+  dc.start(0);
+}
+
+// piano-roll region: 2 bars of 16th arpeggio + whole-bar 4-note chords, looped to 4 bars
+const S = 120; // ticks per 16th at PPQ 480
+const notes = [];
+const arp = [60, 64, 67, 72, 76, 72, 67, 64];
+for (let i = 0; i < 32; i++) notes.push({ tick: i * S, note: arp[i % 8], velocity: 1, length: S });
+for (const bar of [0, 1]) for (const n of [48, 55, 60, 64]) notes.push({ tick: bar * 16 * S, note: n, velocity: 1, length: 14 * S });
+// drum: 2-bar step pattern, 16ths — kick 1/3, snare 2/4, 8th hats, open hat, ride on 1, snare roll under ride in bar 2
+const steps = (on) => Array.from({ length: 32 }, (_, i) => (on(i) ? { v: 1 } : null));
+const pattern = { bars: 2, lanes: [
+  { piece: 0, division: 4, steps: steps((i) => i % 8 === 0) },
+  { piece: 1, division: 4, steps: steps((i) => i % 8 === 4 || i >= 24) },
+  { piece: 2, division: 4, steps: steps((i) => i % 2 === 0 && i % 16 !== 14) },
+  { piece: 3, division: 4, steps: steps((i) => i % 16 === 14) },
+  { piece: 7, division: 4, steps: steps((i) => i === 0 || i === 24) },
+] };
+regions.add({ laneId: track.id, startBar: 1, lengthBars: 4, notes: inst === 'drum' ? pattern : notes, loop: true, loopBars: 2 });
+
+createRollScheduler();
+const firstNoteAt = { t: null };
+const origOn = synth.noteOn.bind(synth);
+synth.noteOn = (n, v, t) => { if (firstNoteAt.t === null || t < firstNoteAt.t) firstNoteAt.t = t; return origOn(n, v, t); };
+
+clock.bpm = 120;
+clock.play();
+
+// stop the transport after 4 bars (8 s at 120 is too long; 4 bars = 8 s) -> stop at 4.5 s
+const STOP_AT = 4.5;
+let stopped = false;
+const redSeries = [];
+let maxReduction = 0, maxRedAt = 0, maxRedLate = 0, maxRedLateAt = 0, stoppedAt = null;
+const STEP = 0.005;
+for (let t = STEP; t < LEN - STEP; t += STEP) {
+  off.suspend(t).then(() => {
+    const tn = off.currentTime;
+    for (const iv of intervals) while (iv.next <= tn) { iv.next += iv.every; iv.fn(); }
+    for (;;) {
+      timers.sort((a, b) => a.due - b.due || a.id - b.id);
+      if (!timers.length || timers[0].due > tn) break;
+      timers.shift().fn();
+    }
+    if (!stopped && tn >= STOP_AT) { stopped = true; stoppedAt = tn; clock.stop(); }
+    const node = audio.getMasterLimiter();
+    if (node && node.reduction < maxReduction) { maxReduction = node.reduction; maxRedAt = tn; }
+    if (node && Math.abs(tn / 0.25 - Math.round(tn / 0.25)) < 1e-6) redSeries.push([+tn.toFixed(2), +node.reduction.toFixed(2)]);
+    if (node && tn >= 0.25 && node.reduction < maxRedLate) { maxRedLate = node.reduction; maxRedLateAt = tn; } // skip startup
+    off.resume();
+  });
+}
+
+const buf = await off.startRendering();
+const d0 = buf.getChannelData(0);
+// RMS per 100 ms window, both channels, linear
+function winRms(b) {
+  const W = SR / 10, out = [];
+  for (let s = 0; s + W <= b.length; s += W) {
+    let sum = 0;
+    for (let c = 0; c < b.numberOfChannels; c++) { const d = b.getChannelData(c); for (let i = s; i < s + W; i++) sum += d[i] * d[i]; }
+    out.push(Math.sqrt(sum / (W * b.numberOfChannels)));
+  }
+  return out;
+}
+const db = (x) => (x > 0 ? (20 * Math.log10(x)).toFixed(2) : '-inf');
+let result;
+if (mode === 'gain') {
+  let instUp = 0, instAt = 0, rise2 = 0, riseAt = 0, min = 1, firstDrop = null, playUp = 0, playUpAt = 0;
+  const stopI = Math.round(STOP_AT * SR);
+  const W = Math.round(0.002 * SR);
+  for (let i = 1; i < d0.length; i++) {
+    const up = d0[i] - d0[i - 1];
+    if (up > instUp) { instUp = up; instAt = i / SR; }
+    if (i < stopI && up > playUp) { playUp = up; playUpAt = i / SR; } // before Stop
+    if (firstDrop === null && up < -1e-5) firstDrop = i / SR;
+    if (d0[i] < min) min = d0[i];
+    if (i + W < d0.length) { const r = d0[i + W] - d0[i]; if (r > rise2) { rise2 = r; riseAt = i / SR; } }
+  }
+  result = {
+    inst, mode,
+    firstNoteAt: +(firstNoteAt.t ?? -1).toFixed(4),
+    duckLeadMs: firstDrop !== null && firstNoteAt.t !== null ? +((firstNoteAt.t - firstDrop) * 1000).toFixed(1) : null,
+    largestSampleRise: +instUp.toFixed(4), at: +instAt.toFixed(4),
+    largestRiseIn2ms: +rise2.toFixed(4), riseAt: +riseAt.toFixed(4),
+    largestSampleRiseBeforeStop: +playUp.toFixed(4), playUpAt: +playUpAt.toFixed(4),
+    minGain: +min.toFixed(4),
+    gainAtEnd: +d0[d0.length - 10].toFixed(4),
+    stoppedAt: stoppedAt === null ? null : +stoppedAt.toFixed(4),
+    voicesLeft: (synth._voices?.size ?? synth._voices?.length ?? synth._allVoices?.size ?? null),
+  };
+} else {
+  let peak = 0, over = 0, jump = 0, jumpAt = 0, sum = 0, count = 0;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < d.length; i++) {
+      const a = Math.abs(d[i]);
+      if (a > peak) peak = a;
+      if (a > 1) over++;
+      sum += d[i] * d[i]; count++;
+      if (i > 0) { const j = Math.abs(d[i] - d[i - 1]); if (j > jump) { jump = j; jumpAt = i / SR; } }
+    }
+  }
+  // tail after stop: loudest sample 50 ms past the stop, and when sound falls under -60 dB
+  const stopI = Math.round(STOP_AT * SR);
+  let afterStop = 0;
+  for (let i = stopI + Math.round(0.05 * SR); i < d0.length; i++) afterStop = Math.max(afterStop, Math.abs(d0[i]));
+  result = {
+    inst, mode, lim,
+    peak: +peak.toFixed(4), peakDb: db(peak), samplesOver1: over,
+    rmsDb: db(Math.sqrt(sum / count)),
+    largestSampleJump: +jump.toFixed(4), jumpAt: +jumpAt.toFixed(4),
+    loudestAfterStop50msDb: db(afterStop),
+    maxReductionDb: +maxReduction.toFixed(2), maxRedAt: +maxRedAt.toFixed(3),
+    maxReductionAfter250msDb: +maxRedLate.toFixed(2), maxRedLateAt: +maxRedLateAt.toFixed(3),
+    redSeries,
+    rms100: winRms(buf),
+  };
+}
+window.result = result;
+document.body.textContent = JSON.stringify(result);
+</script>

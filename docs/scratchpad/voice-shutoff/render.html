@@ -1,0 +1,62 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Voice shutoff render</title>
+<script type="module">
+// Real-engine check, job 1. core/audio.js is handed an OfflineAudioContext. The synth's own
+// sound is muted; a constant 1 feeds the normalizing channel, so the render IS the channel
+// gain curve. Voice free timers are held back: a freed voice already weighs 0.
+const SR = 48000;
+const LEN = 3;
+window.AudioContext = function () { return new OfflineAudioContext(1, SR * LEN, SR); };
+const realTimeout = window.setTimeout.bind(window);
+window.setTimeout = () => 0;
+
+const synthName = new URLSearchParams(location.search).get('synth') || 'simple-synth';
+const audio = await import('../../../src/core/audio.js');
+const Synth = (await import(`../../../src/instruments/${synthName}.js`)).default;
+
+const { ctx } = audio;
+const channel = audio.createChannel(Synth.id);
+const s = new Synth(ctx, channel);
+if (s._mixGain) s._mixGain.gain.value = 0;
+if (s._instrumentGain) s._instrumentGain.gain.value = 0;
+if (s._patch) s._patch.e1r = 0.3; else s.setParam('env.release', 0.3);
+
+const dc = ctx.createConstantSource();
+dc.offset.value = 1;
+dc.connect(channel);
+dc.start(0);
+
+const origin = 0.2;
+const pitches = [60, 64, 67, 72, 67, 64, 60, 64];
+pitches.forEach((note, i) => {
+  s.noteOn(note, 0.8, origin + i * 0.125);
+  s.noteOff(note, origin + i * 0.125 + 0.1);
+});
+await Promise.resolve();
+await new Promise((r) => realTimeout(r, 0));
+
+const buf = await ctx.startRendering();
+const d = buf.getChannelData(0);
+let instUp = 0, instAt = 0, rise2 = 0, riseAt = 0, min = 1;
+const W = Math.round(0.002 * SR);
+for (let i = 1; i < d.length; i++) {
+  const up = d[i] - d[i - 1];
+  if (up > instUp) { instUp = up; instAt = i / SR; }
+  if (d[i] < min) min = d[i];
+  if (i + W < d.length) {
+    const r = d[i + W] - d[i];
+    if (r > rise2) { rise2 = r; riseAt = i / SR; }
+  }
+}
+const at = (t) => d[Math.round(t * SR)];
+window.result = {
+  synth: synthName,
+  largestSampleRise: instUp, at: instAt - origin,
+  largestRiseIn2ms: rise2, riseAt: riseAt - origin,
+  minGain: min,
+  gainAtEnd: at(LEN - 0.01),
+  samples: [0.05, 0.3, 0.55, 0.8, 1.05, 1.3].map((t) => [t, +at(origin + t).toFixed(4)]),
+};
+document.body.textContent = JSON.stringify(window.result);
+</script>

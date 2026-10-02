@@ -2,7 +2,7 @@ import { clock as sharedClock, ticksPerBar, ticksPerBeat } from '../core/clock.j
 import { tracks as sharedTracks } from '../core/tracks.js';
 import { state as sharedState } from '../core/state.js';
 import { unlock } from '../core/audio.js';
-import StepGrid, { stepLabel } from '../surfaces/step-grid.js';
+import StepGrid from '../surfaces/step-grid.js';
 import Keyboard from '../surfaces/keyboard.js';
 import DiatonicKeys from '../surfaces/diatonic-keys.js';
 import ScaleCircle from '../surfaces/scale-circle.js';
@@ -56,6 +56,8 @@ const ZOOM_MAX = 8;
 const ZOOM_STEP = 1.25;
 // Below this much room per beat the ruler shows bar numbers only.
 const BEAT_LABEL_MIN_PX = 22;
+// two presses on one region inside this window count as a double press
+const DOUBLE_PRESS_MS = 400;
 
 function clampZoom(z) {
   const v = Number(z);
@@ -227,7 +229,7 @@ const STYLE_TEXT = `
 
 .cbdaw-arr__ruler {
   position: var(--pos-relative);
-  height: var(--sp-14);
+  height: var(--sp-12);
   background: var(--ruler-ground);
   box-sizing: var(--box-border-box);
   cursor: var(--cur-pointer);
@@ -260,28 +262,36 @@ const STYLE_TEXT = `
   background: var(--loop-region);
 }
 
+/* beat ticks: short marks along the bottom, clear of the labels */
 .cbdaw-arr__tick {
   position: var(--pos-absolute);
-  top: var(--sp-0);
+  top: var(--sp-5);
   bottom: var(--sp-0);
   width: var(--bw);
   background: var(--ruler-tick-beat);
 }
 
+/* bar ticks: full height */
 .cbdaw-arr__tick[data-bar="true"] {
+  top: var(--sp-0);
   background: var(--ruler-tick-bar);
 }
 
 .cbdaw-arr__label {
   position: var(--pos-absolute);
-  top: var(--sp-1);
+  top: var(--sp-5);
+  padding-left: var(--sp-2);
   font-size: var(--fs-micro);
   color: var(--text-dim);
+  opacity: var(--op-mid);
   white-space: var(--ws-nowrap);
 }
 
+/* bar numbers: bright and bold over dimmed beats */
 .cbdaw-arr__label[data-bar="true"] {
-  color: var(--ruler-tick-bar);
+  color: var(--text);
+  opacity: var(--op-full);
+  font-weight: var(--w-bold);
   font-size: var(--fs-xs);
 }
 
@@ -593,7 +603,9 @@ export default class Arrangement {
     this._unsubProject = null;
     this._blockDrag = null;
     this._loopDrag = null;
-    this._listeners = { select: new Set() };
+    this._listeners = { select: new Set(), open: new Set() };
+    // { id, at } of the last region press, null after a double press
+    this._lastPress = null;
     // the clock statechange handler, live only while mounted
     this._onClockState = null;
 
@@ -1221,8 +1233,8 @@ export default class Arrangement {
         beatLabel.className = 'cbdaw-arr__label';
         if (isBarStart) beatLabel.dataset.bar = 'true';
         beatLabel.style.left = left;
-        // Bar starts carry the bar number; the beats between carry the subdivision.
-        beatLabel.textContent = isBarStart ? String(bar) : stepLabel(beat, 1);
+        // bar starts: "2"; beats between: "2.2", "2.3"
+        beatLabel.textContent = isBarStart ? String(bar) : `${bar}.${beat + 1}`;
         ruler.appendChild(beatLabel);
       }
     }
@@ -1304,6 +1316,15 @@ export default class Arrangement {
     this._emit('select', id ? this._regions.get(id) : null);
   }
 
+  /** A second press on the same region inside DOUBLE_PRESS_MS emits 'open'. */
+  _noteRegionPress(id) {
+    const now = performance.now();
+    const last = this._lastPress;
+    const twice = !!last && last.id === id && now - last.at < DOUBLE_PRESS_MS;
+    this._lastPress = twice ? null : { id, at: now };
+    if (twice) this._emit('open', this._regions.get(id) || null);
+  }
+
   _paintSelection() {
     for (const lane of this._lanes.values()) {
       for (const el of lane.regionRow.querySelectorAll('.cbdaw-arr__region')) {
@@ -1355,7 +1376,10 @@ export default class Arrangement {
         this._beginLoopDrag(e, r.id);
       });
 
-      this._addDom(el, 'pointerdown', (e) => this._beginBlockDrag(e, r.id, 'move'));
+      this._addDom(el, 'pointerdown', (e) => {
+        this._beginBlockDrag(e, r.id, 'move');
+        this._noteRegionPress(r.id);
+      });
 
       lane.regionRow.appendChild(el);
       this._paintRegionBlock(el, r, barTicks);

@@ -1,0 +1,103 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Master limiter render</title>
+<script type="module">
+// Master limiter render — 2026-10-01 GoTo session. Throwaway.
+// core/audio.js gets an OfflineAudioContext. setTimeout runs on ctx time: the render
+// suspends every 5 ms and fires due timers, so voices free on time.
+// Query: lim=off|now|old · stack=N (copies of the band, each on its own channel)
+const SR = 48000;
+const LEN = 5;
+const q = new URLSearchParams(location.search);
+const lim = q.get('lim') || 'off';
+const stack = Number(q.get('stack') || 1);
+
+let off = null;
+window.AudioContext = function () { off = new OfflineAudioContext(2, SR * LEN, SR); return off; };
+const timers = [];
+let seq = 0;
+window.setTimeout = (fn, ms = 0) => { const id = ++seq; timers.push({ id, due: (off ? off.currentTime : 0) + ms / 1000, fn }); return id; };
+window.clearTimeout = (id) => { const i = timers.findIndex((t) => t.id === id); if (i !== -1) timers.splice(i, 1); };
+window.setInterval = () => 0;
+window.clearInterval = () => {};
+
+const audio = await import('../../../src/core/audio.js');
+const DrumSynth = (await import('../../../src/instruments/drum-synth.js')).default;
+const SimpleSynth = (await import('../../../src/instruments/simple-synth.js')).default;
+const { ctx } = audio;
+
+// limiter: settings as committed (old) vs working tree (now)
+if (lim !== 'off') {
+  audio.setMasterLimiter(true);
+  if (lim === 'old') {
+    const n = audio.getMasterLimiter();
+    n.threshold.value = -1; n.knee.value = 0; n.ratio.value = 20; n.attack.value = 0.001; n.release.value = 0.05;
+  }
+}
+
+// band: drums + simple-synth chords, 120 bpm, 4 bars
+const origin = 0.2;
+const LOOKAHEAD = 0.08;
+const events = [];
+for (let k = 0; k < stack; k++) {
+  const dCh = audio.createChannel(DrumSynth.id);
+  const sCh = audio.createChannel(SimpleSynth.id);
+  const drums = new DrumSynth(ctx, dCh);
+  const synth = new SimpleSynth(ctx, sCh);
+  for (let i = 0; i < 64; i++) {
+    const t = origin + i * 0.125;
+    events.push({ at: t, fn: () => drums.noteOn(42, 1, t) });
+    if (i % 8 === 0) events.push({ at: t, fn: () => drums.noteOn(36, 1, t) });
+    if (i % 8 === 4) events.push({ at: t, fn: () => drums.noteOn(38, 1, t) });
+    if (i % 16 === 0) events.push({ at: t, fn: () => drums.noteOn(49, 1, t) });
+    if (i % 4 === 0) {
+      for (const n of [48, 60, 64, 67, 72]) {
+        events.push({ at: t, fn: () => { synth.noteOn(n, 1, t); synth.noteOff(n, t + 0.4); } });
+      }
+    }
+  }
+}
+events.sort((a, b) => a.at - b.at);
+
+// suspend every 5 ms: fire due timers, schedule events inside the lookahead
+let maxReduction = 0;
+const STEP = 0.005;
+for (let t = STEP; t < LEN - STEP; t += STEP) {
+  off.suspend(t).then(() => {
+    const now = off.currentTime;
+    for (;;) {
+      timers.sort((a, b) => a.due - b.due || a.id - b.id);
+      if (!timers.length || timers[0].due > now) break;
+      timers.shift().fn();
+    }
+    while (events.length && events[0].at - LOOKAHEAD <= now) events.shift().fn();
+    const node = audio.getMasterLimiter();
+    if (node && node.reduction < maxReduction) maxReduction = node.reduction;
+    off.resume();
+  });
+}
+while (events.length && events[0].at - LOOKAHEAD <= 0) events.shift().fn();
+
+const buf = await off.startRendering();
+let peak = 0, over = 0, sum = 0, count = 0, jump = 0;
+for (let c = 0; c < buf.numberOfChannels; c++) {
+  const d = buf.getChannelData(c);
+  for (let i = 0; i < d.length; i++) {
+    const a = Math.abs(d[i]);
+    if (a > peak) peak = a;
+    if (a > 1) over++;
+    sum += d[i] * d[i]; count++;
+    if (i > 0) { const j = Math.abs(d[i] - d[i - 1]); if (j > jump) jump = j; }
+  }
+}
+const db = (x) => (20 * Math.log10(x)).toFixed(2);
+window.result = {
+  lim, stack,
+  peak: +peak.toFixed(4), peakDb: db(peak),
+  samplesOver1: over,
+  rmsDb: db(Math.sqrt(sum / count)),
+  maxReductionDb: +maxReduction.toFixed(2),
+  largestSampleJump: +jump.toFixed(4),
+};
+document.body.textContent = JSON.stringify(window.result);
+</script>

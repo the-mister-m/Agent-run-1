@@ -287,6 +287,18 @@ class BeatPage {
     gridPanel.el.appendChild(gridHost);
     root.appendChild(gridPanel.el);
 
+    // Clear: every step off; bar count and lane divisions kept.
+    const clearBtn = el('button', 'bt-btn bt-btn--small', 'Clear');
+    clearBtn.type = 'button';
+    clearBtn.title = 'Turn every step off';
+    gridPanel.head.appendChild(clearBtn);
+    this.listeners.add(clearBtn, 'click', () => {
+      if (!this.grid) return;
+      const pattern = this.grid.getPattern();
+      for (const lane of pattern.lanes) lane.steps.fill(null);
+      this.grid.setPattern(pattern);
+    });
+
     this.grid = new StepGrid(gridHost, clock);
     // The grid reads two members off whatever it is bound to: Instrument.pieces and
     // instrument.noteOn(note, velocity, atTime).

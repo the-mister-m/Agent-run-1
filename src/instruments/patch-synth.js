@@ -688,6 +688,8 @@ const CSS = `
 }
 .ps-add:hover { border-color: var(--node-selected); }
 .ps-group[data-group="math"] .ps-add { color: var(--math-group); }
+.ps-add[aria-pressed="false"] { color: var(--text-dim); }
+.ps-add[aria-pressed="true"] { border-color: var(--node-selected); }
 .ps-add.ps-refused {
   border-color: var(--edge-refused);
   color: var(--edge-refused);
@@ -973,6 +975,9 @@ export default class PatchSynth {
     this._heldNote = null;
     this._lastRefusal = null;
     this._groupOpen = { ...GROUP_OPEN_DEFAULT };
+    // page-supplied playing surfaces: [{ id, label, active, onToggle }]; empty paints no group
+    this._controllers = [];
+    this._controllersOpen = true;
     this._selected = null;
     this._drag = null;
     this._cable = null;
@@ -1021,6 +1026,18 @@ export default class PatchSynth {
     if (!(groupId in this._groupOpen)) return false;
     this._groupOpen[groupId] = !!open;
     return true;
+  }
+
+  /** Controllers palette group. Each entry is { id, label, active, onToggle(active) }.
+   *  A click flips `active` and calls onToggle; the page owns what is shown. */
+  setControllers(entries = []) {
+    this._controllers = entries.map((e) => ({
+      id: String(e.id),
+      label: String(e.label),
+      active: !!e.active,
+      onToggle: typeof e.onToggle === 'function' ? e.onToggle : () => {},
+    }));
+    this._repaint();
   }
 
   _createNode(kind, x, y) {
@@ -1470,9 +1487,11 @@ export default class PatchSynth {
     this._syncUI();
   }
 
-  // Sources · Modulators · Processors · Math, in that order. Math closed at first load.
+  // Controllers (when the page supplies any) · Sources · Modulators · Processors · Math.
+  // Math closed at first load.
   _paintPalette(which, doc) {
     const palette = make(doc, 'div', 'ps-palette');
+    if (this._controllers.length > 0) palette.appendChild(this._paintControllers(which, doc));
     for (const group of GROUPS) {
       const box = make(doc, 'div', 'ps-group');
       box.dataset.group = group.id;
@@ -1502,6 +1521,42 @@ export default class PatchSynth {
       palette.appendChild(box);
     }
     return palette;
+  }
+
+  // Controllers group: one show/hide toggle per page-supplied surface.
+  _paintControllers(which, doc) {
+    const box = make(doc, 'div', 'ps-group');
+    box.dataset.group = 'controllers';
+    box.dataset.open = String(this._controllersOpen);
+
+    const head = make(doc, 'button', 'ps-group-head');
+    head.type = 'button';
+    head.textContent = 'Controllers';
+    this._listen(which, head, 'click', () => {
+      this._controllersOpen = !this._controllersOpen;
+      this._repaint();
+    });
+    box.appendChild(head);
+
+    const body = make(doc, 'div', 'ps-group-body');
+    for (const entry of this._controllers) {
+      const btn = make(doc, 'button', 'ps-add');
+      btn.type = 'button';
+      btn.dataset.controller = entry.id;
+      btn.setAttribute('aria-pressed', String(entry.active));
+      btn.textContent = entry.label;
+      this._listen(which, btn, 'click', () => {
+        entry.active = !entry.active;
+        for (const v of VIEWS) {
+          const b = this._views[v]?.palette.querySelector(`[data-controller="${entry.id}"]`);
+          if (b) b.setAttribute('aria-pressed', String(entry.active));
+        }
+        entry.onToggle(entry.active);
+      });
+      body.appendChild(btn);
+    }
+    box.appendChild(body);
+    return box;
   }
 
   _paintNode(which, doc, node) {
@@ -1946,7 +2001,7 @@ export default class PatchSynth {
     view.note.textContent = r ? r.reason : '';
     const where = r ? r.where : null;
 
-    for (const btn of view.palette.querySelectorAll('.ps-add')) {
+    for (const btn of view.palette.querySelectorAll('.ps-add[data-kind]')) {
       btn.classList.toggle('ps-refused', !!(where && where.kind === btn.dataset.kind));
     }
     for (const port of view.canvas.querySelectorAll('.ps-port')) {

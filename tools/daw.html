@@ -653,6 +653,13 @@ let paneKind = null;
 // the region the pane holds, null when the pane is empty
 let rollRegionId = null;
 
+// the song tick the loaded region starts on
+let rollOriginTick = 0;
+
+// the pane roll's pitch range: three octaves up from C2
+const ROLL_BASE_OCTAVE = 2;
+const ROLL_OCTAVES = 3;
+
 // 'drum' | 'pitched' for a region on a lane with a kind, else null
 function regionKind(region) {
   if (!region) return null;
@@ -706,10 +713,15 @@ function showRegion(region) {
     if (!paneSurface) {
       paneSurface = kind === 'drum' ? new StepGrid(null, clock) : new PianoRoll();
       paneKind = kind;
+      if (kind === 'pitched') {
+        paneSurface.baseOctave = ROLL_BASE_OCTAVE;
+        paneSurface.octaves = ROLL_OCTAVES;
+      }
       paneSurface.mountCompact(rollHost);
     }
     rollRegionId = region.id;
-    paneSurface.setOriginTick((region.startBar - 1) * ticksPerBar());
+    rollOriginTick = (region.startBar - 1) * ticksPerBar();
+    paneSurface.setOriginTick(rollOriginTick);
     if (kind === 'drum') {
       paneSurface.setPieces(piecesFor(region.laneId));
       // a region with no pattern yet starts blank at its own length
@@ -720,6 +732,8 @@ function showRegion(region) {
       paneSurface.setNotes(region.notes);
     }
   }
+  // the roll is drawn at the region's own length
+  if (kind === 'pitched') paneSurface.bars = region.lengthBars;
   paneSurface.setActiveTicks(activeTicksOf(region));
   // the pane sounds through whichever lane owns the region it is showing
   paneSurface.setBus(shell.trackBus(region.laneId));
@@ -727,11 +741,26 @@ function showRegion(region) {
 }
 
 arrangement.on('select', showRegion);
+// a double press on a region reloads it and raises the pane, selected already or not
+arrangement.on('open', (region) => {
+  if (!region) return;
+  showRegion(region);
+  // back to the whole region in view
+  if (paneKind === 'pitched' && paneSurface) paneSurface.zoom = 1;
+});
 
-// loop toggled or resized while its region is open: refresh the length and the dim boundary
+// loop toggled, moved or resized while its region is open: refresh the origin, the length
+// and the dim boundary
 regions.on('update', (r) => {
   if (r.id !== rollRegionId || !paneSurface) return;
+  if (regionKind(r) !== paneKind) return;
+  const origin = (r.startBar - 1) * ticksPerBar();
+  if (origin !== rollOriginTick) {
+    rollOriginTick = origin;
+    paneSurface.setOriginTick(origin);
+  }
   if (paneKind === 'drum') paneSurface.bars = Math.max(r.lengthBars, paneSurface.bars);
+  else paneSurface.bars = r.lengthBars;
   paneSurface.setActiveTicks(activeTicksOf(r));
 });
 

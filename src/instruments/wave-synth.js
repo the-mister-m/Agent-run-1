@@ -188,7 +188,7 @@ class Env {
 
   /** The scheduled value at absolute time t. */
   valueAt(t) {
-    if (this.state === 'releasing') {
+    if (this.state === 'releasing' && t >= this._releaseT0) {
       const start = this._releaseT0;
       const end = Math.max(start + this.shape.release, start + MIN_RAMP);
       if (t <= start) return this._releaseFrom;
@@ -235,12 +235,23 @@ class Env {
     this.shape = { ...shape };
     const now = this.ctx.currentTime;
     if (this.state === 'running') this._writeAttackDecay(now, this.valueAt(now));
-    else if (this.state === 'releasing') this._writeRelease(now, this.valueAt(now));
+    else if (this.state === 'releasing') {
+      const from = Math.max(now, this._releaseT0);
+      this._writeRelease(from, this.valueAt(from));
+    }
   }
 
   cancel(t) {
     this.param.cancelScheduledValues(t);
     this.state = 'idle';
+  }
+
+  /** Cancels automation from t and pins the param to value there. A future t keeps the
+   *  ramp in flight by ramping to value instead of stepping. */
+  anchor(t, value) {
+    this.param.cancelScheduledValues(t);
+    if (t > this.ctx.currentTime) this.param.linearRampToValueAtTime(value, t);
+    else this.param.setValueAtTime(value, t);
   }
 
   _writeAttackDecay(fromTime, fromValue) {
@@ -263,8 +274,7 @@ class Env {
     const p = this.param;
     const end = Math.max(this._releaseT0 + this.shape.release, fromTime + MIN_RAMP);
     this._releaseFrom = fromValue;
-    p.cancelScheduledValues(fromTime);
-    p.setValueAtTime(fromValue, fromTime);
+    this.anchor(fromTime, fromValue);
     p.linearRampToValueAtTime(0, end);
   }
 }
@@ -558,24 +568,31 @@ class Voice {
     this.ampEnv.reaim(clamp(velocity, 0, 1) * this._unisonGain);
   }
 
+  /** An earlier release replaces a later scheduled one; a later one is ignored. */
   release(atTime) {
     if (this._state === 'free' || this._state === 'stealing') return;
-    const t0 = atTime ?? this.ctx.currentTime;
+    const now = this.ctx.currentTime;
+    const t0 = Math.max(atTime ?? now, now);
+    if (this._state === 'releasing' && t0 >= this._releaseT0) return;
     this._state = 'releasing';
+    this._releaseT0 = t0;
     const tail = this.ampEnv.release(t0);
     this.env2.release(t0);
+    voicePool.fade(this, t0, t0 + tail);
     this._armFree(t0 + tail);
   }
 
   /** Forced release: linear fade to 0 over 5ms, then free. */
   steal(atTime) {
     if (this._state === 'free') return;
-    const t0 = atTime ?? this.ctx.currentTime;
-    const from = t0 > this.ctx.currentTime ? this.ampEnv.valueAt(t0) : this.amp.gain.value;
+    const now = this.ctx.currentTime;
+    const t0 = Math.max(atTime ?? now, now);
+    const from = t0 > now ? this.ampEnv.valueAt(t0) : this.amp.gain.value;
     this._state = 'stealing';
-    this.ampEnv.cancel(t0);
-    this.amp.gain.setValueAtTime(from, t0);
+    this.ampEnv.anchor(t0, from);
+    this.ampEnv.state = 'idle';
     this.amp.gain.linearRampToValueAtTime(0, t0 + STEAL_FADE);
+    voicePool.fade(this, t0, t0 + STEAL_FADE);
     this._armFree(t0 + STEAL_FADE);
   }
 
@@ -860,7 +877,7 @@ export default class WaveSynth {
       }
     }
 
-    const voice = new Voice(this.ctx, createVoiceOut(WaveSynth.id, this._mixGain), cost);
+    const voice = new Voice(this.ctx, createVoiceOut(WaveSynth.id, this._mixGain, t0), cost);
     voice.onFree = () => {
       this._voices.delete(voice);
       const group = this._notes.get(voice.note);
@@ -898,7 +915,9 @@ export default class WaveSynth {
 
   allNotesOff() {
     const t0 = this.ctx.currentTime;
-    for (const note of Array.from(this._notes.keys())) this._releaseGroup(note, t0);
+    this._notes.clear();
+    // Every live voice, so a release already scheduled later is pulled in to now.
+    for (const v of Array.from(this._voices)) v.release(t0);
   }
 
   // ---- note emission — no-op, emitsNotes is false ----
