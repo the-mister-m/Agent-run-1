@@ -8,9 +8,13 @@ import DiatonicKeys from '../surfaces/diatonic-keys.js';
 import ScaleCircle from '../surfaces/scale-circle.js';
 import { regions as sharedRegions } from '../core/regions.js';
 import Capture from '../core/capture.js';
+import { openContextMenu, closeContextMenu, MOD } from './context-menu.js';
 
 const STYLE_ID = 'cbdaw-arrangement-style';
 let styleRefs = 0;
+
+// copied regions, shared by every arrangement on the page
+let arrClipboard = [];
 
 // instrumentType -> display label, for the lane head's instrument dropdown
 export const INSTRUMENT_OPTIONS = [
@@ -332,7 +336,7 @@ const STYLE_TEXT = `
 
 .cbdaw-arr__lane-instrument {
   font: var(--font-inherit);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-sm);
   color: var(--text);
   background: var(--btn-face);
   border: var(--bw) solid var(--line);
@@ -596,6 +600,10 @@ export default class Arrangement {
     this._channels = [];
     this._lanes = new Map();
     this._selectedId = null;
+    // every selected region id; `_selectedId` is the one the editor pane follows
+    this._selection = new Set();
+    // undo stacks of { tracks, regions } snapshots
+    this._history = { undo: [], redo: [] };
     this._unsubRegions = null;
     this._unsubTracksAdd = null;
     this._unsubTracksRemove = null;
@@ -737,6 +745,7 @@ export default class Arrangement {
 
     // A store change from anywhere — this timeline, a recording, a project load — redraws.
     this._unsubRegions = this._regions.on('change', () => {
+      this._pruneSelection();
       if (this._blockDrag) { this._renderDuringDrag(); return; }
       this._renderAllRegions();
     });
@@ -807,6 +816,8 @@ export default class Arrangement {
     this._unsubTracksUpdate = null;
     this._unsubProject = null;
     this._selectedId = null;
+    this._selection.clear();
+    closeContextMenu();
     this._detachDom();
     this._teardownLanes();
     this.el?.remove();
@@ -897,28 +908,21 @@ export default class Arrangement {
 
     this._addDom(zoomOut, 'click', () => this._applyZoom(this._zoom / ZOOM_STEP));
     this._addDom(zoomIn, 'click', () => this._applyZoom(this._zoom * ZOOM_STEP));
-    this._addDom(addTrack, 'click', () => this._tracks.add());
-
-    // Ctrl/Cmd + wheel zooms about the pointer; plain wheel stays ordinary scrolling.
-    this._addDom(scroll, 'wheel', (e) => {
-      if (!e.ctrlKey && !e.metaKey) return;
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      this._applyZoom(this._zoom * factor, e.clientX);
+    this._addDom(addTrack, 'click', () => {
+      this._record(this._snapshot());
+      this._tracks.add();
     });
 
     this._wireRulerSeek();
     this._wireLoopRow();
 
-    this._addDom(root, 'keydown', (e) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-      if (!this._selectedId) return;
-      e.preventDefault();
-      const gone = this._selectedId;
-      this._selectedId = null;
-      this._regions.remove(gone);
-      this._emit('select', null);
-    });
+    this._addDom(root, 'keydown', (e) => this._onKeyDown(e));
+    this._addDom(scroll, 'contextmenu', (e) => this._onContextMenu(e));
+    // a press anywhere but a text field or picker aims the edit keys here
+    this._addDom(root, 'pointerdown', (e) => {
+      if (e.target.closest('input, select, textarea')) return;
+      root.focus({ preventScroll: true });
+    }, true);
 
     this._applyZoom(this._zoom);
   }
@@ -1090,10 +1094,12 @@ export default class Arrangement {
     }
 
     this._addDom(nameInput, 'change', () => {
+      this._record(this._snapshot());
       this._tracks.update(ch.id, { name: nameInput.value });
     });
 
     this._addDom(instrumentSelect, 'change', () => {
+      this._record(this._snapshot());
       const type = instrumentSelect.value || null;
       if (typeof this.onAssignInstrument === 'function') this.onAssignInstrument(ch.id, type);
       else this._tracks.setInstrumentType(ch.id, type);
@@ -1123,7 +1129,10 @@ export default class Arrangement {
     armRow.append(armBtn, removeBtn);
     head.appendChild(armRow);
 
-    this._addDom(removeBtn, 'click', () => this._tracks.remove(ch.id));
+    this._addDom(removeBtn, 'click', () => {
+      this._record(this._snapshot());
+      this._tracks.remove(ch.id);
+    });
 
     const body = document.createElement('div');
     body.className = 'cbdaw-arr__lane-body';
@@ -1178,8 +1187,12 @@ export default class Arrangement {
     this._addDom(regionRow, 'dblclick', (e) => {
       if (e.target !== regionRow) return;
       const bar = this._barFromClientX(e.clientX);
+      const before = this._snapshot();
       const made = this._regions.add({ laneId: lane.id, startBar: bar, lengthBars: 1, name: lane.label });
-      if (made) this._select(made.id);
+      if (made) {
+        this._record(before);
+        this._select(made.id);
+      }
     });
 
     this._addDom(regionRow, 'pointerdown', (e) => {
@@ -1309,11 +1322,186 @@ export default class Arrangement {
     return this._selectedId ? this._regions.get(this._selectedId) : null;
   }
 
+  /** Selects one region, or none. Collapses a multi-selection. */
   _select(id) {
-    if (this._selectedId === id) return;
+    const was = this._selectedId;
+    this._selection = new Set(id ? [id] : []);
     this._selectedId = id;
     this._paintSelection();
-    this._emit('select', id ? this._regions.get(id) : null);
+    if (was !== id) this._emit('select', id ? this._regions.get(id) : null);
+  }
+
+  // drop ids the store no longer holds; the pane lets go if its region went
+  _pruneSelection() {
+    for (const id of [...this._selection]) if (!this._regions.get(id)) this._selection.delete(id);
+    if (this._selectedId && !this._regions.get(this._selectedId)) {
+      this._selectedId = null;
+      this._emit('select', null);
+    }
+  }
+
+  // ——— edit commands: undo, clipboard, selection ——————————————————————————————————————————
+
+  get canUndo() { return this._history.undo.length > 0; }
+  get canRedo() { return this._history.redo.length > 0; }
+
+  // tracks and regions as they stand, for the undo stack
+  _snapshot() {
+    return {
+      tracks: this._tracks.all.map((t) => ({
+        id: t.id, name: t.name, color: t.color, instrumentType: t.instrumentType,
+      })),
+      regions: this._regions.serialize(),
+    };
+  }
+
+  // push a before-state; a new edit drops the redo stack
+  _record(before) {
+    this._history.undo.push(before);
+    this._history.redo.length = 0;
+  }
+
+  // push only if the regions moved since `before`
+  _recordIfChanged(before) {
+    if (JSON.stringify(before.regions) !== JSON.stringify(this._regions.serialize())) this._record(before);
+  }
+
+  /** Makes tracks and regions match a snapshot. A region that is live now keeps its live
+   *  notes — the editor pane owns notes, with its own undo. A track brought back gets a
+   *  fresh instrument of its old type, at the bottom of the list. */
+  _restore(snap) {
+    const want = new Map(snap.tracks.map((t) => [t.id, t]));
+    for (const t of this._tracks.all) if (!want.has(t.id)) this._tracks.remove(t.id);
+    for (const t of snap.tracks) {
+      let live = this._tracks.get(t.id);
+      if (!live) live = this._tracks.restore({ id: t.id, name: t.name, color: t.color });
+      if (!live) continue;
+      if (live.name !== t.name) this._tracks.update(t.id, { name: t.name });
+      if ((live.instrumentType || null) !== (t.instrumentType || null)) {
+        if (typeof this.onAssignInstrument === 'function') this.onAssignInstrument(t.id, t.instrumentType || null);
+        else this._tracks.setInstrumentType(t.id, t.instrumentType || null);
+      }
+    }
+    this._regions.restore(snap.regions.map((r) => {
+      const live = this._regions.get(r.id);
+      return live ? { ...r, notes: live.notes } : r;
+    }));
+    this._pruneSelection();
+    this._paintSelection();
+  }
+
+  undo() {
+    const snap = this._history.undo.pop();
+    if (!snap) return false;
+    this._history.redo.push(this._snapshot());
+    this._restore(snap);
+    return true;
+  }
+
+  redo() {
+    const snap = this._history.redo.pop();
+    if (!snap) return false;
+    this._history.undo.push(this._snapshot());
+    this._restore(snap);
+    return true;
+  }
+
+  // selected regions, in lane-then-start order
+  _selectedRegions() {
+    return this._regions.all.filter((r) => this._selection.has(r.id));
+  }
+
+  copy() {
+    const picked = this._selectedRegions();
+    if (!picked.length) return false;
+    arrClipboard = picked.map((r) => structuredClone({ ...r, notes: r.notes }));
+    return true;
+  }
+
+  cut() {
+    if (!this.copy()) return false;
+    return this.deleteSelection();
+  }
+
+  /** Clipboard regions at the playhead bar, each on its own lane. A region that would land
+   *  on another or whose lane is gone is skipped. The pasted ones come in selected. */
+  paste() {
+    if (!arrClipboard.length) return false;
+    const bar = this._clock.position.bar;
+    const first = Math.min(...arrClipboard.map((r) => r.startBar));
+    const before = this._snapshot();
+    const made = [];
+    for (const c of arrClipboard) {
+      if (!this._tracks.get(c.laneId)) continue;
+      const r = this._regions.add({ ...structuredClone(c), startBar: c.startBar - first + bar });
+      if (r) made.push(r.id);
+    }
+    if (!made.length) return false;
+    this._record(before);
+    this._select(made[0]);
+    this._selection = new Set(made);
+    this._paintSelection();
+    return true;
+  }
+
+  deleteSelection() {
+    const doomed = this._selectedRegions();
+    if (!doomed.length) return false;
+    this._record(this._snapshot());
+    for (const r of doomed) this._regions.remove(r.id);
+    this._select(null);
+    return true;
+  }
+
+  selectAll() {
+    this._selection = new Set(this._regions.all.map((r) => r.id));
+    this._paintSelection();
+    return true;
+  }
+
+  deselectAll() {
+    this._select(null);
+    return true;
+  }
+
+  _onKeyDown(e) {
+    if (e.target.closest?.('input, select, textarea, [contenteditable]')) return;
+    const mod = e.metaKey || e.ctrlKey;
+    const key = e.key.toLowerCase();
+    let run = null;
+    if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) run = () => this.deleteSelection();
+    else if (mod && key === 'z') run = () => (e.shiftKey ? this.redo() : this.undo());
+    else if (mod && key === 'y') run = () => this.redo();
+    else if (mod && key === 'x') run = () => this.cut();
+    else if (mod && key === 'c') run = () => this.copy();
+    else if (mod && key === 'v') run = () => this.paste();
+    else if (mod && key === 'a') run = () => (e.shiftKey ? this.deselectAll() : this.selectAll());
+    if (!run) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeContextMenu();
+    run();
+  }
+
+  _onContextMenu(e) {
+    if (e.target.closest('input, select, textarea')) return;
+    e.preventDefault();
+    const block = e.target.closest('.cbdaw-arr__region');
+    const id = block?.dataset.id || null;
+    if (id && !this._selection.has(id)) this._select(id);
+    const some = this._selection.size > 0;
+    openContextMenu(e.clientX, e.clientY, [
+      { label: 'Undo', keys: `${MOD}Z`, disabled: !this.canUndo, run: () => this.undo() },
+      { label: 'Redo', keys: `${MOD}⇧Z`, disabled: !this.canRedo, run: () => this.redo() },
+      'sep',
+      { label: 'Cut', keys: `${MOD}X`, disabled: !some, run: () => this.cut() },
+      { label: 'Copy', keys: `${MOD}C`, disabled: !some, run: () => this.copy() },
+      { label: 'Paste', keys: `${MOD}V`, disabled: !arrClipboard.length, run: () => this.paste() },
+      { label: 'Delete', keys: '⌫', disabled: !some, run: () => this.deleteSelection() },
+      'sep',
+      { label: 'Select All', keys: `${MOD}A`, disabled: !this._regions.size, run: () => this.selectAll() },
+      { label: 'Deselect All', keys: `${MOD}⇧A`, disabled: !some, run: () => this.deselectAll() },
+    ]);
   }
 
   /** A second press on the same region inside DOUBLE_PRESS_MS emits 'open'. */
@@ -1328,7 +1516,7 @@ export default class Arrangement {
   _paintSelection() {
     for (const lane of this._lanes.values()) {
       for (const el of lane.regionRow.querySelectorAll('.cbdaw-arr__region')) {
-        el.dataset.selected = String(el.dataset.id === this._selectedId);
+        el.dataset.selected = String(this._selection.has(el.dataset.id));
       }
     }
   }
@@ -1342,7 +1530,7 @@ export default class Arrangement {
       const el = document.createElement('div');
       el.className = 'cbdaw-arr__region';
       el.dataset.id = r.id;
-      el.dataset.selected = String(r.id === this._selectedId);
+      el.dataset.selected = String(this._selection.has(r.id));
       el.dataset.muted = String(r.muted);
       if (r.color) el.style.background = r.color;
 
@@ -1422,8 +1610,14 @@ export default class Arrangement {
   _beginBlockDrag(e, id, mode) {
     const origin = this._regions.get(id);
     if (!origin) return;
+    if (e.button === 2) return; // right press opens the menu, it does not drag
     e.preventDefault();
     this._select(id);
+
+    const before = this._snapshot();
+    // alt: the drag places a copy and leaves the original
+    const dup = mode === 'move' && e.altKey;
+    let copyId = null;
 
     const startX = e.clientX;
     const barPx = this._barPx();
@@ -1435,10 +1629,14 @@ export default class Arrangement {
       const deltaBars = Math.round((ev.clientX - startX) / barPx);
       if (mode === 'move') {
         const lane = this._laneFromClientY(ev.clientY);
-        this._regions.move(id, {
-          laneId: lane ? lane.id : origin.laneId,
-          startBar: origin.startBar + deltaBars,
-        });
+        const to = { laneId: lane ? lane.id : origin.laneId, startBar: origin.startBar + deltaBars };
+        if (dup && !copyId) {
+          if (to.laneId === origin.laneId && to.startBar === origin.startBar) return;
+          const made = this._regions.duplicate(id, to);
+          if (made) { copyId = made.id; this._select(copyId); }
+          return;
+        }
+        this._regions.move(copyId || id, to);
       } else if (mode === 'start') {
         this._regions.resize(id, { startBar: origin.startBar + deltaBars });
       } else {
@@ -1450,6 +1648,7 @@ export default class Arrangement {
       this._blockDrag = null;
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      this._recordIfChanged(before);
       this._renderAllRegions();
     };
 
@@ -1462,8 +1661,10 @@ export default class Arrangement {
   _beginLoopDrag(e, id) {
     const origin = this._regions.get(id);
     if (!origin || !hasPlayableNotes(origin)) return;
+    if (e.button === 2) return;
     e.preventDefault();
     this._select(id);
+    const before = this._snapshot();
 
     const startX = e.clientX;
     const barPx = this._barPx();
@@ -1488,6 +1689,7 @@ export default class Arrangement {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       if (!dragged) this._regions.setLoop(id, { on: !origin.loop });
+      this._recordIfChanged(before);
       this._renderAllRegions();
     };
 

@@ -492,7 +492,8 @@ function syncPanelSurface(panel, id) {
     surface = new spec.Ctor(null, bus);
   }
   panel.surface = surface;
-  surface.mountCompact(panel.surfaceHost);
+  if (spec.value === 'keyboard') surface.mount(panel.surfaceHost, 'expanded');
+  else surface.mountCompact(panel.surfaceHost);
 }
 
 // the surface chip row, rebuilt from the track's kind
@@ -656,9 +657,20 @@ let rollRegionId = null;
 // the song tick the loaded region starts on
 let rollOriginTick = 0;
 
-// the pane roll's pitch range: three octaves up from C2
-const ROLL_BASE_OCTAVE = 2;
-const ROLL_OCTAVES = 3;
+// region id -> the roll's undo stacks, kept after the region is clicked off
+const rollHistories = new Map();
+
+function rollHistoryFor(id) {
+  let h = rollHistories.get(id);
+  if (!h) { h = { undo: [], redo: [] }; rollHistories.set(id, h); }
+  return h;
+}
+
+// the pane roll's pitch range: six octaves up from C1
+const ROLL_BASE_OCTAVE = 1;
+const ROLL_OCTAVES = 6;
+// printed C numbers run 3 below true pitch, so the bottom C (midi 24) reads C-2
+const ROLL_LABEL_SHIFT = -3;
 
 // 'drum' | 'pitched' for a region on a lane with a kind, else null
 function regionKind(region) {
@@ -716,6 +728,9 @@ function showRegion(region) {
       if (kind === 'pitched') {
         paneSurface.baseOctave = ROLL_BASE_OCTAVE;
         paneSurface.octaves = ROLL_OCTAVES;
+        paneSurface.octaveLabelShift = ROLL_LABEL_SHIFT;
+        // a key or menu edit writes back at once, not on the next pointerup
+        paneSurface.onChange = flushRoll;
       }
       paneSurface.mountCompact(rollHost);
     }
@@ -730,6 +745,7 @@ function showRegion(region) {
       paneSurface.bars = Math.max(region.lengthBars, paneSurface.bars);
     } else {
       paneSurface.setNotes(region.notes);
+      paneSurface.setHistory(rollHistoryFor(region.id));
     }
   }
   // the roll is drawn at the region's own length

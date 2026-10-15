@@ -356,6 +356,40 @@ export function createRegionStore() {
       return regions.size;
     },
 
+    /** Undo's write: makes the store match `list`, ids kept, one remove/add/update event per
+     *  region that differs. */
+    restore(list = []) {
+      const want = new Map();
+      for (const raw of Array.isArray(list) ? list : []) {
+        if (raw && raw.id && raw.laneId !== undefined) want.set(raw.id, raw);
+      }
+      for (const r of [...regions.values()]) {
+        if (want.has(r.id)) continue;
+        regions.delete(r.id);
+        publish('remove', r);
+      }
+      for (const raw of want.values()) {
+        const had = regions.get(raw.id);
+        _seq = Math.max(_seq, Number(String(raw.id).replace(/^r/, '')) || 0);
+        const next = freeze({
+          id: raw.id,
+          laneId: raw.laneId,
+          startBar: clampInt(raw.startBar, 1, 1),
+          lengthBars: clampInt(raw.lengthBars, MIN_LENGTH_BARS, MIN_LENGTH_BARS),
+          name: raw.name ?? null,
+          color: raw.color ?? null,
+          muted: Boolean(raw.muted),
+          notes: copyNotes(raw.notes),
+          loop: Boolean(raw.loop),
+          loopBars: raw.loopBars ?? null,
+        });
+        if (had && JSON.stringify(had) === JSON.stringify(next)) continue;
+        regions.set(next.id, next);
+        publish(had ? 'update' : 'add', next);
+      }
+      return regions.size;
+    },
+
     // ——— introspection, for views and for the done-checks ——————————————————————————————
     get listenerCount() {
       return EVENTS.reduce((n, name) => n + listeners[name].size, 0);

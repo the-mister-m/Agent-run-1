@@ -78,6 +78,9 @@ import {
 // never constructs, mounts, or reaches into a StepGrid.
 import { stepLabel } from './step-grid.js';
 
+// right-click menu
+import { openContextMenu, closeContextMenu, MOD } from '../ui/context-menu.js';
+
 // §15 / §4 / §6. Everything this file draws about pitch comes out of here. It computes none
 // of it. `theory/scale.js` is frozen from S3.
 import {
@@ -121,10 +124,10 @@ const MAX_BARS = 8;
  *  one. Two octaves is what fits a Chromebook screen at the expanded row height and is
  *  enough to show `'8'` (the octave close, §6) at all, which one octave is not. */
 const DEFAULT_OCTAVES = 2;
-const MAX_OCTAVES = 4;
+const MAX_OCTAVES = 6;
 
 /** Sideways zoom. 1 fits the field to the roll; above 1 the boxes widen and the body scrolls. */
-const ZOOM_MIN = 1;
+const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 8;
 const ZOOM_STEP = 1.5;
 
@@ -155,6 +158,9 @@ const RESIZE_ZONE_PX = 10;
 /** Pointer travel before a press becomes a drag rather than a click. `step-grid.js` uses 4
  *  for the same purpose; same number so the two surfaces feel identical under a finger. */
 const DRAG_THRESHOLD_PX = 4;
+
+// copied notes, shared by every roll on the page; ticks start at 0
+let rollClipboard = [];
 
 /**
  * ⛔ BRANDON — EMPTY ON PURPOSE. DO NOT FILL THIS IN WITHOUT HIM.
@@ -266,6 +272,7 @@ const STYLE_TEXT = `
   --roll-gutter: var(--sp-39);
   --roll-key-w: var(--sp-15);
   --roll-zoom: 1;
+  --roll-base: 0.75;
   --roll-bars: 1;
   display: var(--disp-flex);
   flex-direction: var(--flexdir-column);
@@ -340,7 +347,7 @@ const STYLE_TEXT = `
   display: var(--disp-flex);
   align-items: var(--align-stretch);
   flex: var(--flex-0-0-auto);
-  width: calc(var(--roll-gutter) + (var(--pct-100) - var(--roll-gutter)) * var(--roll-zoom) * var(--roll-bars));
+  width: calc(var(--roll-gutter) + (var(--pct-100) - var(--roll-gutter)) * var(--roll-zoom) * var(--roll-base) * var(--roll-bars));
 }
 .cbdaw-roll__gutter {
   flex: var(--flex-0-0-auto);
@@ -357,25 +364,41 @@ const STYLE_TEXT = `
 
 /* ---- the ruler: §13.3's labels, drawn by beat group so triplets and 16ths land on the
    same beat boundaries — §13.2, "not two grid implementations." ---- */
-.cbdaw-roll__ruler { display: var(--disp-flex); gap: var(--sp-hair); }
+.cbdaw-roll__ruler { display: var(--disp-flex); }
+/* bar = tag row over a beats row; lines are overlays, so no border or gap shifts a cell off its grid column */
 .cbdaw-roll__bar {
   flex: var(--flex-1-1-0);
   min-width: var(--sp-0);
   display: var(--disp-flex);
-  gap: var(--sp-hair);
-  border-left: calc(var(--bw) * 2) solid var(--line);
-  padding-left: var(--sp-hair);
+  flex-direction: var(--flexdir-column);
+  position: var(--pos-relative);
 }
-.cbdaw-roll__bar:first-child { border-left: var(--none); padding-left: var(--sp-0); }
+.cbdaw-roll__bar::before {
+  content: '';
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  left: var(--sp-0);
+  width: var(--sp-1);
+  background: var(--accent);
+  z-index: var(--z-raise-2);
+}
+.cbdaw-roll__beats { display: var(--disp-flex); }
 .cbdaw-roll__beat {
   flex: var(--flex-1-1-0);
   min-width: var(--sp-0);
   display: var(--disp-flex);
-  gap: var(--sp-hair);
-  border-left: var(--bw) solid var(--line);
-  padding-left: var(--sp-hair);
+  position: var(--pos-relative);
 }
-.cbdaw-roll__beat:first-child { border-left: var(--none); padding-left: var(--sp-0); }
+.cbdaw-roll__beat:not(:first-child)::before {
+  content: '';
+  position: var(--pos-absolute);
+  top: var(--sp-0);
+  bottom: var(--sp-0);
+  left: var(--sp-0);
+  width: var(--sp-hair);
+  background: var(--line);
+}
 .cbdaw-roll__ruler-cell {
   flex: var(--flex-1-1-0);
   min-width: var(--sp-0);
@@ -386,19 +409,16 @@ const STYLE_TEXT = `
   color: var(--text-dim);
   padding: var(--sp-1) 0;
   border-radius: var(--r-cell);
+  position: var(--pos-relative);
+  z-index: var(--z-raise-2);
 }
 .cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell { font-size: var(--fs-base); padding: var(--sp-hair) 0; }
 .cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell { font-size: var(--fs-2xl); padding: var(--sp-2) 0; }
 .cbdaw-roll__ruler-cell[data-beat="true"] { color: var(--text); font-weight: var(--w-bold); }
-.cbdaw-roll__ruler-bar {
-  display: var(--disp-block);
-  font-size: var(--fs-tiny);
-  font-weight: var(--w-med);
-  color: var(--accent);
-  line-height: var(--lh-tight);
-}
-.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: var(--fs-3xl); }
-/* SEAT QUESTION 4 — "note length must relate to the ruler." While a note is drawn or
+.cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: calc(var(--fs-base) + var(--sp-hair)); }
+.cbdaw-roll[data-variant="compact"] .cbdaw-roll__ruler-cell[data-bar="true"] { font-size: calc(var(--fs-base) + var(--sp-1)); }
+.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-beat="true"] { font-size: calc(var(--fs-3xl) + var(--sp-hair)); }
+.cbdaw-roll[data-variant="expanded"] .cbdaw-roll__ruler-cell[data-bar="true"] { font-size: calc(var(--fs-3xl) + var(--sp-1)); }/* SEAT QUESTION 4 — "note length must relate to the ruler." While a note is drawn or
    resized, the ruler cells it covers light up. The length is read in the counting labels the
    student already says out loud. */
 .cbdaw-roll__ruler-cell[data-span="true"] {
@@ -409,6 +429,12 @@ const STYLE_TEXT = `
 
 /* ---- the pitch rows ---- */
 .cbdaw-roll__rows { position: var(--pos-relative); }
+.cbdaw-roll__marquee {
+  position: var(--pos-absolute);
+  z-index: var(--z-raise-2);
+  border: var(--bw) var(--line-dashed) var(--accent);
+  pointer-events: var(--pe-none);
+}
 .cbdaw-roll__row {
   display: var(--disp-flex);
   align-items: var(--align-stretch);
@@ -540,8 +566,8 @@ const STYLE_TEXT = `
   width: var(--sp-hair);
   background: color-mix(in srgb, var(--text) 42%, transparent);
 }
-.cbdaw-roll__line[data-beat="true"] { background: color-mix(in srgb, var(--text) 68%, transparent); }
-.cbdaw-roll__line[data-bar="true"] { background: var(--text-dim); width: var(--sp-1); }
+.cbdaw-roll__line[data-beat="true"] { background: color-mix(in srgb, var(--text) 55%, transparent); }
+.cbdaw-roll__line[data-bar="true"] { background: var(--accent); width: var(--sp-1); }
 
 /* ---- SEAT QUESTION 5's second half: the velocity lane ---- */
 .cbdaw-roll__vel { height: calc(var(--roll-row-h) * 2.5); }
@@ -635,13 +661,25 @@ export default class PianoRoll {
 
     this._division = DEFAULT_DIVISION;
     this._bars = 1;
-    this._zoom = ZOOM_MIN;
+    this._zoom = 1;
     this._octaves = DEFAULT_OCTAVES;
     this._baseOctave = DEFAULT_BASE_OCTAVE;
+    this._octaveLabelShift = 0;  // added to the printed C octave number only
 
     /** §7 `channels[].notes[]` — the four frozen fields, and this file adds no fifth. */
     this._notes = [];
     this._selected = null;
+    // every selected note; `_selected` is the one the readout and a drag follow
+    this._selection = new Set();
+
+    // undo stacks of note snapshots. The host may hand in its own with `setHistory()`
+    this._history = { undo: [], redo: [] };
+
+    // length a new note is born with; 0 = one step
+    this._lastLength = 0;
+
+    // called after an edit made by key or menu. null = nobody listening
+    this.onChange = null;
 
     /** Which of `_notes` arrived from a bound `core/capture.js`, held by OBJECT IDENTITY so
      *  §7's four fields stay four — no marker key is written onto a note. Read by
@@ -745,6 +783,15 @@ export default class PianoRoll {
     if (!Number.isFinite(v) || v === this._baseOctave) return;
     this._baseOctave = v;
     if (this.mounted) { this._renderRows(); this._renderNotes(); }
+  }
+
+  get octaveLabelShift() { return this._octaveLabelShift; }
+
+  set octaveLabelShift(n) {
+    const v = Math.round(Number(n));
+    if (!Number.isFinite(v) || v === this._octaveLabelShift) return;
+    this._octaveLabelShift = v;
+    if (this.mounted) this._renderRowLabels();
   }
 
   /** The lowest drawn row: the tonic, in `baseOctave`. Every row position below is measured
@@ -925,6 +972,7 @@ export default class PianoRoll {
     this._notes = Array.isArray(notes) ? notes.map(toNote).filter(Boolean) : [];
     this._captureNotes.clear();
     this._selected = null;
+    this._selection.clear();
     if (this.mounted) this._renderNotes();
     return this;
   }
@@ -998,6 +1046,7 @@ export default class PianoRoll {
         this._notes = this._notes.filter((n) => !this._captureNotes.has(n));
         this._captureNotes.clear();
         if (this._selected && !this._notes.includes(this._selected)) this._selected = null;
+        for (const n of [...this._selection]) if (!this._notes.includes(n)) this._selection.delete(n);
       }
       return this._pushNotes(notes, true);
     }
@@ -1094,6 +1143,7 @@ export default class PianoRoll {
   unmount() {
     if (!this.mounted) return this;
     this._previewOff();
+    closeContextMenu();
     if (this._rafHandle !== null) cancelAnimationFrame(this._rafHandle);
     this._rafHandle = null;
     this._detachInteraction();
@@ -1137,6 +1187,7 @@ export default class PianoRoll {
   _build(target) {
     const root = document.createElement('div');
     root.className = 'cbdaw-roll';
+    root.tabIndex = 0; // so edit keys reach the roll
     root.dataset.variant = this.variant;
     root.dataset.overlay = this._overlay;
 
@@ -1261,6 +1312,9 @@ export default class PianoRoll {
     for (let bar = 0; bar < this._bars; bar++) {
       const barEl = document.createElement('div');
       barEl.className = 'cbdaw-roll__bar';
+      const beatsEl = document.createElement('div');
+      beatsEl.className = 'cbdaw-roll__beats';
+      barEl.appendChild(beatsEl);
       for (let b = 0; b < top; b++) {
         const group = document.createElement('div');
         group.className = 'cbdaw-roll__beat';
@@ -1272,15 +1326,14 @@ export default class PianoRoll {
           cell.dataset.step = String(bar * this._stepsPerBar() + stepInBar);
           cell.textContent =
             this._rulerOverlay === 'syllable' || c === 0 ? stepLabel(stepInBar, division) : '';
+          // first beat of each bar reads song-bar.beat
           if (b === 0 && c === 0) {
-            const barTag = document.createElement('span');
-            barTag.className = 'cbdaw-roll__ruler-bar';
-            barTag.textContent = String(startBar + bar);
-            cell.appendChild(barTag);
+            cell.dataset.bar = 'true';
+            cell.textContent = `${startBar + bar}.${cell.textContent}`;
           }
           group.appendChild(cell);
         }
-        barEl.appendChild(group);
+        beatsEl.appendChild(group);
       }
       ruler.appendChild(barEl);
     }
@@ -1362,12 +1415,15 @@ export default class PianoRoll {
   _renderRowLabels() {
     for (const row of this._rowEls) {
       const position = this._rowPosition(row.midi);
-      row.labelEl.innerHTML = pitchLabel(
+      const label = pitchLabel(
         this._scale,
         row.midi,
         this._overlay,
         position === null ? {} : { position },
       );
+      // a plain C under letters carries its octave number, C4 = midi 60
+      const isC = this._overlay === 'letter' && label === 'C' && row.midi % 12 === 0;
+      row.labelEl.innerHTML = isC ? `C${Math.floor(row.midi / 12) - 1 + this._octaveLabelShift}` : label;
     }
   }
 
@@ -1415,7 +1471,7 @@ export default class PianoRoll {
       const inKey = isInKey(this._scale, note.note);
       el.dataset.inkey = String(inKey);
       el.dataset.offGrid = String(this._isOffGrid(note));
-      el.dataset.selected = String(this._selected === note);
+      el.dataset.selected = String(this._selection.has(note));
       el.dataset.dim = String(this._activeTicks > 0 && note.tick >= this._activeTicks);
       el.style.left = `${this._pct(note.tick)}%`;
       el.style.width = `${Math.max(this._pct(note.length), 0.4)}%`;
@@ -1441,7 +1497,7 @@ export default class PianoRoll {
       bar.className = 'cbdaw-roll__vel-bar';
       bar.style.left = `${this._pct(note.tick + note.length / 2)}%`;
       bar.style.height = `${Math.round(note.velocity * 100)}%`;
-      bar.dataset.selected = String(this._selected === note);
+      bar.dataset.selected = String(this._selection.has(note));
       vel.appendChild(bar);
 
       this._noteEls.set(note, { el, fill, bar });
@@ -1457,11 +1513,11 @@ export default class PianoRoll {
     refs.el.style.left = `${this._pct(note.tick)}%`;
     refs.el.style.width = `${Math.max(this._pct(note.length), 0.4)}%`;
     refs.el.dataset.offGrid = String(this._isOffGrid(note));
-    refs.el.dataset.selected = String(this._selected === note);
+    refs.el.dataset.selected = String(this._selection.has(note));
     refs.fill.style.height = `${Math.round(note.velocity * 100)}%`;
     refs.bar.style.left = `${this._pct(note.tick + note.length / 2)}%`;
     refs.bar.style.height = `${Math.round(note.velocity * 100)}%`;
-    refs.bar.dataset.selected = String(this._selected === note);
+    refs.bar.dataset.selected = String(this._selection.has(note));
 
     const ri = this._rowEls.findIndex((r) => r.midi === note.note);
     if (ri >= 0) {
@@ -1560,15 +1616,187 @@ export default class PianoRoll {
     this._addDom(this.nodes.toolbar, 'click', (e) => this._onToolbarClick(e));
     this._addDom(this.nodes.rows, 'pointerdown', (e) => this._onFieldPointerDown(e));
     this._addDom(this.nodes.velField, 'pointerdown', (e) => this._onVelPointerDown(e));
-    this._addDom(this.nodes.rows, 'contextmenu', (e) => {
-      const el = e.target.closest('.cbdaw-roll__note');
-      if (!el) return;
-      e.preventDefault();
-      this._deleteNote(this._noteForEl(el));
-    });
+    this._addDom(this.nodes.rows, 'contextmenu', (e) => this._onContextMenu(e));
+    this._addDom(this.el, 'keydown', (e) => this._onKeyDown(e));
+    // a press anywhere in the roll aims the edit keys here
+    this._addDom(this.el, 'pointerdown', () => this.el?.focus({ preventScroll: true }), true);
     // on the window, so a pointer released off the roll still lifts the held note
     this._addDom(window, 'pointerup', () => this._previewOff());
     this._addDom(window, 'pointercancel', () => this._previewOff());
+  }
+
+  _onContextMenu(e) {
+    if (e.target.closest('.cbdaw-roll__row-gutter')) return;
+    e.preventDefault();
+    const el = e.target.closest('.cbdaw-roll__note');
+    const note = el ? this._noteForEl(el) : null;
+    if (note && !this._selection.has(note)) this._select(note);
+    const some = this._selection.size > 0;
+    openContextMenu(e.clientX, e.clientY, [
+      { label: 'Undo', keys: `${MOD}Z`, disabled: !this._history.undo.length, run: () => this.undo() },
+      { label: 'Redo', keys: `${MOD}⇧Z`, disabled: !this._history.redo.length, run: () => this.redo() },
+      'sep',
+      { label: 'Cut', keys: `${MOD}X`, disabled: !some, run: () => this.cut() },
+      { label: 'Copy', keys: `${MOD}C`, disabled: !some, run: () => this.copy() },
+      { label: 'Paste', keys: `${MOD}V`, disabled: !rollClipboard.length, run: () => this.paste() },
+      { label: 'Delete', keys: '⌫', disabled: !some, run: () => this.deleteSelection() },
+      'sep',
+      { label: 'Select All', keys: `${MOD}A`, disabled: !this._notes.length, run: () => this.selectAll() },
+      { label: 'Deselect All', keys: `${MOD}⇧A`, disabled: !some, run: () => this.deselectAll() },
+    ]);
+  }
+
+  _onKeyDown(e) {
+    if (e.target.closest?.('input, select, textarea, [contenteditable]')) return;
+    const mod = e.metaKey || e.ctrlKey;
+    const key = e.key.toLowerCase();
+    let run = null;
+    if (!mod && (e.key === 'Delete' || e.key === 'Backspace')) run = () => this.deleteSelection();
+    else if (mod && key === 'z') run = () => (e.shiftKey ? this.redo() : this.undo());
+    else if (mod && key === 'y') run = () => this.redo();
+    else if (mod && key === 'x') run = () => this.cut();
+    else if (mod && key === 'c') run = () => this.copy();
+    else if (mod && key === 'v') run = () => this.paste();
+    else if (mod && key === 'a') run = () => (e.shiftKey ? this.deselectAll() : this.selectAll());
+    if (!run) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeContextMenu();
+    run();
+  }
+
+  // =======================================================================================
+  // EDIT COMMANDS — undo, clipboard, selection
+  // =======================================================================================
+
+  /** Hands in the undo stacks to use — `{ undo: [], redo: [] }`, kept by the host per region
+   *  so history outlives this roll. */
+  setHistory(history) {
+    this._history = history && Array.isArray(history.undo) && Array.isArray(history.redo)
+      ? history
+      : { undo: [], redo: [] };
+    return this;
+  }
+
+  get canUndo() { return this._history.undo.length > 0; }
+  get canRedo() { return this._history.redo.length > 0; }
+
+  // a copy of the notes as they stand, for the undo stack
+  _snapshot() {
+    return this._notes.map((n) => ({ tick: n.tick, length: n.length, note: n.note, velocity: n.velocity }));
+  }
+
+  // push a before-state; a new edit drops the redo stack
+  _record(before) {
+    this._history.undo.push(before);
+    this._history.redo.length = 0;
+  }
+
+  // swap the notes for a snapshot, then tell the host
+  _applySnapshot(snap) {
+    this._notes = snap.map(toNote).filter(Boolean).sort(byPosition);
+    this._captureNotes.clear();
+    this._selected = null;
+    this._selection.clear();
+    if (this.mounted) this._renderNotes();
+    this._syncDurationReadout();
+    this._changed();
+  }
+
+  _changed() {
+    if (typeof this.onChange === 'function') this.onChange();
+  }
+
+  undo() {
+    const snap = this._history.undo.pop();
+    if (!snap) return false;
+    this._history.redo.push(this._snapshot());
+    this._applySnapshot(snap);
+    return true;
+  }
+
+  redo() {
+    const snap = this._history.redo.pop();
+    if (!snap) return false;
+    this._history.undo.push(this._snapshot());
+    this._applySnapshot(snap);
+    return true;
+  }
+
+  // the selection in position order
+  _selectedNotes() {
+    return this._notes.filter((n) => this._selection.has(n));
+  }
+
+  copy() {
+    const picked = this._selectedNotes();
+    if (!picked.length) return false;
+    const first = Math.min(...picked.map((n) => n.tick));
+    rollClipboard = picked.map((n) => ({ tick: n.tick - first, length: n.length, note: n.note, velocity: n.velocity }));
+    return true;
+  }
+
+  cut() {
+    if (!this.copy()) return false;
+    return this.deleteSelection();
+  }
+
+  /** Clipboard notes at the playhead, snapped down to the grid. They come in selected. */
+  paste() {
+    if (!rollClipboard.length) return false;
+    const total = this._totalTicks();
+    const local = (this._clock.positionTicks ?? 0) - this._originTick;
+    const at = this._snapDown(total > 0 ? mod(local, total) : 0);
+    const made = [];
+    const before = this._snapshot();
+    for (const c of rollClipboard) {
+      const n = toNote({ ...c, tick: c.tick + at });
+      if (!n || n.tick >= total) continue;
+      made.push(n);
+    }
+    if (!made.length) return false;
+    this._record(before);
+    this._notes.push(...made);
+    this._notes.sort(byPosition);
+    this._setSelection(made);
+    this._renderNotes();
+    this._changed();
+    return true;
+  }
+
+  deleteSelection() {
+    const doomed = this._selectedNotes();
+    if (!doomed.length) return false;
+    this._record(this._snapshot());
+    this._notes = this._notes.filter((n) => !this._selection.has(n));
+    for (const n of doomed) this._captureNotes.delete(n);
+    this._selected = null;
+    this._selection.clear();
+    this._renderNotes();
+    this._syncDurationReadout();
+    this._changed();
+    return true;
+  }
+
+  selectAll() {
+    this._setSelection(this._notes);
+    return true;
+  }
+
+  deselectAll() {
+    this._setSelection([]);
+    return true;
+  }
+
+  // replace the selection; the last note becomes the one the readout follows
+  _setSelection(notes) {
+    this._selection = new Set(notes);
+    this._selected = notes.length ? notes[notes.length - 1] : null;
+    for (const [n, refs] of this._noteEls) {
+      refs.el.dataset.selected = String(this._selection.has(n));
+      refs.bar.dataset.selected = String(this._selection.has(n));
+    }
+    this._syncDurationReadout();
   }
 
   _detachInteraction() {
@@ -1623,6 +1851,7 @@ export default class PianoRoll {
   }
 
   _onFieldPointerDown(e) {
+    if (e.button === 2) return; // right press opens the menu, it does not edit
     // the key strip plays, it does not edit — it never reaches the note logic below
     const keyEl = e.target.closest('.cbdaw-roll__key');
     if (keyEl) {
@@ -1636,32 +1865,74 @@ export default class PianoRoll {
     const noteEl = e.target.closest('.cbdaw-roll__note');
     e.preventDefault();
 
+    const before = this._snapshot();
+
     if (noteEl) {
-      const note = this._noteForEl(noteEl);
+      let note = this._noteForEl(noteEl);
       if (!note) return;
-      if (e.shiftKey) { this._deleteNote(note); return; }
-      this._select(note);
+      if (e.shiftKey) {
+        this._record(before);
+        this._deleteNote(note);
+        this._changed();
+        return;
+      }
       const rect = noteEl.getBoundingClientRect();
       const onHandle = e.target.classList.contains('cbdaw-roll__note-handle')
         || rect.right - e.clientX <= RESIZE_ZONE_PX;
-      const kind = e.altKey ? 'velocity' : (onHandle ? 'length' : 'move');
+
+      // alt: drag a copy of the selection, or of this note, and leave the originals
+      let el = noteEl;
+      let group = null;
+      const dup = e.altKey && !onHandle;
+      if (dup) {
+        const src = this._selection.has(note) ? this._selectedNotes() : [note];
+        const copies = src.map((n) => ({ ...n }));
+        this._notes.push(...copies);
+        this._notes.sort(byPosition);
+        this._renderNotes();
+        note = copies[src.indexOf(note)];
+        this._setSelection(copies);
+        this._selected = note;
+        el = this._noteEls.get(note)?.el || null;
+        group = copies;
+      } else if (this._selection.has(note) && this._selection.size > 1 && !onHandle) {
+        group = this._selectedNotes();
+        this._selected = note;
+        this._syncDurationReadout();
+      } else {
+        this._select(note);
+        group = [note];
+      }
+
       this._beginDrag(e, {
-        kind,
+        kind: onHandle ? 'length' : 'move',
         note,
-        el: noteEl,
+        el,
         grabTick: this._tickAt(e.clientX) - note.tick,
+        startTick: note.tick,
         startLength: note.length,
         startVelocity: note.velocity,
         startNoteNumber: note.note,
+        group: group.map((n) => ({ n, tick: n.tick, note: n.note })),
+        dup,
+        before,
       });
       return;
     }
 
-    // empty field: create, then keep dragging to set the length
     const row = this._rowAt(e.clientY);
     if (!row) return;
+
+    // shift on empty field: drag a selection box
+    if (e.shiftKey) {
+      this._beginDrag(e, { kind: 'marquee', note: null, el: null, box: null });
+      return;
+    }
+
+    // empty field: create, then keep dragging to set the length
     const note = this._createNote(this._snapDown(this._tickAt(e.clientX)), row.midi);
     if (!note) return;
+    this._record(before);
     this._select(note);
     const refs = this._noteEls.get(note);
     this._beginDrag(e, {
@@ -1672,10 +1943,41 @@ export default class PianoRoll {
       startLength: note.length,
       startVelocity: note.velocity,
       startNoteNumber: note.note,
+      created: true,
     });
   }
 
+  // selection box from the press point to (x, y); selects every note it touches
+  _paintMarquee(d, x, y) {
+    const host = this.nodes.rows;
+    if (!host) return;
+    if (!d.box) {
+      d.box = document.createElement('div');
+      d.box.className = 'cbdaw-roll__marquee';
+      host.appendChild(d.box);
+    }
+    const r = host.getBoundingClientRect();
+    const gutter = this._gutterWidth();
+    const left = Math.max(gutter, Math.min(d.startX, x) - r.left);
+    const right = Math.max(gutter, Math.max(d.startX, x) - r.left);
+    d.box.style.left = `${left}px`;
+    d.box.style.width = `${right - left}px`;
+    d.box.style.top = `${Math.min(d.startY, y) - r.top}px`;
+    d.box.style.height = `${Math.abs(y - d.startY)}px`;
+
+    const t0 = this._tickAt(Math.min(d.startX, x));
+    const t1 = this._tickAt(Math.max(d.startX, x));
+    const a = this._rowAt(d.startY)?.midi;
+    const b = this._rowAt(y)?.midi;
+    if (a === undefined || b === undefined) return;
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    this._setSelection(this._notes.filter((n) => n.note >= lo && n.note <= hi
+      && n.tick < Math.max(t1, t0 + 1) && n.tick + n.length > t0));
+  }
+
   _onVelPointerDown(e) {
+    if (e.button === 2) return;
     const bar = e.target.closest('.cbdaw-roll__vel-bar');
     if (!bar) return;
     e.preventDefault();
@@ -1691,6 +1993,7 @@ export default class PianoRoll {
       startLength: hit.length,
       startVelocity: hit.velocity,
       startNoteNumber: hit.note,
+      before: this._snapshot(),
     });
   }
 
@@ -1717,6 +2020,11 @@ export default class PianoRoll {
     if (!d.moved) return;
     e.preventDefault();
 
+    if (d.kind === 'marquee') {
+      this._paintMarquee(d, e.clientX, e.clientY);
+      return;
+    }
+
     const note = d.note;
     if (d.kind === 'velocity') {
       // Measured against the velocity LANE, not against the bar, so the bar can be dragged
@@ -1730,12 +2038,18 @@ export default class PianoRoll {
       note.length = Math.max(MIN_NOTE_TICKS, this._snap(end - note.tick) || this._stepTicks());
     } else {
       const row = this._rowAt(e.clientY);
-      if (row) note.note = row.midi;
       const raw = this._tickAt(e.clientX) - d.grabTick;
       // A note that arrived off-grid keeps its off-grid feel while it is moved by hand
       // unless the student is snapping; §13.5 makes snapping the PROGRAMMING default, so a
-      // hand move snaps and holding alt keeps the slop.
-      note.tick = Math.max(0, e.altKey ? Math.round(raw) : this._snap(raw));
+      // hand move snaps and holding alt keeps the slop. An alt copy snaps.
+      const tick = Math.max(0, e.altKey && !d.dup ? Math.round(raw) : this._snap(raw));
+      const dTick = tick - d.startTick;
+      const dNote = row ? row.midi - d.startNoteNumber : 0;
+      for (const g of d.group || [{ n: note, tick: d.startTick, note: d.startNoteNumber }]) {
+        g.n.tick = Math.max(0, g.tick + dTick);
+        g.n.note = g.note + dNote;
+        if (g.n !== note) this._paintNote(g.n);
+      }
     }
     this._paintNote(note);
     this._paintSpan(note);
@@ -1747,6 +2061,26 @@ export default class PianoRoll {
     if (!d || e.pointerId !== d.pointerId) return;
     try { d.el?.releasePointerCapture?.(d.pointerId); } catch { /* already released */ }
     this._drag = null;
+
+    if (d.kind === 'marquee') {
+      d.box?.remove();
+      return;
+    }
+
+    // an alt copy that never moved would sit on its original — drop it
+    if (d.dup && !d.moved) {
+      const copies = new Set((d.group || []).map((g) => g.n));
+      this._notes = this._notes.filter((n) => !copies.has(n));
+      this._setSelection([]);
+      this._renderNotes();
+    } else if (d.before && d.moved) {
+      this._record(d.before);
+      this._changed();
+    } else if (d.created) {
+      this._changed();
+    }
+    if (d.kind === 'length' && (d.moved || d.created)) this._lastLength = d.note.length;
+
     this._notes.sort(byPosition);
     this._paintSpan(null);
     this._syncDurationReadout();
@@ -1755,7 +2089,7 @@ export default class PianoRoll {
   _createNote(tick, midi) {
     const note = toNote({
       tick,
-      length: this._stepTicks(),
+      length: this._lastLength || this._stepTicks(),
       note: midi,
       velocity: DEFAULT_VELOCITY, // §12.1: a surface that cannot sense velocity reports 0.8
     });
@@ -1774,17 +2108,13 @@ export default class PianoRoll {
     if (i < 0) return;
     this._notes.splice(i, 1);
     this._captureNotes.delete(note); // no stale identity left in the capture set
+    this._selection.delete(note);
     if (this._selected === note) this._selected = null;
     this._renderNotes();
   }
 
   _select(note) {
-    this._selected = note;
-    for (const [n, refs] of this._noteEls) {
-      refs.el.dataset.selected = String(n === note);
-      refs.bar.dataset.selected = String(n === note);
-    }
-    this._syncDurationReadout();
+    this._setSelection(note ? [note] : []);
   }
 
   _onToolbarClick(e) {

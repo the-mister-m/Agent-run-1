@@ -137,6 +137,19 @@ export function createTrackStore() {
       return frozen;
     },
 
+    /** Undo's write: brings a removed track back under its old id, at the end of the list,
+     *  born empty like `add()`. Null if the id is live. */
+    restore({ id, name = null, color = null } = {}) {
+      if (!id || tracks.has(id)) return null;
+      _seq = Math.max(_seq, Number(String(id).replace(/^trk/, '')) || 0);
+      const frozen = commit({
+        id, name, instrumentType: null, instrument: null, kind: null, surfaceType: null,
+        armed: false, color,
+      }, 'add');
+      order.push(id);
+      return frozen;
+    },
+
     /** Drop a track's record. Does not touch its regions, channel, strip, graph node or
      *  instrument — those belong to the caller. */
     remove(id) {
